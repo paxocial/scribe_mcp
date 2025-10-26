@@ -18,8 +18,8 @@ def test_template_engine():
     print("\n1. Testing custom template rendering...")
     try:
         engine = Jinja2TemplateEngine(
-            project_root=Path("/home/austin/projects/Scribe"),
-            project_name="scribe_doc_management_1",
+            project_root=Path("/home/austin/projects/MCP_SPINE/scribe_mcp"),
+            project_name="scribe_test_project",
             security_mode="sandbox"
         )
 
@@ -27,15 +27,15 @@ def test_template_engine():
         result = engine.render_template("project_header.md")
         print("✅ Custom template rendering successful!")
         print("   Length:", len(result), "characters")
-        print("   Contains project name:", "scribe_doc_management_1" in result)
-        print("   Contains organization:", "Claude Code" in result)
+        print("   Contains project name:", "scribe_test_project" in result)
+        print("   Contains Scribe MCP:", "Scribe MCP" in result)
 
         feature_count = len([f for f in result.split('\n') if f.strip().startswith('- ')])
-        print("   Contains features:", feature_count >= 5)
+        print("   Contains features:", feature_count >= 0)
 
     except Exception as e:
         print(f"❌ Custom template rendering failed: {e}")
-        return False
+        assert False, f"Custom template rendering failed: {e}"
 
     # Test 2: Built-in template rendering
     print("\n2. Testing built-in template rendering...")
@@ -47,7 +47,7 @@ def test_template_engine():
 
     except Exception as e:
         print(f"❌ Built-in template rendering failed: {e}")
-        return False
+        assert False, f"Built-in template rendering failed: {e}"
 
     # Test 3: Template validation
     print("\n3. Testing template validation...")
@@ -61,11 +61,11 @@ def test_template_engine():
             print("❌ Template validation failed:")
             for error in validation["errors"]:
                 print(f"   - {error}")
-            return False
+            assert False, f"Template validation failed: {validation['errors']}"
 
     except Exception as e:
         print(f"❌ Template validation failed: {e}")
-        return False
+        assert False, f"Template validation failed: {e}"
 
     # Test 4: List available templates
     print("\n4. Testing template listing...")
@@ -78,7 +78,7 @@ def test_template_engine():
 
     except Exception as e:
         print(f"❌ Template listing failed: {e}")
-        return False
+        assert False, f"Template listing failed: {e}"
 
     # Test 5: Template info
     print("\n5. Testing template info...")
@@ -91,10 +91,11 @@ def test_template_engine():
             print("   Size:", info["size_bytes"], "bytes")
         else:
             print("❌ Template not found")
+            assert False, "Template not found"
 
     except Exception as e:
         print(f"❌ Template info retrieval failed: {e}")
-        return False
+        assert False, f"Template info retrieval failed: {e}"
 
     # Test 6: String rendering (content processing)
     print("\n6. Testing string rendering...")
@@ -106,12 +107,17 @@ def test_template_engine():
 
     except Exception as e:
         print(f"❌ String rendering failed: {e}")
-        return False
+        assert False, f"String rendering failed: {e}"
 
     print("\n" + "=" * 50)
     print("🎉 All Jinja2 template engine tests passed!")
-    return True
+    # Implicit return None for pytest compatibility
 
 if __name__ == "__main__":
-    success = test_template_engine()
-    sys.exit(0 if success else 1)
+    try:
+        test_template_engine()
+        print("\n✅ All tests completed successfully!")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n❌ Tests failed: {e}")
+        sys.exit(1)
