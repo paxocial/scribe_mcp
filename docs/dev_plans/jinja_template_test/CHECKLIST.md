@@ -3,17 +3,15 @@
 **Author:** Scribe
 **Version:** v0.1
 **Status:** Draft
-**Last Updated:** 2025-10-26 08:24:53 UTC
+**Last Updated:** 2025-10-26 08:34:33 UTC
 
 > Acceptance checklist for Jinja Template Test.
 
 ---
 ## Documentation Hygiene
 <!-- ID: documentation_hygiene -->
-- [ ] Architecture guide updated (proof: ARCHITECTURE_GUIDE.md)- [ ] Phase plan current (proof: PHASE_PLAN.md)
-
-
----## Phase 0
+- [x] Architecture guide updated (proof: ARCHITECTURE_GUIDE.md) | proof=PROGRESS_LOG.md#2025-10-26-08-37-52
+- [ ] Phase plan current (proof: PHASE_PLAN.md) | token=phase_plan_doc
 <!-- ID: phase_0 -->
 - [ ] Async write fix merged (proof: commit)- [ ] Verification enabled (proof: tests)
 

@@ -46,6 +46,28 @@ await append_entry(items=json.dumps([
 - Makes project state queryable and analyzable
 
 **If You Missed Entries:** Use bulk mode IMMEDIATELY to backfill your work trail. NEVER let gaps exist in the Scribe log - every action must be traceable. The log is not optional documentation, it's the PRIMARY RECORD of all development activity.
+
+---
+
+### ✍️ `manage_docs` — Non‑Negotiable Doc Management Workflow
+- **When:** Run immediately after `set_project` (before writing any feature code). Populate `ARCHITECTURE_GUIDE`, `PHASE_PLAN`, and `CHECKLIST` with the proposed plan via `manage_docs`, get the human sign-off, then proceed with implementation.
+- **Why:** Ensures every plan/change is captured through the Jinja-managed doc pipeline with atomic writes, verification, and automatic `doc_updates` logging.
+- **Actions:** `replace_section` (needs valid `section` anchor), `append` (freeform/Jinja content), `status_update` (toggle checklist items + proofs).
+- **Example payload:**
+```jsonc
+{
+  "action": "status_update",
+  "doc": "checklist",
+  "section": "architecture_review",
+  "content": "status toggle placeholder",
+  "metadata": {
+    "status": "done",
+    "proof": "PROGRESS_LOG.md#2025-10-26-08-37-52"
+  }
+}
+```
+- **Customization:** All doc sections are editable; append fragments, drop in metadata-driven templates, or flip `[ ]` → `[x]` with proofs. If an anchor/token is wrong the tool fails safely—fix it and rerun.
+- **Approval gate:** No coding until the manage_docs-authored plan is approved by the user. Re-run manage_docs whenever the plan shifts so docs stay authoritative.
 ---
 **⚠️ COMMANDMENT #11 CRITICAL**: NEVER write replacement files. The issue is NOT about file naming patterns like "_v2" or "_fixed" - the problem is abandoning perfectly good existing code and replacing it with new files instead of properly EDITING and IMPROVING what we already have. This is lazy engineering that creates technical debt and confusion.
 

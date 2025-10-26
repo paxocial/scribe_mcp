@@ -3,7 +3,7 @@
 **Author:** Scribe
 **Version:** Draft v0.1
 **Status:** Draft
-**Last Updated:** 2025-10-26 08:24:53 UTC
+**Last Updated:** 2025-10-26 08:34:33 UTC
 
 > Architecture guide for Jinja Template Test.
 
@@ -23,17 +23,16 @@
 ## 2. Requirements & Constraints
 <!-- ID: requirements_constraints -->
 - **Functional Requirements:**
-- Atomic document updates- Jinja2 templates with inheritance
+  - Ensure Jinja Template Test docs regenerate via pure Jinja2
+  - Allow manage_docs automation metadata.timestamp=2025-10-26 08:37:06 UTC
 - **Non-Functional Requirements:**
-- Backwards-compatible file layout- Sandboxed template rendering
+  - Writes remain atomic even under stress
+  - Logging surfaces errors before fallback
 - **Assumptions:**
-- Filesystem read/write access- Python runtime available
+  - Agents run tools via MCP servers only
 - **Risks & Mitigations:**
-- User edits outside manage_docs- Template misuse causing errors
-
-
----
-## 3. Architecture Overview
+  - Risk: Tool misuse breaks anchors → Mitigation: enforce SECTION markers
+  - Risk: Template missing filters → Mitigation: block legacy fallback so bugs surface fast
 <!-- ID: architecture_overview -->
 - **Solution Summary:** Document manager orchestrates template rendering and writes.
 - **Component Breakdown:**
@@ -110,3 +109,7 @@ Generated via generate_doc_templates.
 
 
 ---
+## Observability Deep Dive
+- **Log Correlation:** Scribe entries reference manage_docs proof IDs.
+- **Metrics:** doc_manage_latency tracked for every operation.
+- **Alerts:** Fire pager when verification_passed=false occurs twice.

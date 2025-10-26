@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Tuple
@@ -25,6 +26,8 @@ OUTPUT_FILENAMES: List[Tuple[str, str]] = [
     ("bug_log", "BUG_LOG.md"),
 ]
 
+logger = logging.getLogger(__name__)
+
 
 @app.tool()
 async def generate_doc_templates(
@@ -34,10 +37,13 @@ async def generate_doc_templates(
     documents: Iterable[str] | None = None,
     base_dir: str | None = None,
     custom_context: Any = None,
+    legacy_fallback: bool = False,
 ) -> Dict[str, Any]:
     """Render the standard documentation templates for a project."""
     state_snapshot = await server_module.state_manager.record_tool("generate_doc_templates")
-    templates = await load_templates()
+    templates: Dict[str, str] = {}
+    if legacy_fallback:
+        templates = await load_templates()
 
     # INTELLIGENT PARAMETER HANDLING: Support custom context with bulletproof error recovery
     try:
@@ -59,15 +65,23 @@ async def generate_doc_templates(
         context = substitution_context(project_name, author)
         print(f"Warning: Error handling custom_context: {e}. Using base context.")
 
+    engine_error: Exception | None = None
     try:
         engine = Jinja2TemplateEngine(
             project_root=settings.project_root,
             project_name=project_name,
             security_mode="sandbox",
         )
-    except Exception as engine_error:  # pragma: no cover - initialization rarely fails
-        print(f"Warning: Failed to initialize Jinja2 template engine, falling back to legacy renderer: {engine_error}")
+    except Exception as exc:  # pragma: no cover - initialization rarely fails
         engine = None
+        engine_error = exc
+        logger.error("Failed to initialize Jinja2 template engine: %s", exc)
+
+    if engine is None and not legacy_fallback:
+        return {
+            "ok": False,
+            "error": f"Failed to initialize Jinja2 template engine: {engine_error}",
+        }
 
     output_dir = _target_directory(project_name, base_dir)
     await asyncio.to_thread(output_dir.mkdir, parents=True, exist_ok=True)
@@ -87,9 +101,21 @@ async def generate_doc_templates(
             try:
                 rendered = engine.render_template(template_name, metadata=metadata_payload)
             except TemplateEngineError as template_error:
-                print(f"Warning: Jinja2 rendering failed for {template_name}: {template_error}")
+                logger.warning("Jinja2 rendering failed for %s: %s", template_name, template_error)
+                if not legacy_fallback:
+                    return {
+                        "ok": False,
+                        "error": f"Jinja2 rendering failed for {template_name}: {template_error}",
+                        "template": template_name,
+                    }
 
         if rendered is None:
+            if not legacy_fallback:
+                return {
+                    "ok": False,
+                    "error": f"No rendered output generated for {template_name}",
+                    "template": template_name,
+                }
             template_body = templates.get(key)
             if not template_body:
                 source_name = TEMPLATE_FILENAMES[key]

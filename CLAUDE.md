@@ -51,6 +51,31 @@ await append_entry(items=json.dumps([
 
 ---
 
+### ✍️ `manage_docs` — Mandatory Doc Updates (Before Any Coding)
+- **When to use:** Immediately after `set_project` finishes and before touching product code. Draft your plan in `ARCHITECTURE_GUIDE.md`, `PHASE_PLAN.md`, and `CHECKLIST.md`, get it approved by the human, and only then begin implementation.
+- **Why:** This tool applies structured Markdown changes (replace sections, append blocks, toggle checklist proofs) using the Jinja templating engine, writes atomically, and auto-logs the change via `doc_updates`.
+- **Actions supported:**
+  - `replace_section` — requires a valid `section` anchor (e.g. `problem_statement`).
+  - `append` — adds freeform/Jinja-rendered content to the end of the doc.
+  - `status_update` — flips checklist `[ ]`/`[x]` items and attaches proofs.
+- **Usage pattern:**
+```jsonc
+{
+  "action": "replace_section",
+  "doc": "architecture",
+  "section": "problem_statement",
+  "content": "- **Context:** {{ project_name }} ships the approved plan.\n- **Goals:** ...",
+  "metadata": {
+    "requested_by": "user",
+    "phase": "foundation"
+  }
+}
+```
+- **Customization:** Every section is editable, checklist checkmarks can be toggled with proofs (`status_update`), and you can inject fragments/templates for reusable content. If a section is missing or the selector is wrong, the tool errors without writing—fix the anchor and rerun.
+- **Approval gate:** Do not start coding until the user confirms the manage_docs-updated plan. Update docs again if the plan changes mid-task.
+
+---
+
 ## 🏗️ MCP_SPINE ARCHITECTURE
 
 ### **MCP_SPINE: The Multi-MCP Infrastructure Spinal Cord**
