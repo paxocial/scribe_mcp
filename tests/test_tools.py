@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from scribe_mcp import server
 from scribe_mcp.config.settings import settings
 from scribe_mcp.state.manager import StateManager
+from scribe_mcp.storage.sqlite import SQLiteStorage
 from scribe_mcp.tools import (
     append_entry,
     generate_doc_templates,
@@ -44,7 +45,9 @@ def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "state_manager", manager, raising=False)
     if getattr(server, "storage_backend", None):
         run(server.storage_backend.close())
-    monkeypatch.setattr(server, "storage_backend", None, raising=False)
+    storage = SQLiteStorage(tmp_path / "scribe.db")
+    run(storage.setup())
+    monkeypatch.setattr(server, "storage_backend", storage, raising=False)
     append_entry._RATE_TRACKER.clear()
     append_entry._RATE_LOCKS.clear()
 

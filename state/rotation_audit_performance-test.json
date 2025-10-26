@@ -43,9 +43,23 @@
       "modified_timestamp": "2025-10-25T23:19:19.110687",
       "hash_chain_previous": "248d82dc4a9063fefb53704dc74b1828fb44cc475217c477cce416a5100a0f1c",
       "stored_timestamp": "2025-10-26T03:19:19.175805 UTC"
+    },
+    {
+      "rotation_uuid": "0db58ba8-3644-44e8-a4ba-47440ce5079b",
+      "rotation_timestamp_utc": "2025-10-26T04:24:06.598249 UTC",
+      "sequence_number": 15,
+      "archived_file_path": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/8b9954eb-c798-40fb-b278-d03301f2362e/docs/dev_plans/performance_test/PROGRESS_LOG.md.archive_0db58ba8.md",
+      "archived_file_name": "PROGRESS_LOG.md.archive_0db58ba8.md",
+      "entry_count": 63,
+      "file_hash": "8e61721208615ada91aa9762c8767fe0e9837fff5e706e7408ec6fae959d3b1f",
+      "file_size": 1809,
+      "created_timestamp": "2025-10-26T00:24:06.604068",
+      "modified_timestamp": "2025-10-26T00:24:06.549205",
+      "hash_chain_previous": "8fef06443726e8f64b8d5b8cab3ae6153259d48f041b54b1943786001e91515b",
+      "stored_timestamp": "2025-10-26T04:24:06.617097 UTC"
     }
   ],
-  "total_rotations": 3,
-  "last_updated": "2025-10-26T03:19:19.175805 UTC",
+  "total_rotations": 4,
+  "last_updated": "2025-10-26T04:24:06.617097 UTC",
   "version": "1.0"
 }

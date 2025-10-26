@@ -22,20 +22,20 @@ pip install -r requirements.txt
    - PostgreSQL: set `SCRIBE_STORAGE_BACKEND=postgres` and `SCRIBE_DB_URL=postgresql://...`.
 3. **Launch the server**:
    ```bash
-   python -m MCP_SPINE.scribe_mcp.server
+   python server.py
    ```
 
 ### Claude / MCP Configuration
-Copy `MCP_SPINE/config/mcp_config.json` into your Claude Desktop/Code MCP configuration and adjust the `SCRIBE_ROOT` path to point to this repository:
+Copy `config/mcp_config.json` into your Claude Desktop/Code MCP configuration and adjust the `SCRIBE_ROOT` path to point to this repository:
 
 ```json
 {
   "mcpServers": {
     "scribe": {
       "command": "python",
-        "args": ["-m", "MCP_SPINE.scribe_mcp.server"],
+        "args": ["/absolute/path/to/scribe_mcp/server.py"],
         "env": {
-        "SCRIBE_ROOT": "/absolute/path/to/MCP_SPINE/scribe_mcp",
+        "SCRIBE_ROOT": "/absolute/path/to/scribe_mcp",
         "SCRIBE_STORAGE_BACKEND": "sqlite"
         }
     }
@@ -47,7 +47,7 @@ Copy `MCP_SPINE/config/mcp_config.json` into your Claude Desktop/Code MCP config
 Verify the MCP server responds before wiring it into an IDE:
 
 ```bash
-python MCP_SPINE/scripts/test_mcp_server.py
+python scripts/test_mcp_server.py
 ```
 
 This script runs a short-lived stdio session and checks that the server advertises tools.

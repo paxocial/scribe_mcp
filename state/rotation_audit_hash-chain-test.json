@@ -57,9 +57,37 @@
       "modified_timestamp": "2025-10-25T23:19:18.345591",
       "hash_chain_previous": "4b35dbef32fcdaea58ba64710968ec98906d31caee9d9ee11aef5ada1ee19cf3",
       "stored_timestamp": "2025-10-26T03:19:18.411721 UTC"
+    },
+    {
+      "rotation_uuid": "cc1638b1-e191-45ed-8d58-3035b25dd452",
+      "rotation_timestamp_utc": "2025-10-26T04:24:05.711992 UTC",
+      "sequence_number": 27,
+      "archived_file_path": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/cbe6a022-5424-4e2e-ac0b-595877cc5cf9/docs/dev_plans/hash_chain_test/PROGRESS_LOG.md.rotation-1_cc1638b1.md",
+      "archived_file_name": "PROGRESS_LOG.md.rotation-1_cc1638b1.md",
+      "entry_count": 59,
+      "file_hash": "ce4174b545407d6ede404868fe5df0d5ee29f726f3d61f3b04562f9d23c79650",
+      "file_size": 1393,
+      "created_timestamp": "2025-10-26T00:24:05.713608",
+      "modified_timestamp": "2025-10-26T00:24:05.662965",
+      "hash_chain_previous": "45188421b5bfb43419cc18b2d603f2d7308c8c6a26c93ec139b5bcd4b98145ad",
+      "stored_timestamp": "2025-10-26T04:24:05.731923 UTC"
+    },
+    {
+      "rotation_uuid": "3708976e-57cc-4753-bb88-b200490d73ea",
+      "rotation_timestamp_utc": "2025-10-26T04:24:05.789952 UTC",
+      "sequence_number": 28,
+      "archived_file_path": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/cbe6a022-5424-4e2e-ac0b-595877cc5cf9/docs/dev_plans/hash_chain_test/PROGRESS_LOG.md.rotation-2_3708976e.md",
+      "archived_file_name": "PROGRESS_LOG.md.rotation-2_3708976e.md",
+      "entry_count": 59,
+      "file_hash": "dd9a9dfe51e981257d3bc282e487c4f11c36f99c5b5dbc24e5b4e1d75a8688df",
+      "file_size": 1601,
+      "created_timestamp": "2025-10-26T00:24:05.793791",
+      "modified_timestamp": "2025-10-26T00:24:05.738929",
+      "hash_chain_previous": "ce4174b545407d6ede404868fe5df0d5ee29f726f3d61f3b04562f9d23c79650",
+      "stored_timestamp": "2025-10-26T04:24:05.808387 UTC"
     }
   ],
-  "total_rotations": 4,
-  "last_updated": "2025-10-26T03:19:18.411721 UTC",
+  "total_rotations": 6,
+  "last_updated": "2025-10-26T04:24:05.808387 UTC",
   "version": "1.0"
 }

@@ -58,9 +58,11 @@ class Settings:
         else:
             storage_backend = "postgres" if db_url else "sqlite"
 
-        sqlite_path = Path(
-            os.environ.get("SCRIBE_SQLITE_PATH", "~/.scribe/scribe.db")
-        ).expanduser()
+        sqlite_override = os.environ.get("SCRIBE_SQLITE_PATH")
+        if sqlite_override:
+            sqlite_path = Path(sqlite_override).expanduser()
+        else:
+            sqlite_path = (project_root / ".scribe" / "scribe.db").resolve()
 
         allow_network = os.environ.get("SCRIBE_ALLOW_NETWORK", "false").lower() in {
             "1",

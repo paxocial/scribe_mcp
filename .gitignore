@@ -14,3 +14,4 @@ MCP_SPINE/scribe_mcp/state/*.json
 tmp_tests/*
 tmp_manual/*
 *.lock
+state/*.json

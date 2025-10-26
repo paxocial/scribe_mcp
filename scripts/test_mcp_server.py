@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
+from pathlib import Path
 from typing import Any, Dict
 
 
@@ -38,16 +40,50 @@ LIST_TOOLS_REQUEST: Dict[str, Any] = {
 }
 
 TIMEOUT_SECONDS = 10
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SERVER_ENTRYPOINT = REPO_ROOT / "server.py"
+
+
+def _resolve_python_executable() -> str:
+    """Prefer the project's virtualenv interpreter when available."""
+    override = os.environ.get("SCRIBE_TEST_PYTHON")
+    if override:
+        return override
+
+    candidates = [
+        REPO_ROOT / ".venv" / "bin" / "python",
+        REPO_ROOT / ".venv" / "Scripts" / "python.exe",
+    ]
+    for candidate in candidates:
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return sys.executable
+
+
+def _build_env() -> Dict[str, str]:
+    """Prepare environment variables for the subprocess."""
+    env = os.environ.copy()
+    env.setdefault("SCRIBE_ROOT", str(REPO_ROOT))
+    existing_pythonpath = env.get("PYTHONPATH")
+    pythonpath_parts = [str(REPO_ROOT.parent)]
+    if existing_pythonpath:
+        pythonpath_parts.append(existing_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+    return env
 
 
 async def run_test() -> None:
+    if not SERVER_ENTRYPOINT.exists():
+        raise RuntimeError(f"Server entrypoint not found at {SERVER_ENTRYPOINT}")
+
     proc = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-m",
-        "MCP_SPINE.scribe_mcp.server",
+        _resolve_python_executable(),
+        str(SERVER_ENTRYPOINT),
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=str(REPO_ROOT),
+        env=_build_env(),
     )
 
     try:
