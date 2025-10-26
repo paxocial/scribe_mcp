@@ -16,3 +16,8 @@ tmp_manual/*
 *.lock
 state/*.json
 *.db
+# Vector index artifacts
+.scribe_vectors/
+*.faiss
+*.npy
+*.shard

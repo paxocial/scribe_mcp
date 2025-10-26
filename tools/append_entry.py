@@ -47,6 +47,68 @@ def _sanitize_message(message: str) -> str:
     return sanitized
 
 
+def _get_repo_slug(project_root: str) -> str:
+    """Extract repository slug from project root path."""
+    from pathlib import Path
+    import re
+
+    # Convert to Path object and get the name of the directory
+    path = Path(project_root)
+    repo_name = path.name
+
+    # Clean up the name to be URL-friendly
+    # Replace spaces and special characters with hyphens
+    slug = re.sub(r'[^a-zA-Z0-9_-]', '-', repo_name.lower())
+
+    # Remove multiple consecutive hyphens
+    slug = re.sub(r'-+', '-', slug)
+
+    # Remove leading/trailing hyphens
+    slug = slug.strip('-')
+
+    # Ensure it's not empty
+    if not slug:
+        slug = "unknown-repo"
+
+    return slug
+
+
+def _generate_deterministic_entry_id(
+    repo_slug: str,
+    project_slug: str,
+    timestamp: str,
+    agent: str,
+    message: str,
+    meta: Dict[str, Any]
+) -> str:
+    """Generate deterministic UUID for a log entry.
+
+    Algorithm: sha256(repo_slug|project_slug|timestamp|agent|message|meta_sha)[:32]
+    This ensures the same content always generates the same UUID across rebuilds.
+    """
+    # Create a deterministic hash of metadata
+    meta_items = []
+    for key, value in sorted(meta.items()):
+        meta_items.append(f"{key}={value}")
+    meta_str = "|".join(meta_items)
+    meta_sha = hashlib.sha256(meta_str.encode("utf-8")).hexdigest()
+
+    # Combine all components for deterministic hashing
+    components = [
+        repo_slug,
+        project_slug,
+        timestamp,
+        agent,
+        message,
+        meta_sha
+    ]
+    combined = "|".join(components)
+    full_hash = hashlib.sha256(combined.encode("utf-8")).hexdigest()
+
+    # Use first 32 characters as deterministic UUID
+    return full_hash[:32]
+
+
 def _should_use_bulk_mode(message: str, items: Optional[str] = None, items_list: Optional[List[Dict[str, Any]]] = None) -> bool:
     """Detect if content should be processed as bulk entries."""
     if items is not None or items_list is not None:
@@ -455,6 +517,19 @@ async def append_entry(
             "recent_projects": list(recent),
         }
     meta_payload.setdefault("log_type", entry_log_type)
+
+    # Generate deterministic entry_id
+    repo_slug = _get_repo_slug(project["root"])
+    project_slug = project["name"].lower().replace(" ", "-").replace("_", "-")
+    entry_id = _generate_deterministic_entry_id(
+        repo_slug=repo_slug,
+        project_slug=project_slug,
+        timestamp=timestamp,
+        agent=resolved_agent,
+        message=message,
+        meta=meta_payload
+    )
+
     line = _compose_line(
         emoji=resolved_emoji,
         timestamp=timestamp,
@@ -462,6 +537,7 @@ async def append_entry(
         project_name=project["name"],
         message=message,
         meta_pairs=meta_pairs,
+        entry_id=entry_id,
     )
 
     await _rotate_if_needed(log_path)
@@ -469,7 +545,6 @@ async def append_entry(
 
     backend = server_module.storage_backend
     if backend:
-        entry_id = str(uuid.uuid4())
         sha_value = hashlib.sha256(line.encode("utf-8")).hexdigest()
         ts_dt = timestamp_dt or utcnow()
         timeout = settings.storage_timeout_seconds
@@ -602,14 +677,21 @@ def _compose_line(
     project_name: str,
     message: str,
     meta_pairs: tuple[tuple[str, str], ...],
+    entry_id: Optional[str] = None,
 ) -> str:
     segments = [
         f"[{emoji}]",
         f"[{timestamp}]",
         f"[Agent: {agent}]",
         f"[Project: {project_name}]",
-        message,
     ]
+
+    # Add entry_id if provided
+    if entry_id:
+        segments.append(f"[ID: {entry_id}]")
+
+    segments.append(message)
+
     base = " ".join(segments)
     if meta_pairs:
         meta_text = "; ".join(f"{key}={value}" for key, value in meta_pairs)
@@ -816,6 +898,18 @@ async def _append_bulk_entries(
                 continue
             meta_payload.setdefault("log_type", entry_log_type)
 
+            # Generate deterministic entry_id for bulk item
+            repo_slug = _get_repo_slug(project["root"])
+            project_slug = project["name"].lower().replace(" ", "-").replace("_", "-")
+            entry_id = _generate_deterministic_entry_id(
+                repo_slug=repo_slug,
+                project_slug=project_slug,
+                timestamp=timestamp,
+                agent=resolved_agent,
+                message=item_message,
+                meta=meta_payload
+            )
+
             # Compose line
             line = _compose_line(
                 emoji=resolved_emoji,
@@ -824,6 +918,7 @@ async def _append_bulk_entries(
                 project_name=project["name"],
                 message=item_message,
                 meta_pairs=meta_pairs,
+                entry_id=entry_id,
             )
 
             # Write to file immediately (ensures order)
@@ -833,7 +928,6 @@ async def _append_bulk_entries(
 
             # Prepare database entry for batch processing
             if backend:
-                entry_id = str(uuid.uuid4())
                 sha_value = hashlib.sha256(line.encode("utf-8")).hexdigest()
                 ts_dt = timestamp_dt or utcnow()
 

@@ -43,6 +43,14 @@ class Settings:
     reminder_defaults: Dict[str, Any]
     reminder_idle_minutes: int
     reminder_warmup_minutes: int
+    # Vector indexing settings
+    vector_enabled: bool
+    vector_backend: str
+    vector_dimension: int
+    vector_model: str
+    vector_gpu: bool
+    vector_queue_max: int
+    vector_batch_size: int
 
     @classmethod
     def load(cls) -> "Settings":
@@ -86,6 +94,20 @@ class Settings:
         reminder_idle_minutes = max(1, _int_env("SCRIBE_REMINDER_IDLE_MINUTES", 45))
         reminder_warmup_minutes = max(0, _int_env("SCRIBE_REMINDER_WARMUP_MINUTES", 5))
 
+        # Vector indexing configuration
+        from .vector_config import load_vector_config, merge_with_env_overrides
+
+        vector_config = load_vector_config(project_root)
+        vector_config = merge_with_env_overrides(vector_config)
+
+        vector_enabled = vector_config.enabled
+        vector_backend = vector_config.backend
+        vector_dimension = max(1, vector_config.dimension)
+        vector_model = vector_config.model
+        vector_gpu = vector_config.gpu
+        vector_queue_max = max(1, vector_config.queue_max)
+        vector_batch_size = max(1, vector_config.batch_size)
+
         return cls(
             project_root=project_root,
             default_state_path=state_path,
@@ -103,6 +125,13 @@ class Settings:
             reminder_defaults=reminder_defaults,
             reminder_idle_minutes=reminder_idle_minutes,
             reminder_warmup_minutes=reminder_warmup_minutes,
+            vector_enabled=vector_enabled,
+            vector_backend=vector_backend,
+            vector_dimension=vector_dimension,
+            vector_model=vector_model,
+            vector_gpu=vector_gpu,
+            vector_queue_max=vector_queue_max,
+            vector_batch_size=vector_batch_size,
         )
 
 

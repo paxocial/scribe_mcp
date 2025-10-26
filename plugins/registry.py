@@ -474,6 +474,26 @@ def initialize_plugins(config: RepoConfig) -> None:
     registry.cleanup()  # Cleanup any existing plugins
     registry.load_plugins(config)
 
+    # Register vector tools if VectorIndexer plugin is loaded and initialized
+    _register_vector_tools_if_available()
+
+
+def _register_vector_tools_if_available() -> None:
+    """Register vector search tools if VectorIndexer plugin is available."""
+    try:
+        # Import here to avoid circular dependencies
+        from scribe_mcp.tools.vector_search import register_vector_tools
+
+        # Try to register tools - will only work if VectorIndexer is initialized
+        registered = register_vector_tools()
+        if registered:
+            plugin_logger.info("Vector search tools registered successfully")
+    except ImportError:
+        # Vector search tools not available
+        plugin_logger.debug("Vector search tools not available")
+    except Exception as e:
+        plugin_logger.warning(f"Failed to register vector tools: {e}")
+
 
 def get_plugin_security_info() -> Dict[str, Any]:
     """Get security information about loaded plugins for audit."""
