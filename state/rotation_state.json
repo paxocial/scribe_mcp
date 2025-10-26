@@ -1,0 +1,510 @@
+{
+  "version": "1.0",
+  "created_timestamp": "2025-10-24 11:35:00 UTC",
+  "last_updated": "2025-10-26T03:19:19.176097 UTC",
+  "projects": {
+    "enhanced-rotation-test": {
+      "created_timestamp": "2025-10-24T12:05:59.361388 UTC",
+      "current_sequence": 18,
+      "total_rotations": 18,
+      "last_rotation_timestamp": "2025-10-26T03:19:18.030747 UTC",
+      "hash_chain": {
+        "root_hash": "error",
+        "current_sequence": 18,
+        "last_hash": "b00b96462ee9892f8a6464e105506038e30bc29fefab5116078bc288f0538d8a"
+      },
+      "rotation_ids": [
+        "73f581a8-ce2c-4a14-9546-e84d7c50ba9f",
+        "86009626-f158-4e9b-adfb-73e4a3d9fcd9",
+        "88a1b148-498b-4eb9-872d-91d4e7905e0e",
+        "09b79596-ffe5-45d1-b0b5-f7deea19185b",
+        "bb73d5ca-ecf5-4e94-a607-281ba20a7da0",
+        "c8bde9fe-e784-41b7-b4ee-4e57b6bc7846",
+        "2f4c56fc-f26b-4aec-b9f2-862127f4cfa8",
+        "83b87edd-8a52-4216-a37d-22155f0cb854",
+        "d6ae8f64-f70b-4104-97dc-a374e2bd451f",
+        "24fae2b7-fc40-4c94-a6e4-3ac60cd1bc57",
+        "33cb1b01-a1fd-4978-abb4-3bf02e7ad3f7",
+        "c1c56e27-d50f-4fb1-921c-5c6c7934ae15",
+        "d97456b6-486f-45dc-b38d-7fda475611e4",
+        "8c5af6e8-9095-4318-ad49-03d4c89f77be",
+        "45aea69d-4647-427a-accf-fa004d48eb44",
+        "2686df65-7dd3-4494-b549-1117f22b435c",
+        "48a99d67-3ab4-4a1b-b1a8-fc0e04e084aa",
+        "846e53f8-dccd-4a70-97f8-e1bc2844dd81"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "metadata-test": {
+      "created_timestamp": "2025-10-24T12:13:54.763499 UTC",
+      "current_sequence": 13,
+      "total_rotations": 13,
+      "last_rotation_timestamp": "2025-10-26T03:19:18.151813 UTC",
+      "hash_chain": {
+        "root_hash": "442b8d52715f71144e00194a10b17350e0fc3668adf51d0ccd29d2e2a39b86db",
+        "current_sequence": 13,
+        "last_hash": "df940976695544a3d5b14a48b6688b00e8e665849acf8321f6fb0bd65a681052"
+      },
+      "rotation_ids": [
+        "bdf33e36-eeea-467f-b0b1-aa6106973d61",
+        "72de9b25-353a-433d-9f30-652ed49cfced",
+        "c7547a30-78c4-428f-905b-39856ca830b0",
+        "afea1398-1ef5-43a2-b874-21da2779d997",
+        "16d8fd06-bede-4878-870e-317f1963a2e8",
+        "bc330477-7ef1-4c1f-a221-c4495ff97926",
+        "91f5f516-5f1a-43e9-8c26-dcc87d7e7d72",
+        "79d28828-4a73-45e9-a2eb-5f769d3b7e2b",
+        "1e7c1be8-119a-4b89-a0ed-bbe999578789",
+        "16bacde5-14fa-49c1-8042-ae7064157367",
+        "59b63d99-303b-4bd7-8059-15bd0364d5a7",
+        "f8658a8a-c335-42ac-8f26-3ecfbf0da84c",
+        "41fafc80-d6f1-47ae-b6d5-0d196cbea684"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "hash-chain-test": {
+      "created_timestamp": "2025-10-24T12:13:54.860256 UTC",
+      "current_sequence": 26,
+      "total_rotations": 26,
+      "last_rotation_timestamp": "2025-10-26T03:19:18.393213 UTC",
+      "hash_chain": {
+        "root_hash": "1b0cda39e4d5d516965ea59c284fada23045ad99c27bab9615b22c32acdffbdc",
+        "current_sequence": 26,
+        "last_hash": "45188421b5bfb43419cc18b2d603f2d7308c8c6a26c93ec139b5bcd4b98145ad"
+      },
+      "rotation_ids": [
+        "00443cd9-e2b3-451e-9f4d-4de088d51794",
+        "582f0281-d414-4aca-9277-890ea831b37a",
+        "501dc06f-c43c-49be-a4ad-8d409c6ba4b0",
+        "a07561f6-9462-45e0-8f52-ccfdd82d5c89",
+        "01db10f9-33d8-465d-8565-0a4730843602",
+        "525e9eeb-15c1-45ff-8d73-fa9e177bbb62",
+        "c9abbeed-47b7-4ad2-a64f-bbf681173998",
+        "00ff3121-03ee-435b-8b63-0aee59fdcba8",
+        "f8d048c6-1b2a-4240-a270-c51a960ec887",
+        "d6cca6b2-7cb0-4890-8269-1c6ffab63d73",
+        "b7dbe6c7-d407-457b-8c1e-acdbc7c4ba70",
+        "d665ae13-77f9-42b9-bee7-341b15bc3208",
+        "a6908139-32f2-4d70-a2cc-6e8860a11e3f",
+        "ad3689a8-8620-403b-a32e-c0b15ec02b5d",
+        "214783de-0c1d-4921-bda4-9b8cf4134a14",
+        "f3fae05f-ef8b-49d4-b8b0-150bfb0bf29c",
+        "2bb31dfa-7bb3-4997-85ba-fcc17b4a1e0a",
+        "2be148c0-4514-4374-98ea-d16888584598",
+        "1a947dc4-5edf-4abf-a3d9-dfbf8c39a5a3",
+        "4b2eab42-5232-4978-8f80-369d5def1349",
+        "f377f642-2a15-48e4-8229-2900bf8028a8",
+        "7e155e76-1864-41f7-94cb-c4a746683155",
+        "6292d83f-4eed-4604-82af-7292f7395437",
+        "6ba53f29-d0ce-43e2-9dcd-983b4e658ce0",
+        "7d5381ed-2445-4bb9-af9a-722bc24aca5b",
+        "fe0dd3eb-dd06-4e81-bae6-344b70363af2"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "integrity-test": {
+      "created_timestamp": "2025-10-24T12:13:54.969392 UTC",
+      "current_sequence": 15,
+      "total_rotations": 15,
+      "last_rotation_timestamp": "2025-10-26T03:19:18.512687 UTC",
+      "hash_chain": {
+        "root_hash": "dfbb82a6b661cbc1cac818e70949ebb1e4f6985153863176e953911d2fe210a5",
+        "current_sequence": 15,
+        "last_hash": "d4fae170e2047e6f95b3cd66120a8f348e0e36822fbf6c22d78093235de6825c"
+      },
+      "rotation_ids": [
+        "b37b51e8-6ae7-4ac5-8796-62fa704eefc1",
+        "089f90eb-cc2b-47f6-b326-cc7c70d83a54",
+        "eefa37aa-c67e-46fc-a06c-6fe20ba612fb",
+        "1bc34d2b-9f5d-445e-bc07-9044300a4b09",
+        "b6807b21-9f4b-4534-bb46-92af08fe1102",
+        "450b517d-ba7f-4170-b7c8-7e6bdcf14064",
+        "44063eeb-dad7-4187-82a3-024fa6472571",
+        "294d8f9e-a09f-48d9-a167-1ec945608dfb",
+        "8867d093-1547-4eb4-81b9-299897b7f82e",
+        "e683c4f9-1ece-4281-b43c-b80d80a04782",
+        "1a4969ec-1e53-45de-bb71-9fc4b0cfc4ec",
+        "0701730e-8294-4ae6-bf35-4666164bf362",
+        "d74e50f8-256b-4fa1-b9a2-9cf74f022c75",
+        "1b0f487e-a326-477a-8099-ea0284a4bcfb",
+        "773e3382-f113-4932-8470-793cd0fc24d2"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "history-test": {
+      "created_timestamp": "2025-10-24T12:13:55.067450 UTC",
+      "current_sequence": 28,
+      "total_rotations": 28,
+      "last_rotation_timestamp": "2025-10-24T12:25:58.026883 UTC",
+      "hash_chain": {
+        "root_hash": "b561870827e4d595494443f9294eb2ae05a2e10141304c44c13e357b7d6560d6",
+        "current_sequence": 28,
+        "last_hash": "407fdc3f3d0615d75dbdc1b92941c7b0b0b13c1f261f5669e8b2b284b672ed4e"
+      },
+      "rotation_ids": [
+        "fe3a82df-1606-465d-855b-af1eae97e4fc",
+        "183ac968-1c6b-4478-97ed-8c5f240c156f",
+        "683e7f64-dabb-421c-8a11-6ab6e9dd78a4",
+        "37d873be-871d-48b6-93c0-32c4a3b1a17c",
+        "9ed40a77-6225-478d-9325-2f97b2db683e",
+        "88d94e7d-319a-4347-917c-b74283b2d64b",
+        "64dc4010-2d5a-4558-b353-9cba753bf0eb",
+        "df5c385a-b5c9-4140-89d1-e889c5afe6d9",
+        "e4882875-2b28-48f7-80db-03df77521f42",
+        "48d82862-1c43-42a8-b452-9865eeab2666",
+        "241751af-53ac-4106-89ec-3b6ed04b3e87",
+        "b6491034-19c8-4121-ae1c-2d076c48fc18",
+        "4c4cd574-9708-4fb7-9254-2fcb920f5dab",
+        "59ea88d6-be30-479a-a7ad-6e032309d812",
+        "40209ffa-68e7-45fd-b4e0-6d5c2def1b9a",
+        "a3fb8d95-6d9c-4507-a219-043ad552070d",
+        "e1098443-7e2b-4d48-8551-f36b7eb0f5be",
+        "482c3440-b2bb-4261-839a-c617ff160c26",
+        "e5fd638a-6d98-4687-bbda-b93152c68ea1",
+        "843989fa-fd38-4f94-bd76-83ff507a1c40",
+        "15d1ed37-5cad-4c40-a07b-e363779a8a17",
+        "5ffaa82d-b10d-47d2-8e5d-dd4c16b80a51",
+        "fc284822-7d92-40ba-afb0-55fce92098fd",
+        "5b59de68-0497-48be-ae34-72211f81a080",
+        "a0da0412-5673-42ab-85a6-1b2b5f67c035",
+        "8e8ed306-b661-4aec-9b29-d5c5a4cbd1d6",
+        "92e77d6e-fe82-4fe1-8de8-f5dd1b6ebe21",
+        "8bf6bc6d-85bc-4e8e-b88c-9c190adf8bdd"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "performance-test": {
+      "created_timestamp": "2025-10-24T12:13:55.362403 UTC",
+      "current_sequence": 14,
+      "total_rotations": 14,
+      "last_rotation_timestamp": "2025-10-26T03:19:19.157621 UTC",
+      "hash_chain": {
+        "root_hash": "1988276645c27ac6bfbabc4984af8b0de6cf2f045c5a0cb5d92f77422d1d7efa",
+        "current_sequence": 14,
+        "last_hash": "8fef06443726e8f64b8d5b8cab3ae6153259d48f041b54b1943786001e91515b"
+      },
+      "rotation_ids": [
+        "dc8472bc-08c2-4486-99a4-ff45dc02d4c5",
+        "69f328da-93af-4566-9a69-e4cfd455903b",
+        "d9c5a6c2-72c0-4bb1-9fe4-23048d957553",
+        "00335972-3b6c-406e-8f8c-5f3dbff61e1e",
+        "a5099597-e2f6-4f5c-90a9-d060ead7c802",
+        "fe0c10cf-553e-40db-a628-2a8bab1a06ec",
+        "bb76025b-8a98-4005-a8b9-237d47ee0af7",
+        "e08d449d-3b4f-45d9-9267-66ac9a47080c",
+        "ef904099-1092-47d3-8a4c-6bb28091652d",
+        "8f370ff5-1d0f-46e6-8741-a0a66d68f300",
+        "2974229d-e512-45fa-abab-921b4582b772",
+        "e5a9b961-4551-438b-9f2f-8c33687a540c",
+        "032c25bc-d6c8-485c-9b91-dd52dc46d309",
+        "d493e6f2-91ac-47fb-9e9e-05e6b3defd9b"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "history-test-4acbc064": {
+      "created_timestamp": "2025-10-24T12:26:16.199217 UTC",
+      "current_sequence": 3,
+      "total_rotations": 3,
+      "last_rotation_timestamp": "2025-10-24T12:26:16.282058 UTC",
+      "hash_chain": {
+        "root_hash": "c3780bf63b455d20e2287120f7bf3127576ce5b12f59a289b1f75c969c7af2cc",
+        "current_sequence": 3,
+        "last_hash": "0d9e5ca89ff0efd491cecea898f6acb97ed4a0e82158e49f75a3279021052ddd"
+      },
+      "rotation_ids": [
+        "28873c33-6b2f-455e-8b3a-357163430e47",
+        "4f236a47-fd41-4ab7-b4c5-c32e85046058",
+        "11234869-accb-4931-b06b-3e1c58c06f4b"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "history-test-711f48a0": {
+      "created_timestamp": "2025-10-24T12:26:20.641526 UTC",
+      "current_sequence": 3,
+      "total_rotations": 3,
+      "last_rotation_timestamp": "2025-10-24T12:26:20.728637 UTC",
+      "hash_chain": {
+        "root_hash": "74e75520c49fc77ed28f695c6cfd57dbb2bdf9cc4734ae262304a5a4b64e748e",
+        "current_sequence": 3,
+        "last_hash": "96f3df8397c25f93fb987df32d6e3d3e4a210c209254a32528acb939baea3065"
+      },
+      "rotation_ids": [
+        "98ca2e21-5597-4690-85de-cb178a5fc658",
+        "3ce3a690-85ec-476f-9f67-3809b576fb32",
+        "0256cc15-7204-4d35-ba4f-ac45eaf65908"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "Enhanced Log Rotation with Auditability": {
+      "created_timestamp": "2025-10-24T16:46:27.028747 UTC",
+      "current_sequence": 7,
+      "total_rotations": 7,
+      "last_rotation_timestamp": "2025-10-24T16:47:47.688168 UTC",
+      "hash_chain": {
+        "root_hash": "226d708c716cf3353da52f4a5726418afd52322397b626484b6d26cd8ad598bb",
+        "current_sequence": 7,
+        "last_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "rotation_ids": [
+        "817f85da-967c-4f39-8d75-9ba820f56b7e",
+        "8b7b1da1-c148-466d-ba31-9c10ca30ecae",
+        "eb8db40d-8458-41a6-9887-f666ce9ad0f8",
+        "46bcb1f7-4019-46db-b164-6116672dddda",
+        "8db33177-b890-4fe9-a4ac-4dfad75cc952",
+        "1a249dd3-9c85-49ce-a20d-e7eed516f3f2",
+        "176d8d87-5ae0-4703-b1a3-462ddf2e7ca5"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "bulletproof-test": {
+      "created_timestamp": "2025-10-24T17:08:35.484716 UTC",
+      "current_sequence": 1,
+      "total_rotations": 1,
+      "last_rotation_timestamp": "2025-10-24T17:08:35.484622 UTC",
+      "hash_chain": {
+        "root_hash": "298034e6c36482f77b12fce8e2df76deff71518a7a55903be75b9c9e46f64972",
+        "current_sequence": 1,
+        "last_hash": "298034e6c36482f77b12fce8e2df76deff71518a7a55903be75b9c9e46f64972"
+      },
+      "rotation_ids": [
+        "ea875cb6-4a8b-4b83-bc3a-565456983716"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "history-test-885ada0c": {
+      "created_timestamp": "2025-10-24T17:10:39.625737 UTC",
+      "current_sequence": 3,
+      "total_rotations": 3,
+      "last_rotation_timestamp": "2025-10-24T17:10:39.750735 UTC",
+      "hash_chain": {
+        "root_hash": "2b1195544ae05b85c12c6ac95184f4fbdf2071a06c2d493c4ce02c29619d688f",
+        "current_sequence": 3,
+        "last_hash": "a4586de61a867ba3b326650b03ff33d830f7e8c1fa8f926271a735281d16c20d"
+      },
+      "rotation_ids": [
+        "ae1b0d83-f6b6-4cbb-a261-5361796c729d",
+        "08a7981c-040b-45ff-8d74-5111e6621ea7",
+        "83b384ae-7761-4f8e-9d89-3b751f48e119"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "history-test-cdbe0dba": {
+      "created_timestamp": "2025-10-24T17:14:11.307686 UTC",
+      "current_sequence": 3,
+      "total_rotations": 3,
+      "last_rotation_timestamp": "2025-10-24T17:14:11.441836 UTC",
+      "hash_chain": {
+        "root_hash": "428fe6528a08cc386785542fc3aa75c49aafa339c26ae4068ad1a777190dd997",
+        "current_sequence": 3,
+        "last_hash": "7a5ff4be656642f385d99781e523e6bb94ad024d5c9dc4e86a63d42ce88cdbf7"
+      },
+      "rotation_ids": [
+        "12e4be0f-23dc-49a4-89ad-2c7560013ba4",
+        "8347f22f-b7af-4640-a8d9-82c70143237f",
+        "c6b65f2c-6c1f-4dcc-8362-3502dba2b86b"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "history-test-0491766f": {
+      "created_timestamp": "2025-10-24T17:20:29.314135 UTC",
+      "current_sequence": 3,
+      "total_rotations": 3,
+      "last_rotation_timestamp": "2025-10-24T17:20:29.449553 UTC",
+      "hash_chain": {
+        "root_hash": "ad1370a61af36ceaa3afa874b806e2ffc675bef17cb484e50a9d717b3989174f",
+        "current_sequence": 3,
+        "last_hash": "09a5bf214fe648dc83c8f9d8d26ae0d463e33c1440adf0f3fffc1de22115f292"
+      },
+      "rotation_ids": [
+        "1b2e1abb-7d8f-461d-abe4-eb0932fdfe8f",
+        "66daeebc-e795-4490-84a8-8bf6dd0513e7",
+        "b6991e19-7aea-4c69-8405-073908e115a4"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "test-project": {
+      "created_timestamp": "2025-10-25T20:03:58.697353 UTC",
+      "current_sequence": 0,
+      "total_rotations": 0,
+      "last_rotation_timestamp": null,
+      "hash_chain": {
+        "root_hash": null,
+        "current_sequence": 0,
+        "last_hash": null
+      },
+      "rotation_ids": [],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "rotate-test": {
+      "created_timestamp": "2025-10-25T20:04:04.788854 UTC",
+      "current_sequence": 6,
+      "total_rotations": 6,
+      "last_rotation_timestamp": "2025-10-26T03:19:17.733377 UTC",
+      "hash_chain": {
+        "root_hash": "de31a3ef69355397d23ffd48010d4f59e7873fd6f4956f2f861209ec6875a3f6",
+        "current_sequence": 6,
+        "last_hash": "a1be2f9514c83e018002475eb799424a8ca8962c6bb36173c060d2571d6df271"
+      },
+      "rotation_ids": [
+        "4ce686f8-aa45-4348-9945-002554e1a1e4",
+        "a3de841a-16f7-4095-be62-94410e809a76",
+        "f4ae8982-246d-408f-8ee2-765eac766917",
+        "ef7a5e49-a87a-4024-b072-481baf4e67ff",
+        "7c48e5d0-5f74-4d79-9d9b-5183585af6eb",
+        "7c702c98-ba2d-4852-b149-294e97069cf4"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "history-test-40a5d58e": {
+      "created_timestamp": "2025-10-25T20:04:03.900094 UTC",
+      "current_sequence": 3,
+      "total_rotations": 3,
+      "last_rotation_timestamp": "2025-10-25T20:04:03.984729 UTC",
+      "hash_chain": {
+        "root_hash": "c24e5d518cd4827d56422b3a1eea9e9dd33d461f4cccfbe88113e07626de0aa9",
+        "current_sequence": 3,
+        "last_hash": "fb10ffd2692e132e6cb5e60b1c8e5e2294eee4800a46502677c778696ca3799c"
+      },
+      "rotation_ids": [
+        "7d54049a-35a8-4195-b44c-6638e58bc397",
+        "383acb01-2f67-4a69-87c1-4914e20b1230",
+        "cf18a03d-d400-4d27-bf74-8910a9181a7f"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "history-test-9295d858": {
+      "created_timestamp": "2025-10-25T20:13:50.608500 UTC",
+      "current_sequence": 3,
+      "total_rotations": 3,
+      "last_rotation_timestamp": "2025-10-25T20:13:50.761573 UTC",
+      "hash_chain": {
+        "root_hash": "d4e1dfdf5b08a681be697786fe4fab84594ad0e0bbd81ddd165848352e784948",
+        "current_sequence": 3,
+        "last_hash": "32e3ef4cd543680807e59fb28a614589a31d007e73b70f4d89d942d0975a210a"
+      },
+      "rotation_ids": [
+        "4b98bf3f-09f1-44ca-bd6c-7a81ec6059d0",
+        "f072a6b9-e666-454e-968a-d79517b5822c",
+        "7ecb110c-9435-4cd5-a1df-3ee4df1c9a29"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "history-test-3b773569": {
+      "created_timestamp": "2025-10-25T20:18:22.362026 UTC",
+      "current_sequence": 3,
+      "total_rotations": 3,
+      "last_rotation_timestamp": "2025-10-25T20:18:22.505068 UTC",
+      "hash_chain": {
+        "root_hash": "a8f0e325440c56e38512cf23020850e00dc7e10122b60b8898dd28591ad0d324",
+        "current_sequence": 3,
+        "last_hash": "6fc5f9d7335fb10f0295fc57abbd89b15959b16b88c97b4bd8e2034d8537090c"
+      },
+      "rotation_ids": [
+        "c497df6c-8c3a-4fe9-944c-b026aa139574",
+        "2bbd0e12-e87a-461c-8d1f-4787814f0d33",
+        "37905566-5533-4ba6-9683-ea73834fb464"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "history-test-5ba100da": {
+      "created_timestamp": "2025-10-26T03:17:53.656829 UTC",
+      "current_sequence": 3,
+      "total_rotations": 3,
+      "last_rotation_timestamp": "2025-10-26T03:17:53.806336 UTC",
+      "hash_chain": {
+        "root_hash": "cc3c6d240bf9225fe247064c39262a8b0c394c03eeacd3499c46ff775cc03f10",
+        "current_sequence": 3,
+        "last_hash": "a800b3b9c01265924deb28da637791dc1a067edff1b196ad4ac382881688055c"
+      },
+      "rotation_ids": [
+        "875b7ac5-01d4-44ed-94b7-ccd202b38747",
+        "253ca531-c457-440a-bfaf-bdb9cb115fa0",
+        "5826de06-5704-4034-8e40-b42809333fda"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "history-test-56609c9e": {
+      "created_timestamp": "2025-10-26T03:19:18.632475 UTC",
+      "current_sequence": 3,
+      "total_rotations": 3,
+      "last_rotation_timestamp": "2025-10-26T03:19:18.779852 UTC",
+      "hash_chain": {
+        "root_hash": "99c7a64879b34f78a48b50783e1c850f48559b84e1e6685fe31006084b28c56a",
+        "current_sequence": 3,
+        "last_hash": "4cafc5db9cb84b886155c58373dbe91130f5c3b075bf851e45e665d83295cb28"
+      },
+      "rotation_ids": [
+        "1355b24e-e57a-458c-8eff-b94a61e3d3e2",
+        "0a4f173f-4a47-4ab8-8bbb-d85c89711f71",
+        "9e562e56-4197-47c3-bfda-5a560059e7a6"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    }
+  },
+  "global_settings": {
+    "max_rotations_per_project": 100,
+    "cleanup_threshold": 150,
+    "hash_chaining_enabled": true,
+    "integrity_verification_enabled": true
+  }
+}

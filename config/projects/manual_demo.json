@@ -1,0 +1,10 @@
+{
+  "name": "manual_demo",
+  "root": ".",
+  "progress_log": "docs/dev_plans/manual_demo/PROGRESS_LOG.md",
+  "docs_dir": "docs/dev_plans/manual_demo",
+  "defaults": {
+    "emoji": "🧪",
+    "agent": "LabTech"
+  }
+}

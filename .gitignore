@@ -1,0 +1,16 @@
+*:Zone.Identifier
+.env
+*/__pycache__/*
+*.pyc
+data/snapshots/*
+reports/*
+example_code/*
+#Please keep the example code out of the repository.  it is not meant to go online.
+.venv/*
+scribe_fullcode.txt
+fullcode.txt
+*_fullcode.txt
+MCP_SPINE/scribe_mcp/state/*.json
+tmp_tests/*
+tmp_manual/*
+*.lock

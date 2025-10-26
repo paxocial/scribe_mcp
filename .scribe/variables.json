@@ -1,0 +1,26 @@
+{
+  "project_description": "Scribe MCP - Project documentation and progress logging system",
+  "author": "Scribe",
+  "version": "2.0.0",
+  "organization": "Corta Labs",
+  "contact": {
+    "email": "contact@cortalabs.com",
+    "repository": "https://github.com/cortalabs/scribe-mcp"
+  },
+  "features": [
+    "Jinja2 templating",
+    "Custom templates",
+    "Structured logging",
+    "Document management",
+    "Progress tracking"
+  ],
+  "standards": {
+    "timezone": "UTC",
+    "encoding": "UTF-8",
+    "line_endings": "LF"
+  },
+  "links": {
+    "documentation": "https://scribe-mcp.cortalabs.com",
+    "issues": "https://github.com/cortalabs/scribe-mcp/issues"
+  }
+}

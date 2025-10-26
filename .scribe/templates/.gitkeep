@@ -1,0 +1,2 @@
+# This file ensures the project custom templates directory is tracked by git
+# Add your custom Jinja2 templates here to override built-in templates

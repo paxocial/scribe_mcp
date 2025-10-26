@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "scribe": {
+      "command": "python",
+      "args": ["-m", "MCP_SPINE.scribe_mcp.server"],
+      "env": {
+        "SCRIBE_ROOT": "/absolute/path/to/MCP_SPINE",
+        "SCRIBE_STORAGE_BACKEND": "sqlite"
+      }
+    }
+  }
+}

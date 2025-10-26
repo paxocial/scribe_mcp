@@ -1,0 +1,65 @@
+{
+  "project_name": "hash-chain-test",
+  "created_timestamp": "2025-10-26T03:17:53.362679 UTC",
+  "rotations": [
+    {
+      "rotation_uuid": "6292d83f-4eed-4604-82af-7292f7395437",
+      "rotation_timestamp_utc": "2025-10-26T03:17:53.342400 UTC",
+      "sequence_number": 23,
+      "archived_file_path": "/home/austin/projects/Scribe/MCP_SPINE/scribe_mcp/tmp_tests/ef3f6863-1c09-4cdf-9c2a-f949b2bf18d5/docs/dev_plans/hash_chain_test/PROGRESS_LOG.md.rotation-1_6292d83f.md",
+      "archived_file_name": "PROGRESS_LOG.md.rotation-1_6292d83f.md",
+      "entry_count": 59,
+      "file_hash": "cbcbbff2978f011d1dd0836a79ac19ca16d1cb003d977700a402d49494d41fe4",
+      "file_size": 1393,
+      "created_timestamp": "2025-10-25T23:17:53.347569",
+      "modified_timestamp": "2025-10-25T23:17:53.288433",
+      "hash_chain_previous": "db46b20c90d10873b7531455d891e99cf1ca3dbfcfa2f246bb40ebe27c983dc7",
+      "stored_timestamp": "2025-10-26T03:17:53.362688 UTC"
+    },
+    {
+      "rotation_uuid": "6ba53f29-d0ce-43e2-9dcd-983b4e658ce0",
+      "rotation_timestamp_utc": "2025-10-26T03:17:53.418363 UTC",
+      "sequence_number": 24,
+      "archived_file_path": "/home/austin/projects/Scribe/MCP_SPINE/scribe_mcp/tmp_tests/ef3f6863-1c09-4cdf-9c2a-f949b2bf18d5/docs/dev_plans/hash_chain_test/PROGRESS_LOG.md.rotation-2_6ba53f29.md",
+      "archived_file_name": "PROGRESS_LOG.md.rotation-2_6ba53f29.md",
+      "entry_count": 59,
+      "file_hash": "e0f940d76e522a13ed386036a608dec7f168401873c560dbffb5b4db683a6c48",
+      "file_size": 1601,
+      "created_timestamp": "2025-10-25T23:17:53.419378",
+      "modified_timestamp": "2025-10-25T23:17:53.368690",
+      "hash_chain_previous": "cbcbbff2978f011d1dd0836a79ac19ca16d1cb003d977700a402d49494d41fe4",
+      "stored_timestamp": "2025-10-26T03:17:53.436943 UTC"
+    },
+    {
+      "rotation_uuid": "7d5381ed-2445-4bb9-af9a-722bc24aca5b",
+      "rotation_timestamp_utc": "2025-10-26T03:19:18.320541 UTC",
+      "sequence_number": 25,
+      "archived_file_path": "/home/austin/projects/Scribe/MCP_SPINE/scribe_mcp/tmp_tests/60e2b5ab-243f-41b1-8278-1c0f82b55644/docs/dev_plans/hash_chain_test/PROGRESS_LOG.md.rotation-1_7d5381ed.md",
+      "archived_file_name": "PROGRESS_LOG.md.rotation-1_7d5381ed.md",
+      "entry_count": 59,
+      "file_hash": "4b35dbef32fcdaea58ba64710968ec98906d31caee9d9ee11aef5ada1ee19cf3",
+      "file_size": 1393,
+      "created_timestamp": "2025-10-25T23:19:18.324456",
+      "modified_timestamp": "2025-10-25T23:19:18.273731",
+      "hash_chain_previous": "e0f940d76e522a13ed386036a608dec7f168401873c560dbffb5b4db683a6c48",
+      "stored_timestamp": "2025-10-26T03:19:18.339121 UTC"
+    },
+    {
+      "rotation_uuid": "fe0dd3eb-dd06-4e81-bae6-344b70363af2",
+      "rotation_timestamp_utc": "2025-10-26T03:19:18.393213 UTC",
+      "sequence_number": 26,
+      "archived_file_path": "/home/austin/projects/Scribe/MCP_SPINE/scribe_mcp/tmp_tests/60e2b5ab-243f-41b1-8278-1c0f82b55644/docs/dev_plans/hash_chain_test/PROGRESS_LOG.md.rotation-2_fe0dd3eb.md",
+      "archived_file_name": "PROGRESS_LOG.md.rotation-2_fe0dd3eb.md",
+      "entry_count": 59,
+      "file_hash": "45188421b5bfb43419cc18b2d603f2d7308c8c6a26c93ec139b5bcd4b98145ad",
+      "file_size": 1601,
+      "created_timestamp": "2025-10-25T23:19:18.396316",
+      "modified_timestamp": "2025-10-25T23:19:18.345591",
+      "hash_chain_previous": "4b35dbef32fcdaea58ba64710968ec98906d31caee9d9ee11aef5ada1ee19cf3",
+      "stored_timestamp": "2025-10-26T03:19:18.411721 UTC"
+    }
+  ],
+  "total_rotations": 4,
+  "last_updated": "2025-10-26T03:19:18.411721 UTC",
+  "version": "1.0"
+}
