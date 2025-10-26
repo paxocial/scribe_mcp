@@ -269,6 +269,10 @@ async def append_entry(
     """
     state_snapshot = await server_module.state_manager.record_tool("append_entry")
 
+    # Normalize metadata early for consistent handling throughout the function
+    meta_pairs = _normalise_meta(meta)
+    meta_payload = {key: value for key, value in meta_pairs}
+
     # Auto-detect agent ID if not provided
     if agent_id is None:
         agent_identity = server_module.get_agent_identity()
@@ -358,7 +362,7 @@ async def append_entry(
 
                 # Apply inherited metadata to all split entries
                 bulk_items = _apply_inherited_metadata(
-                    bulk_items, meta, status, emoji, agent
+                    bulk_items, meta_payload, status, emoji, agent
                 )
 
                 # Add individual timestamps
@@ -388,7 +392,7 @@ async def append_entry(
         # Apply inherited metadata if not already applied
         if meta or status or emoji or agent:
             bulk_items = _apply_inherited_metadata(
-                bulk_items, meta, status, emoji, agent
+                bulk_items, meta_payload, status, emoji, agent
             )
 
         # Add timestamps if not present
@@ -438,7 +442,7 @@ async def append_entry(
     resolved_agent = _sanitize_identifier(agent or defaults.get("agent") or "Scribe")
     timestamp_dt, timestamp, timestamp_warning = _resolve_timestamp(timestamp_utc)
 
-    meta_pairs = _normalise_meta(meta)
+    # Metadata already normalized at function start (meta_pairs defined at line 273)
     meta_payload = {key: value for key, value in meta_pairs}
 
     entry_log_type = base_log_type
@@ -544,8 +548,31 @@ def _normalise_meta(meta: Optional[Dict[str, Any]]) -> tuple[tuple[str, str], ..
                 # If JSON parses but isn't a dict, create error metadata
                 return (("parse_error", f"Expected dict, got {type(meta).__name__}"),)
         except json.JSONDecodeError:
-            # If JSON parsing fails, treat the string as a single value
-            return (("message", meta),)
+            # EDGE CASE: Handle common "key=value,key2=value2" or "key=value key2=value2" pattern from CLI usage
+            if '=' in meta:
+                try:
+                    pairs = []
+                    # Try comma-separated first
+                    if ',' in meta:
+                        delimiter = ','
+                    else:
+                        delimiter = ' '
+
+                    for pair in meta.split(delimiter):
+                        pair = pair.strip()
+                        if '=' in pair:
+                            key, value = pair.split('=', 1)
+                            pairs.append((key.strip(), value.strip()))
+                        else:
+                            # If no equals, treat as message
+                            pairs.append(('message', pair.strip()))
+                    return tuple(pairs)
+                except Exception:
+                    # Fall back to treating as single message
+                    return (("message", meta),)
+            else:
+                # If JSON parsing fails, treat the string as a single value
+                return (("message", meta),)
 
     # Ensure we have a dictionary at this point
     if not isinstance(meta, dict):
