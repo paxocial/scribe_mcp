@@ -38,6 +38,8 @@ async def generate_doc_templates(
     base_dir: str | None = None,
     custom_context: Any = None,
     legacy_fallback: bool = False,
+    include_template_metadata: bool = False,
+    validate_only: bool = False,
 ) -> Dict[str, Any]:
     """Render the standard documentation templates for a project."""
     state_snapshot = await server_module.state_manager.record_tool("generate_doc_templates")
@@ -82,6 +84,11 @@ async def generate_doc_templates(
             "ok": False,
             "error": f"Failed to initialize Jinja2 template engine: {engine_error}",
         }
+    if validate_only and engine is None:
+        return {
+            "ok": False,
+            "error": "Validation requires the Jinja2 template engine. Enable legacy_fallback only for emergency writes.",
+        }
 
     output_dir = _target_directory(project_name, base_dir)
     await asyncio.to_thread(output_dir.mkdir, parents=True, exist_ok=True)
@@ -90,12 +97,43 @@ async def generate_doc_templates(
 
     written: List[str] = []
     skipped: List[str] = []
+    template_metadata: Dict[str, Any] = {}
+    validation_results: Dict[str, Any] = {}
+    template_directories_info: List[Dict[str, str]] = []
+    available_templates: List[str] = []
+    all_templates_valid = True
+
+    if include_template_metadata and engine:
+        template_directories_info = engine.describe_template_directories()
+        available_templates = engine.list_templates()
     for key, filename in OUTPUT_FILENAMES:
         if key not in selected:
             continue
         template_name = f"documents/{TEMPLATE_FILENAMES[key]}"
         rendered = None
         metadata_payload = _metadata_for(key, project_name, context)
+
+        if engine:
+            validation_result = engine.validate_template(template_name)
+            if validation_result:
+                validation_results[template_name] = validation_result
+                if not validation_result.get("valid", False):
+                    all_templates_valid = False
+                    if not validate_only:
+                        return {
+                            "ok": False,
+                            "error": f"Template validation failed for {template_name}",
+                            "template": template_name,
+                            "validation": validation_result,
+                        }
+        if include_template_metadata and engine:
+            template_metadata[key] = {
+                "template": template_name,
+                "info": engine.get_template_info(template_name),
+            }
+
+        if validate_only:
+            continue
 
         if engine:
             try:
@@ -128,6 +166,20 @@ async def generate_doc_templates(
         else:
             skipped.append(str(path))
 
+    if validate_only:
+        response: Dict[str, Any] = {
+            "ok": all_templates_valid,
+            "validation": validation_results,
+            "directory": str(output_dir),
+        }
+        if include_template_metadata:
+            response["template_metadata"] = {
+                "documents": template_metadata,
+                "directories": template_directories_info,
+                "available_templates": available_templates,
+            }
+        return response
+
     project_stub = {
         "name": project_name,
         "progress_log": str(output_dir / "PROGRESS_LOG.md"),
@@ -146,13 +198,22 @@ async def generate_doc_templates(
         tool_name="generate_doc_templates",
         state=state_snapshot,
     )
-    return {
+    response: Dict[str, Any] = {
         "ok": True,
         "files": written,
         "skipped": skipped,
         "directory": str(output_dir),
         "reminders": reminders_payload,
     }
+    if validation_results:
+        response["validation"] = validation_results
+    if include_template_metadata:
+        response["template_metadata"] = {
+            "documents": template_metadata,
+            "directories": template_directories_info,
+            "available_templates": available_templates,
+        }
+    return response
 
 
 def _target_directory(project_name: str, base_dir: str | None) -> Path:

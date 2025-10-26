@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 # Import with absolute paths from MCP_SPINE root
 from scribe_mcp.config.settings import settings
@@ -21,6 +22,8 @@ TEMPLATE_FILENAMES = {
     "security_log": "SECURITY_LOG_TEMPLATE.md",
     "bug_log": "BUG_LOG_TEMPLATE.md",
 }
+
+_PROJECT_VARIABLES_CACHE: Dict[str, Any] | None = None
 
 
 def template_root() -> Path:
@@ -104,6 +107,13 @@ def substitution_context(project_name: str, author: str | None = None, rotation_
                 context[key] = str(value)
                 context[key.upper()] = str(value)
 
+    custom_vars = _load_project_variables()
+    if custom_vars:
+        context.update(custom_vars)
+        for key, value in custom_vars.items():
+            if isinstance(key, str) and isinstance(value, (str, int, float, bool)):
+                context.setdefault(key.upper(), str(value))
+
     return context
 
 
@@ -157,3 +167,29 @@ def slugify_project_name(name: str) -> str:
     """Return a filesystem-friendly slug without importing project_utils (avoids circular deps)."""
     normalised = name.strip().lower().replace(" ", "_")
     return _SLUG_CLEANER.sub("_", normalised).strip("_") or "project"
+
+
+def _load_project_variables() -> Dict[str, Any]:
+    """Load variables from .scribe/variables.json once per process."""
+    global _PROJECT_VARIABLES_CACHE
+    if _PROJECT_VARIABLES_CACHE is not None:
+        return _PROJECT_VARIABLES_CACHE
+
+    variables_path = settings.project_root / ".scribe" / "variables.json"
+    if not variables_path.exists():
+        _PROJECT_VARIABLES_CACHE = {}
+        return _PROJECT_VARIABLES_CACHE
+
+    try:
+        content = variables_path.read_text(encoding="utf-8")
+        data = json.loads(content) if content.strip() else {}
+        if isinstance(data, dict):
+            _PROJECT_VARIABLES_CACHE = data
+        else:
+            _PROJECT_VARIABLES_CACHE = {}
+    except json.JSONDecodeError:
+        _PROJECT_VARIABLES_CACHE = {}
+    except OSError:
+        _PROJECT_VARIABLES_CACHE = {}
+
+    return _PROJECT_VARIABLES_CACHE

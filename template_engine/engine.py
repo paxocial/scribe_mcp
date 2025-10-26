@@ -554,6 +554,16 @@ class Jinja2TemplateEngine:
 
         return unique_templates
 
+    def describe_template_directories(self) -> List[Dict[str, str]]:
+        """Return metadata about each discovered template directory."""
+        directories: List[Dict[str, str]] = []
+        for template_dir in self.template_dirs:
+            directories.append({
+                "path": str(template_dir),
+                "type": self._template_dir_types.get(template_dir, "unknown"),
+            })
+        return directories
+
     def get_template_info(self, template_name: str) -> Dict[str, Any]:
         """Get detailed information about a template."""
         info = {
