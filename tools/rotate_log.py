@@ -135,8 +135,15 @@ async def rotate_log(
             }
 
         # Perform enhanced rotation
-        # Default to dry-run for safety unless explicitly confirmed OR dry_run is explicitly set
-        is_dry_run = dry_run if dry_run is not None else (not confirm)
+        # confirm=true should override dry_run and perform actual rotation
+        # dry_run=None means auto-determine based on confirm flag
+        # dry_run=true/false means respect the explicit setting
+        if confirm:
+            is_dry_run = False
+        elif dry_run is not None:
+            is_dry_run = dry_run
+        else:
+            is_dry_run = True  # Default to safe dry-run
 
         if is_dry_run:
             safe_rotation_id = rotation_id[:8]

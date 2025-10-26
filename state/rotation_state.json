@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "created_timestamp": "2025-10-24 11:35:00 UTC",
-  "last_updated": "2025-10-26T04:24:06.617413 UTC",
+  "last_updated": "2025-10-26T10:27:37.266862 UTC",
   "projects": {
     "enhanced-rotation-test": {
       "created_timestamp": "2025-10-24T12:05:59.361388 UTC",
@@ -524,6 +524,24 @@
         "59f77f7e-6e61-44be-ae7c-87f2c6816ae6",
         "6b11b2a0-cb67-481a-892f-f7df8992e5d3",
         "106cbbca-e25f-4396-8513-d3952292d8fe"
+      ],
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "scribe_test_2": {
+      "created_timestamp": "2025-10-26T10:27:34.628227 UTC",
+      "current_sequence": 1,
+      "total_rotations": 1,
+      "last_rotation_timestamp": "2025-10-26T10:27:37.221161 UTC",
+      "hash_chain": {
+        "root_hash": "5d136ca889669a217d7f7acb80abe7e4c6899d4d47fd30a2c01bd28dd93e2813",
+        "current_sequence": 1,
+        "last_hash": "5d136ca889669a217d7f7acb80abe7e4c6899d4d47fd30a2c01bd28dd93e2813"
+      },
+      "rotation_ids": [
+        "0871ff58-7aef-4873-9ba1-ec556cdc3bf9"
       ],
       "settings": {
         "auto_cleanup": true,

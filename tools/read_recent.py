@@ -15,7 +15,7 @@ from scribe_mcp.utils.files import read_tail
 
 @app.tool()
 async def read_recent(
-    n: int = 50,
+    n: Optional[Any] = None,
     filter: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Return the last `n` entries for the active project, optionally filtered."""
@@ -31,7 +31,13 @@ async def read_recent(
             "reminders": reminders_payload,
         }
 
-    limit = max(1, min(n, 200))
+    # Handle n parameter that might come as string from MCP interface
+    try:
+        limit_int = int(n) if n is not None else 50
+    except (ValueError, TypeError):
+        limit_int = 50
+
+    limit = max(1, min(limit_int, 200))
     filters = filter or {}
 
     backend = server_module.storage_backend

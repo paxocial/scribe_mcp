@@ -26,6 +26,15 @@ def message_matches(
             return False
         return bool(pattern.search(haystack))
 
+    if mode == "exact":
+        candidate = needle
+        target = haystack
+        if not case_sensitive:
+            candidate = needle.lower()
+            target = haystack.lower()
+        return candidate == target
+
+    # Default to substring matching
     candidate = needle if case_sensitive else needle.lower()
     target = haystack if case_sensitive else haystack.lower()
     return candidate in target

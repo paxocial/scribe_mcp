@@ -16,7 +16,7 @@ from scribe_mcp.utils.search import message_matches
 from scribe_mcp.utils.time import coerce_range_boundary
 from scribe_mcp import reminders
 
-VALID_MESSAGE_MODES = {"substring", "regex"}
+VALID_MESSAGE_MODES = {"substring", "regex", "exact"}
 META_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]+$")
 
 

@@ -19,17 +19,17 @@ Update this table as the project evolves. Confidence values should change as kno
 
 ---
 
-## Phase 0 — Foundation Fixes & Database Enhancement
+## ✅ Phase 0 — Foundation Fixes & Database Enhancement
 <!-- ID: phase_0 -->
 **Objective:** Fix critical silent failures and establish robust database foundation for document management
 
 **Key Tasks:**
-- [ ] Fix async/await bug in manager.py (add async_atomic_write function)
-- [ ] Extend database schema with document_sections, custom_templates, document_changes tables
-- [ ] Implement database migration system for new schema
-- [ ] Add comprehensive error handling and validation to manage_docs operations
-- [ ] Create post-write verification to eliminate silent failures
-- [ ] Add structured logging for all document operations
+- [x] Fix async/await bug in manager.py (add async_atomic_write function)
+- [x] Extend database schema with document_sections, custom_templates, document_changes tables
+- [x] Implement database migration system for new schema
+- [x] Add comprehensive error handling and validation to manage_docs operations
+- [x] Create post-write verification to eliminate silent failures
+- [x] Add structured logging for all document operations
 
 **Deliverables:**
 - Working manage_docs tool with 100% reliable file operations
@@ -38,31 +38,31 @@ Update this table as the project evolves. Confidence values should change as kno
 - Comprehensive test coverage for document operations
 
 **Acceptance Criteria:**
-- [ ] All manage_docs operations succeed or raise appropriate errors (no silent failures)
-- [ ] File content always matches expected result after operations
-- [ ] Database properly mirrors document content after each operation
-- [ ] All existing projects continue to work without manual intervention
-- [ ] Test suite demonstrates 100% reliability of document operations
+- [x] All manage_docs operations succeed or raise appropriate errors (no silent failures)
+- [x] File content always matches expected result after operations
+- [x] Database properly mirrors document content after each operation
+- [x] All existing projects continue to work without manual intervention
+- [x] Test suite demonstrates 100% reliability of document operations
 
 **Dependencies:** SQLite database access, Jinja2 library (for later phases)
 **Estimated Duration:** 2-3 days
-**Notes:** This phase fixes the critical bug that prevents document editing and establishes the foundation for all后续 phases.
+**Notes:** This phase fixes the critical bug that prevents document editing and establishes the foundation for all subsequent phases.
 
 ---
 
-## Phase 1 — Jinja2 Template Engine & Custom Templates
+## ✅ Phase 1 — Jinja2 Template Engine & Custom Templates
 <!-- ID: phase_1 -->
 **Objective:** Replace basic string substitution with professional Jinja2 templating and enable custom template creation
 
 **Key Tasks:**
-- [ ] Integrate Jinja2 template engine with security sandboxing
-- [ ] Replace simple {{variable}} substitution with Jinja2 rendering
-- [ ] Implement template inheritance and block system
-- [ ] Create custom template discovery system (.scribe/templates/)
-- [ ] Add JSON-based custom variable definitions
-- [ ] Implement template validation and error reporting
-- [ ] Create migration from old templates to Jinja2 format
-- [ ] Add template testing and preview capabilities
+- [x] Integrate Jinja2 template engine with security sandboxing
+- [x] Replace simple {{variable}} substitution with Jinja2 rendering
+- [x] Implement template inheritance and block system
+- [x] Create custom template discovery system (.scribe/templates/)
+- [x] Add JSON-based custom variable definitions
+- [x] Implement template validation and error reporting
+- [x] Create migration from old templates to Jinja2 format *(legacy fallback supported)*
+- [x] Add template testing and preview capabilities *(via validate_only and dry-run modes)*
 
 **Deliverables:**
 - Jinja2-based template engine with inheritance and includes
@@ -72,12 +72,12 @@ Update this table as the project evolves. Confidence values should change as kno
 - Backward compatibility with existing template variables
 
 **Acceptance Criteria:**
-- [ ] All existing templates render correctly with Jinja2 engine
-- [ ] Users can create custom templates with Jinja2 syntax
-- [ ] Custom variables defined in JSON are available in templates
-- [ ] Template inheritance works for base templates and extensions
-- [ ] Template errors provide clear, actionable feedback
-- [ ] Template rendering performance is acceptable (<100ms for typical documents)
+- [x] All existing templates render correctly with Jinja2 engine
+- [x] Users can create custom templates with Jinja2 syntax
+- [x] Custom variables defined in JSON are available in templates
+- [x] Template inheritance works for base templates and extensions
+- [x] Template errors provide clear, actionable feedback
+- [x] Template rendering performance is acceptable (<100ms for typical documents)
 
 **Dependencies:** Phase 0 completion, Jinja2 library
 **Estimated Duration:** 3-4 days
