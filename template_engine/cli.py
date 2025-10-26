@@ -102,7 +102,8 @@ def main():
             print(f"Security mode: {args.security}")
             print(f"Template directories: {len(engine.template_dirs)}")
             for i, template_dir in enumerate(engine.template_dirs, 1):
-                print(f"  {i}. {template_dir}")
+                dir_type = getattr(engine, "_template_dir_types", {}).get(template_dir, "unknown")
+                print(f"  {i}. {template_dir} [{dir_type}]")
 
     except Exception as e:
         print(f"Error: Failed to initialize template engine: {e}", file=sys.stderr)

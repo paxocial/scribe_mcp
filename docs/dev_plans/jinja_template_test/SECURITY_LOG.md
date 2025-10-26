@@ -1,22 +1,17 @@
-{% extends "documents/base_log.md" %}
-{% from "documents/base_log.md" import rotation_notice with context %}
 
-{% block log_metadata %}
-{% set log_config.title = "Security Log" %}
-{% set log_config.icon = "🔒" %}
-{% set log_config.summary = 'Track security events, vulnerabilities, and decisions. Use `log_type="security"` (or `--log security`).' %}
-{% endblock %}
+# 🔒 Security Log — Jinja Template Test
+**Maintained By:** Scribe
+**Timezone:** UTC
 
-{% block log_body %}
-{% set rotation_raw = metadata.get("is_rotation", metadata.get("IS_ROTATION", is_rotation | default("false"))) %}
-{% set rotation_active = rotation_raw in [True, "true", "True", 1, "1", "yes", "YES"] %}
-{% if rotation_active %}
-{{ rotation_notice(metadata) }}
-{% endif %}
+> Track security events, vulnerabilities, and decisions. Use `log_type="security"` (or `--log security`).
+
+---
+
+
 
 ## Entry Format
 ```
-[EMOJI] [YYYY-MM-DD HH:MM:SS UTC] [Agent: <name>] [Project: {{ project_name or PROJECT_NAME }}] Message text | severity=<severity>; area=<area>; impact=<impact>; [additional metadata]
+[EMOJI] [YYYY-MM-DD HH:MM:SS UTC] [Agent: <name>] [Project: Jinja Template Test] Message text | severity=<severity>; area=<area>; impact=<impact>; [additional metadata]
 ```
 
 **Required Metadata Fields:**
@@ -57,4 +52,3 @@
 ---
 
 ## Entries will populate below
-{% endblock %}

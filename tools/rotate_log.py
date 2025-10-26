@@ -29,7 +29,9 @@ from scribe_mcp.utils.rotation_state import (
     generate_rotation_id,
     update_project_state
 )
+from scribe_mcp.template_engine import Jinja2TemplateEngine, TemplateEngineError
 from scribe_mcp.templates import (
+    TEMPLATE_FILENAMES,
     substitution_context,
     create_rotation_context
 )
@@ -185,21 +187,38 @@ async def rotate_log(
             rotation_context=rotation_context
         )
 
-        # Import template rendering functions for direct content generation
+        # Import fallback renderer for safety
         from scribe_mcp.tools.generate_doc_templates import _render_template
         from scribe_mcp.templates import load_templates
 
-        # Load the progress log template
-        templates = await load_templates()
-        template_body = templates.get("progress_log", "")
-
-        # Generate the complete new log content in memory first
+        template_engine = None
         try:
-            new_log_content = _render_template(template_body, template_context)
-        except Exception as template_error:
-            print(f"Warning: Template generation failed: {template_error}")
-            # Fallback to basic content
-            new_log_content = f"""# Progress Log
+            template_engine = Jinja2TemplateEngine(
+                project_root=Path(project.get("root", "")) if project.get("root") else Path.cwd(),
+                project_name=project["name"],
+                security_mode="sandbox",
+            )
+        except Exception as engine_error:  # pragma: no cover - rarely triggered
+            print(f"Warning: Failed to initialize Jinja2 template engine for rotation: {engine_error}")
+
+        template_name = f"documents/{TEMPLATE_FILENAMES['progress_log']}"
+        new_log_content = None
+
+        if template_engine:
+            try:
+                new_log_content = template_engine.render_template(template_name, metadata=template_context)
+            except TemplateEngineError as render_error:
+                print(f"Warning: Jinja2 rendering failed for {template_name}: {render_error}")
+
+        if new_log_content is None:
+            templates = await load_templates()
+            template_body = templates.get("progress_log", "")
+            try:
+                new_log_content = _render_template(template_body, template_context)
+            except Exception as template_error:
+                print(f"Warning: Template generation failed: {template_error}")
+                # Fallback to basic content
+                new_log_content = f"""# Progress Log
 
 ## Rotation Notice
 Previous log was archived with rotation ID: {template_context.get('ROTATION_ID', 'unknown')}

@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Tuple
 
 from scribe_mcp import reminders, server as server_module
 from scribe_mcp.config.settings import settings
 from scribe_mcp.tools.project_utils import slugify_project_name
 from scribe_mcp.server import app
+from scribe_mcp.template_engine import Jinja2TemplateEngine, TemplateEngineError
 from scribe_mcp.templates import TEMPLATE_FILENAMES, load_templates, substitution_context
 
 
@@ -58,6 +59,16 @@ async def generate_doc_templates(
         context = substitution_context(project_name, author)
         print(f"Warning: Error handling custom_context: {e}. Using base context.")
 
+    try:
+        engine = Jinja2TemplateEngine(
+            project_root=settings.project_root,
+            project_name=project_name,
+            security_mode="sandbox",
+        )
+    except Exception as engine_error:  # pragma: no cover - initialization rarely fails
+        print(f"Warning: Failed to initialize Jinja2 template engine, falling back to legacy renderer: {engine_error}")
+        engine = None
+
     output_dir = _target_directory(project_name, base_dir)
     await asyncio.to_thread(output_dir.mkdir, parents=True, exist_ok=True)
 
@@ -68,11 +79,22 @@ async def generate_doc_templates(
     for key, filename in OUTPUT_FILENAMES:
         if key not in selected:
             continue
-        template_body = templates.get(key)
-        if not template_body:
-            source_name = TEMPLATE_FILENAMES[key]
-            return {"ok": False, "error": f"Template missing: {source_name}"}
-        rendered = _render_template(template_body, context)
+        template_name = f"documents/{TEMPLATE_FILENAMES[key]}"
+        rendered = None
+        metadata_payload = _metadata_for(key, project_name, context)
+
+        if engine:
+            try:
+                rendered = engine.render_template(template_name, metadata=metadata_payload)
+            except TemplateEngineError as template_error:
+                print(f"Warning: Jinja2 rendering failed for {template_name}: {template_error}")
+
+        if rendered is None:
+            template_body = templates.get(key)
+            if not template_body:
+                source_name = TEMPLATE_FILENAMES[key]
+                return {"ok": False, "error": f"Template missing: {source_name}"}
+            rendered = _render_template(template_body, context)
         path = output_dir / filename
         if overwrite or not path.exists():
             await asyncio.to_thread(_write_template, path, rendered, overwrite)
@@ -136,3 +158,203 @@ def _select_documents(documents: Iterable[str] | None) -> List[str]:
     normalized = {doc.lower() for doc in documents}
     valid = [key for key, _ in OUTPUT_FILENAMES if key in normalized]
     return valid
+
+
+MetadataBuilder = Callable[[str, Dict[str, str]], Dict[str, Any]]
+
+
+def _metadata_for(doc_key: str, project_name: str, context: Dict[str, str]) -> Dict[str, Any]:
+    builder = METADATA_BUILDERS.get(doc_key)
+    if builder:
+        return builder(project_name, context)
+    return {}
+
+
+def _architecture_metadata(project_name: str, context: Dict[str, str]) -> Dict[str, Any]:
+    project_root = context.get("project_root", "project")
+    return {
+        "summary": f"Architecture guide for {project_name}.",
+        "version": "Draft v0.1",
+        "status": "Draft",
+        "problem_statement": {
+            "context": f"{project_name} needs a reliable documentation system.",
+            "goals": [
+                "Eliminate silent failures",
+                "Improve template flexibility",
+            ],
+            "non_goals": ["Define UI/UX beyond documentation"],
+            "success_metrics": [
+                "All manage_docs operations verified",
+                "Templates easy to customize",
+            ],
+        },
+        "requirements": {
+            "functional": [
+                "Atomic document updates",
+                "Jinja2 templates with inheritance",
+            ],
+            "non_functional": [
+                "Backwards-compatible file layout",
+                "Sandboxed template rendering",
+            ],
+            "assumptions": [
+                "Filesystem read/write access",
+                "Python runtime available",
+            ],
+            "risks": [
+                "User edits outside manage_docs",
+                "Template misuse causing errors",
+            ],
+        },
+        "architecture_overview": {
+            "summary": "Document manager orchestrates template rendering and writes.",
+            "components": [
+                {
+                    "name": "Doc Manager",
+                    "description": "Validates sections and applies atomic writes.",
+                    "interfaces": "manage_docs tool",
+                    "notes": "Provides verification and logging.",
+                },
+                {
+                    "name": "Template Engine",
+                    "description": "Renders templates via Jinja2 with sandboxing.",
+                    "interfaces": "Jinja2 environment",
+                    "notes": "Supports project/local overrides.",
+                },
+            ],
+            "data_flow": "User -> manage_docs -> template engine -> filesystem/database.",
+            "external_integrations": "SQLite mirror, git history.",
+        },
+        "subsystems": [
+            {
+                "name": "Doc Change Pipeline",
+                "purpose": "Coordinate apply/verify steps.",
+                "interfaces": "Atomic writer, storage backend",
+                "notes": "Async aware",
+                "error_handling": "Rollback on verification failure",
+            }
+        ],
+        "directory_structure": f"{project_root}/docs/dev_plans/{slugify_project_name(project_name)}",
+        "data_storage": {
+            "datastores": ["Filesystem markdown", "SQLite mirror"],
+            "indexing": "FTS for sections",
+            "migrations": "Sequential migrations tracked in storage layer",
+        },
+        "testing_strategy": {
+            "unit": "Template rendering + doc ops",
+            "integration": "manage_docs tool exercises real files",
+            "manual": "Project review after each release",
+            "observability": "Structured logging via doc_updates log",
+        },
+        "deployment": {
+            "environments": "Local development",
+            "release": "Git commits drive deployment",
+            "config": "Project-specific .scribe settings",
+            "ownership": "Doc management team",
+        },
+        "open_questions": [
+            {
+                "item": "Should templates support conditionals per phase?",
+                "owner": "Docs Lead",
+                "status": "TODO",
+                "notes": "Evaluate after initial rollout.",
+            }
+        ],
+        "references": ["PROGRESS_LOG.md", "ARCHITECTURE_GUIDE.md"],
+        "appendix": "Generated via generate_doc_templates.",
+    }
+
+
+def _phase_plan_metadata(project_name: str, context: Dict[str, str]) -> Dict[str, Any]:
+    return {
+        "summary": f"Execution roadmap for {project_name}.",
+        "phases": [
+            {
+                "name": "Phase 0 — Foundation",
+                "anchor": "phase_0",
+                "goal": "Stabilize document writes and storage.",
+                "deliverables": ["Async atomic write", "SQLite mirror"],
+                "confidence": 0.9,
+                "tasks": ["Fix async bug", "Add verification"],
+                "acceptance": [
+                    {"label": "No silent failures", "proof": "tests"},
+                ],
+                "dependencies": "Existing storage layer",
+                "notes": "Must complete before template overhaul.",
+            },
+            {
+                "name": "Phase 1 — Templates",
+                "anchor": "phase_1",
+                "goal": "Introduce advanced Jinja2 template system.",
+                "deliverables": ["Base templates", "Custom template discovery"],
+                "confidence": 0.8,
+                "tasks": ["Add inheritance", "Add sandboxing"],
+                "acceptance": [
+                    {"label": "All built-in templates render", "proof": "pytest"},
+                ],
+                "dependencies": "Phase 0",
+                "notes": "Focus on template authoring UX.",
+            },
+        ],
+        "milestones": [
+            {
+                "name": "Foundation Complete",
+                "target": "2025-10-29",
+                "owner": "DevTeam",
+                "status": "🚧 In Progress",
+                "evidence": "PROGRESS_LOG.md",
+            },
+            {
+                "name": "Template Engine Ship",
+                "target": "2025-11-02",
+                "owner": "DevTeam",
+                "status": "⏳ Planned",
+                "evidence": "Phase 1 tasks",
+            },
+        ],
+    }
+
+
+def _checklist_metadata(project_name: str, context: Dict[str, str]) -> Dict[str, Any]:
+    return {
+        "summary": f"Acceptance checklist for {project_name}.",
+        "sections": [
+            {
+                "title": "Documentation Hygiene",
+                "anchor": "documentation_hygiene",
+                "items": [
+                    {"label": "Architecture guide updated", "proof": "ARCHITECTURE_GUIDE.md"},
+                    {"label": "Phase plan current", "proof": "PHASE_PLAN.md"},
+                ],
+            },
+            {
+                "title": "Phase 0",
+                "anchor": "phase_0",
+                "items": [
+                    {"label": "Async write fix merged", "proof": "commit"},
+                    {"label": "Verification enabled", "proof": "tests"},
+                ],
+            },
+        ],
+    }
+
+
+def _log_metadata(label: str) -> MetadataBuilder:
+    def builder(project_name: str, _: Dict[str, str]) -> Dict[str, Any]:
+        return {
+            "summary": f"{label} for {project_name}.",
+            "is_rotation": False,
+        }
+
+    return builder
+
+
+METADATA_BUILDERS: Dict[str, MetadataBuilder] = {
+    "architecture": _architecture_metadata,
+    "phase_plan": _phase_plan_metadata,
+    "checklist": _checklist_metadata,
+    "progress_log": _log_metadata("Progress log"),
+    "doc_log": _log_metadata("Documentation updates"),
+    "security_log": _log_metadata("Security log"),
+    "bug_log": _log_metadata("Bug log"),
+}

@@ -21,6 +21,12 @@ from jinja2 import (
 from jinja2.exceptions import TemplateNotFound as TemplateNotFoundError
 from jinja2.sandbox import ImmutableSandboxedEnvironment, SandboxedEnvironment
 
+try:
+    from scribe_mcp.config.repo_config import RepoConfig, RepoDiscovery
+except Exception:  # pragma: no cover - repo config optional during bootstrap
+    RepoConfig = None  # type: ignore
+    RepoDiscovery = None  # type: ignore
+
 # Standalone implementations to avoid circular import hell
 def get_template_root():
     """Get template root directory - standalone implementation."""
@@ -101,7 +107,9 @@ class Jinja2TemplateEngine:
         self,
         project_root: Optional[Path] = None,
         project_name: Optional[str] = None,
-        security_mode: str = "sandbox"
+        security_mode: str = "sandbox",
+        repo_config: Optional["RepoConfig"] = None,
+        template_pack: Optional[str] = None,
     ):
         """
         Initialize the Jinja2 template engine.
@@ -111,12 +119,25 @@ class Jinja2TemplateEngine:
             project_name: Name of the project
             security_mode: Security mode - "sandbox", "immutable", or "none"
         """
-        self.project_root = Path(project_root) if project_root else Path.cwd()
+        self.project_root = Path(project_root).resolve() if project_root else Path.cwd().resolve()
         self.project_name = project_name or ""
         self.project_slug = slugify_project_name(project_name or "")
+        self.repo_root: Path = self.project_root
+
+        # Repository configuration (for templates pack/custom dirs)
+        self.repo_config = repo_config or self._load_repo_config()
+        self.template_pack = template_pack or (
+            self.repo_config.templates_pack  # type: ignore[attr-defined]
+            if self.repo_config and getattr(self.repo_config, "templates_pack", None)
+            else "default"
+        )
 
         # Template directories
+        self._template_dir_types: Dict[Path, str] = {}
         self.template_dirs = self._discover_template_directories()
+
+        if not self.template_dirs:
+            raise TemplateEngineError("No template directories discovered. Ensure templates are available.")
 
         # Security mode setup
         self.security_mode = security_mode
@@ -127,31 +148,77 @@ class Jinja2TemplateEngine:
 
         template_logger.debug(f"Initialized template engine for project '{project_name}' with {len(self.template_dirs)} template directories")
 
+    def _load_repo_config(self) -> Optional["RepoConfig"]:
+        """Attempt to load per-repo configuration for template packs/custom dirs."""
+        if RepoDiscovery is None:
+            return None
+        try:
+            repo_root = RepoDiscovery.find_repo_root(self.project_root)
+            if repo_root:
+                self.repo_root = repo_root
+                return RepoDiscovery.load_config(repo_root)
+        except Exception as exc:  # pragma: no cover - config optional
+            template_logger.debug(f"Repo config load skipped: {exc}")
+        return None
+
     def _discover_template_directories(self) -> List[Path]:
         """Discover template directories in order of precedence."""
-        template_dirs = []
+        template_dirs: List[Path] = []
+        seen: Set[Path] = set()
+
+        def add_dir(path: Optional[Path], dir_type: str) -> None:
+            if not path:
+                return
+            try:
+                resolved = path.resolve()
+            except FileNotFoundError:
+                resolved = path
+            if not resolved.exists() or not resolved.is_dir():
+                template_logger.debug(f"Skipping missing template directory: {resolved}")
+                return
+            if resolved in seen:
+                return
+            template_dirs.append(resolved)
+            self._template_dir_types[resolved] = dir_type
+            seen.add(resolved)
+            template_logger.debug(f"Registered template directory ({dir_type}): {resolved}")
 
         # 1. Project-specific custom templates (.scribe/templates/)
-        project_templates_dir = self.project_root / ".scribe" / "templates"
-        if project_templates_dir.exists():
-            template_dirs.append(project_templates_dir)
-            template_logger.debug(f"Found project templates: {project_templates_dir}")
+        add_dir(self.project_root / ".scribe" / "templates", "project_custom")
 
-        # 2. Global custom templates (MCP_SPINE/scribe_mcp/templates/custom/)
+        # 2. Repo-level custom templates if configured
+        if self.repo_config and getattr(self.repo_config, "custom_templates_dir", None):
+            add_dir(self.repo_config.custom_templates_dir, "repo_custom")  # type: ignore[attr-defined]
+
+        # 3. Project-root templates directory (optional pattern some repos use)
+        add_dir(self.project_root / "templates", "project_templates")
+
+        # 4. Built-in / global templates bundled with Scribe MCP
         try:
-            template_root_path = get_template_root()
-            global_custom_dir = template_root_path.parent / "templates" / "custom"
-            if global_custom_dir.exists():
-                template_dirs.append(global_custom_dir)
-                template_logger.debug(f"Found global custom templates: {global_custom_dir}")
+            builtin_root = get_template_root()
+        except Exception as exc:
+            template_logger.warning(f"Could not determine built-in template root: {exc}")
+            builtin_root = None
 
-            # 3. Built-in fragments (MCP_SPINE/scribe_mcp/templates/fragments/)
-            fragments_dir = template_root_path.parent / "fragments"
-            if fragments_dir.exists():
-                template_dirs.append(fragments_dir)
-                template_logger.debug(f"Found built-in fragments: {fragments_dir}")
-        except Exception as e:
-            template_logger.warning(f"Could not load built-in templates: {e}")
+        if builtin_root:
+            add_dir(builtin_root / "custom", "builtin_custom")
+
+            # Template pack directories (default pack lives under packs/<name>)
+            pack_candidates = [
+                builtin_root / "packs" / self.template_pack,
+                builtin_root / self.template_pack,  # legacy layout fallback
+            ]
+            for pack_dir in pack_candidates:
+                if pack_dir.exists():
+                    add_dir(pack_dir, f"pack:{self.template_pack}")
+                    add_dir(pack_dir / "documents", f"pack_documents:{self.template_pack}")
+                    add_dir(pack_dir / "fragments", f"pack_fragments:{self.template_pack}")
+                    break  # stop after first matching pack layout
+
+            # Core built-in documents/fragments
+            add_dir(builtin_root, "builtin_root")
+            add_dir(builtin_root / "documents", "builtin_documents")
+            add_dir(builtin_root / "fragments", "builtin_fragments")
 
         return template_dirs
 
@@ -260,6 +327,7 @@ class Jinja2TemplateEngine:
         context.update({
             "project_name": self.project_name,
             "project_slug": self.project_slug,
+            "project_root": str(self.project_root),
         })
 
         # Add time variables that were declared in defaults but never populated
@@ -267,15 +335,40 @@ class Jinja2TemplateEngine:
         context.update({
             "timestamp": now.strftime("%Y-%m-%d %H:%M:%S UTC"),
             "utcnow": now.isoformat(),
+            "date_utc": now.strftime("%Y-%m-%d %H:%M:%S UTC"),
         })
+
+        # Provide sensible defaults for legacy-compatible fields
+        context.setdefault("author", "Scribe")
 
         # Add custom variables
         custom_vars = self.load_custom_variables()
         context.update(custom_vars)
 
-        # Add runtime metadata
-        if metadata:
-            context.update(metadata)
+        # Add runtime metadata (both as dict + flattened keys)
+        metadata_payload = metadata.copy() if isinstance(metadata, dict) else {}
+        context["metadata"] = metadata_payload
+        if metadata_payload:
+            context.update(metadata_payload)
+
+        # Mirror key fields using uppercase variants for backward compatibility
+        uppercase_keys = {
+            "project_name",
+            "project_slug",
+            "project_root",
+            "timestamp",
+            "utcnow",
+            "date_utc",
+            "author",
+            "agent",
+            "version",
+            "status",
+        }
+        for key in uppercase_keys:
+            value = context.get(key)
+            if value is None:
+                continue
+            context[key.upper()] = value
 
         return context
 
@@ -481,14 +574,7 @@ class Jinja2TemplateEngine:
                 info["size_bytes"] = template_path.stat().st_size
                 info["line_count"] = len(template_path.read_text(encoding='utf-8').splitlines())
                 info["last_modified"] = template_path.stat().st_mtime
-
-                # Determine template type based on directory
-                if ".scribe/templates" in str(template_dir):
-                    info["template_type"] = "project_custom"
-                elif "templates/custom" in str(template_dir):
-                    info["template_type"] = "global_custom"
-                elif "fragments" in str(template_dir):
-                    info["template_type"] = "built_in"
+                info["template_type"] = self._template_dir_types.get(template_dir, "unknown")
                 break
 
         return info

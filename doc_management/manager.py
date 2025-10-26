@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, Tuple
 from scribe_mcp.utils.files import async_atomic_write, ensure_parent
 from scribe_mcp.utils.time import utcnow
 from scribe_mcp.templates import template_root
-from scribe_mcp.tools.project_utils import slugify_project_name
+import re
 
 # Setup logging for doc management operations
 doc_logger = logging.getLogger(__name__)
@@ -114,6 +114,7 @@ async def apply_doc_change(
 ) -> DocChangeResult:
     """Apply a document change with comprehensive error handling and verification."""
     start_time = time.time()
+    file_size_before = 0
 
     try:
         # Validate inputs
@@ -590,3 +591,10 @@ class DefaultDict(dict):
 
     def __missing__(self, key: str) -> str:
         return ""
+_SLUG_CLEANER = re.compile(r"[^0-9a-z_]+")
+
+
+def slugify_project_name(name: str) -> str:
+    """Return a filesystem-friendly slug; duplicated here to avoid circular imports during tests."""
+    normalised = name.strip().lower().replace(" ", "_")
+    return _SLUG_CLEANER.sub("_", normalised).strip("_") or "project"

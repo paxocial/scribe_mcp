@@ -1,22 +1,17 @@
-{% extends "documents/base_log.md" %}
-{% from "documents/base_log.md" import rotation_notice with context %}
 
-{% block log_metadata %}
-{% set log_config.title = "Bug Log" %}
-{% set log_config.icon = "🐞" %}
-{% set log_config.summary = 'Track bug discoveries, investigations, and resolutions. Use `log_type="bugs"` (or `--log bugs`).' %}
-{% endblock %}
+# 🐞 Bug Log — Jinja Template Test
+**Maintained By:** Scribe
+**Timezone:** UTC
 
-{% block log_body %}
-{% set rotation_raw = metadata.get("is_rotation", metadata.get("IS_ROTATION", is_rotation | default("false"))) %}
-{% set rotation_active = rotation_raw in [True, "true", "True", 1, "1", "yes", "YES"] %}
-{% if rotation_active %}
-{{ rotation_notice(metadata) }}
-{% endif %}
+> Track bug discoveries, investigations, and resolutions. Use `log_type="bugs"` (or `--log bugs`).
+
+---
+
+
 
 ## Entry Format
 ```
-[EMOJI] [YYYY-MM-DD HH:MM:SS UTC] [Agent: <name>] [Project: {{ project_name or PROJECT_NAME }}] Message text | severity=<severity>; component=<component>; status=<status>; [additional metadata]
+[EMOJI] [YYYY-MM-DD HH:MM:SS UTC] [Agent: <name>] [Project: Jinja Template Test] Message text | severity=<severity>; component=<component>; status=<status>; [additional metadata]
 ```
 
 **Required Metadata Fields:**
@@ -73,4 +68,3 @@
 ---
 
 ## Entries will populate below
-{% endblock %}

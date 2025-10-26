@@ -1,22 +1,17 @@
-{% extends "documents/base_log.md" %}
-{% from "documents/base_log.md" import rotation_notice with context %}
 
-{% block log_metadata %}
-{% set log_config.title = "Documentation Update Log" %}
-{% set log_config.icon = "📋" %}
-{% set log_config.summary = 'Track every structured documentation change. Use `log_type="doc_updates"` (or `--log doc_updates`).' %}
-{% endblock %}
+# 📋 Documentation Update Log — Jinja Template Test
+**Maintained By:** Scribe
+**Timezone:** UTC
 
-{% block log_body %}
-{% set rotation_raw = metadata.get("is_rotation", metadata.get("IS_ROTATION", is_rotation | default("false"))) %}
-{% set rotation_active = rotation_raw in [True, "true", "True", 1, "1", "yes", "YES"] %}
-{% if rotation_active %}
-{{ rotation_notice(metadata) }}
-{% endif %}
+> Track every structured documentation change. Use `log_type="doc_updates"` (or `--log doc_updates`).
+
+---
+
+
 
 ## Entry Format
 ```
-[EMOJI] [YYYY-MM-DD HH:MM:SS UTC] [Agent: <name>] [Project: {{ project_name or PROJECT_NAME }}] Message text | doc=<doc_name>; section=<section_id>; action=<action_type>; [additional metadata]
+[EMOJI] [YYYY-MM-DD HH:MM:SS UTC] [Agent: <name>] [Project: Jinja Template Test] Message text | doc=<doc_name>; section=<section_id>; action=<action_type>; [additional metadata]
 ```
 
 **Required Metadata Fields:**
@@ -45,4 +40,3 @@
 ---
 
 ## Entries will populate below
-{% endblock %}
