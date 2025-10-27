@@ -172,11 +172,10 @@ class VectorIndexer(HookPlugin):
             return
 
         try:
-            future = asyncio.run_coroutine_threadsafe(
-                self._queue_entry_for_embedding(entry_data),
-                self._loop
+            # Schedule the coroutine as a task on the background loop
+            self._loop.call_soon_threadsafe(
+                lambda: self._loop.create_task(self._queue_entry_for_embedding(entry_data))
             )
-            future.add_done_callback(self._log_async_error)
         except Exception as e:
             plugin_logger.error(f"Failed to queue entry for vector indexing: {e}")
 
@@ -289,7 +288,8 @@ class VectorIndexer(HookPlugin):
             embedding_model_version=getattr(self.embedding_model, 'version', 'unknown')
         )
 
-        # Save initial metadata
+        # Save index and metadata
+        faiss.write_index(self.vector_index, str(index_path))
         self._save_index_metadata(metadata_path)
         plugin_logger.info(f"Created new vector index: {dimension}D")
 

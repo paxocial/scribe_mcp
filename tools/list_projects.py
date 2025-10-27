@@ -2,17 +2,34 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from scribe_mcp import server as server_module
 from scribe_mcp.server import app
 from scribe_mcp.tools.project_utils import load_active_project
 from scribe_mcp import reminders
+from scribe_mcp.utils.response import default_formatter
+from scribe_mcp.utils.tokens import token_estimator
 
 
 @app.tool()
-async def list_projects() -> Dict[str, Any]:
-    """Return projects registered in the database or state cache."""
+async def list_projects(
+    limit: Optional[int] = None,
+    filter: Optional[str] = None,
+    compact: bool = False,
+    fields: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Return projects registered in the database or state cache.
+
+    Args:
+        limit: Maximum number of projects to return
+        filter: Filter projects by name (case-insensitive substring match)
+        compact: Use compact response format with short field names
+        fields: Specific fields to include in response
+
+    Returns:
+        Projects list with optional filtering and formatting
+    """
     state_snapshot = await server_module.state_manager.record_tool("list_projects")
     state = await server_module.state_manager.load()
     projects_map: Dict[str, Dict[str, Any]] = {}
@@ -49,7 +66,25 @@ async def list_projects() -> Dict[str, Any]:
             "defaults": active_project.get("defaults"),
         }
 
-    ordered = sorted(projects_map.values(), key=lambda item: item["name"].lower())
+    # Convert to list and apply filters
+    projects_list = list(projects_map.values())
+
+    # Apply name filter if provided
+    if filter:
+        filter_lower = filter.lower()
+        projects_list = [
+            project for project in projects_list
+            if filter_lower in project.get("name", "").lower()
+        ]
+
+    # Sort by name
+    ordered = sorted(projects_list, key=lambda item: item["name"].lower())
+
+    # Apply limit if provided
+    if limit is not None and limit > 0:
+        ordered = ordered[:limit]
+
+    # Get reminders
     reminders_payload: List[Dict[str, Any]] = []
     if active_project:
         reminders_payload = await reminders.get_reminders(
@@ -57,10 +92,32 @@ async def list_projects() -> Dict[str, Any]:
             tool_name="list_projects",
             state=state_snapshot,
         )
-    return {
-        "ok": True,
-        "projects": ordered,
-        "recent_projects": list(recent),
-        "active_project": active_project.get("name") if active_project else None,
-        "reminders": reminders_payload,
-    }
+
+    # Format response using the projects formatter
+    response = default_formatter.format_projects_response(
+        projects=ordered,
+        compact=compact,
+        fields=fields,
+        extra_data={
+            "recent_projects": list(recent),
+            "active_project": active_project.get("name") if active_project else None,
+            "reminders": reminders_payload,
+        }
+    )
+
+    # Record token usage
+    if token_estimator:
+        token_estimator.record_operation(
+            operation="list_projects",
+            input_data={
+                "limit": limit,
+                "filter": filter,
+                "compact": compact,
+                "fields": fields
+            },
+            response=response,
+            compact_mode=compact,
+            page_size=len(ordered)
+        )
+
+    return response

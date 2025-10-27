@@ -11,6 +11,10 @@ from typing import Any, Dict, List, Optional
 from scribe_mcp import server as server_module
 from scribe_mcp.server import app
 from scribe_mcp.tools.agent_project_utils import get_agent_project_data
+import logging
+
+# For backward compatibility with tests
+server = server_module
 
 
 def _get_vector_indexer():
@@ -35,20 +39,24 @@ def register_vector_tools():
     This function should be called after plugin loading is complete.
     Returns True if tools were registered, False otherwise.
     """
+
     try:
         # Check if vector indexer is available and initialized
-        if _get_vector_indexer():
+        indexer = _get_vector_indexer()
+        if indexer and getattr(indexer, 'initialized', False):
             # Register the tools
             app.tool()(vector_search)
             app.tool()(retrieve_by_uuid)
             app.tool()(vector_index_status)
             app.tool()(rebuild_vector_index)
+            logging.debug("Vector tools registered successfully")
             return True
-        return False
+        else:
+            logging.debug("Vector tools not registered: vector indexer plugin not available or not initialized")
+            return False
     except Exception as e:
         # Silently fail - tools just won't be available
-        import logging
-        logging.getLogger(__name__).debug(f"Vector tools not registered: {e}")
+        logging.warning(f"Vector tools not registered due to exception: {e}")
         return False
 
 

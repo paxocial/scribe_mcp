@@ -219,6 +219,7 @@ class SQLiteStorage(StorageBackend):
         project: ProjectRecord,
         limit: int,
         filters: Optional[Dict[str, Any]] = None,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         await self._initialise()
         filters = filters or {}
@@ -242,9 +243,9 @@ class SQLiteStorage(StorageBackend):
             FROM scribe_entries
             WHERE {where_clause}
             ORDER BY ts_iso DESC
-            LIMIT ?;
+            LIMIT ? OFFSET ?;
             """,
-            (*params, limit),
+            (*params, limit, offset),
         )
         results: List[Dict[str, Any]] = []
         for row in rows:
@@ -275,6 +276,7 @@ class SQLiteStorage(StorageBackend):
         message_mode: str = "substring",
         case_sensitive: bool = False,
         meta_filters: Optional[Dict[str, str]] = None,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         await self._initialise()
         limit = max(1, min(limit, 500))
@@ -313,9 +315,9 @@ class SQLiteStorage(StorageBackend):
             FROM scribe_entries
             WHERE {where_clause}
             ORDER BY ts_iso DESC
-            LIMIT ?;
+            LIMIT ? OFFSET ?;
             """,
-            (*params, fetch_limit),
+            (*params, fetch_limit, offset),
         )
 
         results: List[Dict[str, Any]] = []
@@ -341,6 +343,121 @@ class SQLiteStorage(StorageBackend):
             if len(results) >= limit:
                 break
         return results
+
+    async def count_entries(
+        self,
+        project: ProjectRecord,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Efficient count implementation using COUNT query."""
+        await self._initialise()
+        filters = filters or {}
+        clauses = ["project_id = ?"]
+        params: List[Any] = [project.id]
+
+        agent = filters.get("agent")
+        if agent:
+            clauses.append("agent = ?")
+            params.append(agent)
+
+        emoji = filters.get("emoji")
+        if emoji:
+            clauses.append("emoji = ?")
+            params.append(emoji)
+
+        where_clause = " AND ".join(clauses)
+        row = await self._fetchone(
+            f"""
+            SELECT COUNT(*) as count
+            FROM scribe_entries
+            WHERE {where_clause};
+            """,
+            tuple(params),
+        )
+        return row["count"] if row else 0
+
+    async def count_query_entries(
+        self,
+        *,
+        project: ProjectRecord,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        agents: Optional[List[str]] = None,
+        emojis: Optional[List[str]] = None,
+        message: Optional[str] = None,
+        message_mode: str = "substring",
+        case_sensitive: bool = False,
+        meta_filters: Optional[Dict[str, str]] = None,
+    ) -> int:
+        """Efficient count for query_entries."""
+        await self._initialise()
+
+        clauses = ["project_id = ?"]
+        params: List[Any] = [project.id]
+
+        if start:
+            clauses.append("ts_iso >= ?")
+            params.append(start)
+        if end:
+            clauses.append("ts_iso <= ?")
+            params.append(end)
+
+        if agents:
+            agent_placeholders = ", ".join("?" for _ in agents)
+            clauses.append(f"agent IN ({agent_placeholders})")
+            params.extend(agents)
+
+        if emojis:
+            emoji_placeholders = ", ".join("?" for _ in emojis)
+            clauses.append(f"emoji IN ({emoji_placeholders})")
+            params.extend(emojis)
+
+        if meta_filters:
+            for key, value in sorted(meta_filters.items()):
+                clauses.append("json_extract(meta, ?) = ?")
+                params.append(f"$.{key}")
+                params.append(value)
+
+        where_clause = " AND ".join(clauses)
+        row = await self._fetchone(
+            f"""
+            SELECT COUNT(*) as count
+            FROM scribe_entries
+            WHERE {where_clause};
+            """,
+            tuple(params),
+        )
+
+        count = row["count"] if row else 0
+
+        # Apply message filtering if needed (can't do this efficiently in SQL for complex patterns)
+        if message:
+            # Need to fetch and filter messages for counting
+            # This is less efficient but necessary for message pattern matching
+            fetch_limit = min(count, 10000)  # Limit to prevent excessive memory usage
+            rows = await self._fetchall(
+                f"""
+                SELECT message
+                FROM scribe_entries
+                WHERE {where_clause}
+                LIMIT ?;
+                """,
+                (*params, fetch_limit),
+            )
+
+            matching_count = 0
+            for row in rows:
+                if message_matches(
+                    row["message"],
+                    message,
+                    mode=message_mode,
+                    case_sensitive=case_sensitive,
+                ):
+                    matching_count += 1
+
+            return matching_count
+
+        return count
 
     async def _initialise(self) -> None:
         async with self._init_lock:

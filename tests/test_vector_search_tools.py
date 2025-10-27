@@ -353,8 +353,8 @@ class TestVectorToolRegistration:
             result = register_vector_tools()
 
             assert result is True
-            # Should have registered 3 tools
-            assert mock_app.tool.call_count == 3
+            # Should have registered 4 tools
+            assert mock_app.tool.call_count == 4
 
     def test_register_vector_tools_no_plugin(self):
         """Test tool registration when no plugin is available."""

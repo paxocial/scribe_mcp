@@ -8,6 +8,8 @@ pytest-asyncio>=0.23
 portalocker>=2.0
 pyyaml>=6.0
 watchdog>=3.0.0
+# Token estimation for accurate analytics
+tiktoken>=0.5.0
 # Vector indexing dependencies
 faiss-cpu>=1.7.0
 sentence-transformers>=2.0.0

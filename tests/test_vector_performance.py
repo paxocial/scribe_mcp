@@ -434,18 +434,23 @@ class TestVectorScalability:
 
     def test_large_index_scalability(self, temp_repo):
         """Test scalability with large index sizes."""
-        with patch('scribe_mcp.plugins.vector_indexer.settings') as mock_settings:
-            mock_settings.vector_enabled = True
-            mock_settings.vector_dimension = 384
-            mock_settings.vector_model = "all-MiniLM-L6-v2"
-            mock_settings.vector_gpu = False
-            mock_settings.vector_queue_max = 10000
-            mock_settings.vector_batch_size = 128
+        with patch('scribe_mcp.plugins.vector_indexer.load_vector_config') as mock_load_config:
+            # Mock vector config with large values for performance testing
+            mock_config_obj = MagicMock()
+            mock_config_obj.enabled = True
+            mock_config_obj.backend = "faiss"
+            mock_config_obj.dimension = 384
+            mock_config_obj.model = "all-MiniLM-L6-v2"
+            mock_config_obj.gpu = False
+            mock_config_obj.queue_max = 10000
+            mock_config_obj.batch_size = 128
+            mock_load_config.return_value = mock_config_obj
 
             config = MagicMock(spec=RepoConfig)
             config.repo_root = temp_repo
             config.plugins_dir = temp_repo / "plugins"
             config.plugin_config = {"enabled": True}
+            config.repo_slug = "tmp"  # Add missing repo_slug attribute
 
             indexer = VectorIndexer()
             indexer.initialize(config)

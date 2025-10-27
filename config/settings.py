@@ -51,6 +51,16 @@ class Settings:
     vector_gpu: bool
     vector_queue_max: int
     vector_batch_size: int
+    # Token optimization settings
+    default_page_size: int
+    max_page_size: int
+    default_compact_mode: bool
+    token_warning_threshold: int
+    token_daily_limit: int
+    token_operation_limit: int
+    token_warning_threshold_percent: float
+    default_field_selection: List[str]
+    tokenizer_model: str
 
     @classmethod
     def load(cls) -> "Settings":
@@ -108,6 +118,27 @@ class Settings:
         vector_queue_max = max(1, vector_config.queue_max)
         vector_batch_size = max(1, vector_config.batch_size)
 
+        # Token optimization configuration
+        default_page_size = max(1, _int_env("SCRIBE_DEFAULT_PAGE_SIZE", 50))
+        max_page_size = max(1, _int_env("SCRIBE_MAX_PAGE_SIZE", 100))
+        default_compact_mode = os.environ.get("SCRIBE_DEFAULT_COMPACT_MODE", "false").lower() in {
+            "1", "true", "yes"
+        }
+        token_warning_threshold = max(100, _int_env("SCRIBE_TOKEN_WARNING_THRESHOLD", 4000))
+        token_daily_limit = max(1000, _int_env("SCRIBE_TOKEN_DAILY_LIMIT", 100000))
+        token_operation_limit = max(100, _int_env("SCRIBE_TOKEN_OPERATION_LIMIT", 8000))
+        token_warning_threshold_percent = max(0.1, min(1.0,
+            float(os.environ.get("SCRIBE_TOKEN_WARNING_THRESHOLD_PERCENT", "0.8"))
+        ))
+
+        # Default field selection for compact mode
+        default_fields_raw = os.environ.get("SCRIBE_DEFAULT_FIELD_SELECTION",
+            "id,message,timestamp,emoji,agent")
+        default_field_selection = [field.strip() for field in default_fields_raw.split(",") if field.strip()]
+
+        # Tokenizer model
+        tokenizer_model = os.environ.get("SCRIBE_TOKENIZER_MODEL", "gpt-4")
+
         return cls(
             project_root=project_root,
             default_state_path=state_path,
@@ -132,6 +163,15 @@ class Settings:
             vector_gpu=vector_gpu,
             vector_queue_max=vector_queue_max,
             vector_batch_size=vector_batch_size,
+            default_page_size=default_page_size,
+            max_page_size=max_page_size,
+            default_compact_mode=default_compact_mode,
+            token_warning_threshold=token_warning_threshold,
+            token_daily_limit=token_daily_limit,
+            token_operation_limit=token_operation_limit,
+            token_warning_threshold_percent=token_warning_threshold_percent,
+            default_field_selection=default_field_selection,
+            tokenizer_model=tokenizer_model,
         )
 
 

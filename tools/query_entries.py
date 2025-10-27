@@ -14,6 +14,8 @@ from scribe_mcp.tools.project_utils import load_active_project, load_project_con
 from scribe_mcp.utils.logs import parse_log_line, read_all_lines
 from scribe_mcp.utils.search import message_matches
 from scribe_mcp.utils.time import coerce_range_boundary
+from scribe_mcp.utils.response import default_formatter, create_pagination_info
+from scribe_mcp.utils.tokens import token_estimator
 from scribe_mcp import reminders
 
 VALID_MESSAGE_MODES = {"substring", "regex", "exact"}
@@ -32,11 +34,46 @@ async def query_entries(
     status: Optional[List[str]] = None,
     agents: Optional[List[str]] = None,
     meta_filters: Optional[Dict[str, Any]] = None,
-    limit: int = 100,
+    limit: int = 50,
+    page: int = 1,
+    page_size: int = 50,
+    compact: bool = False,
+    fields: Optional[List[str]] = None,
+    include_metadata: bool = True,
 ) -> Dict[str, Any]:
-    """Search the project log with flexible filters."""
+    """Search the project log with flexible filters and pagination.
+
+    Args:
+        project: Project name (uses active project if None)
+        start: Start timestamp filter
+        end: End timestamp filter
+        message: Message text filter
+        message_mode: How to match message (substring, regex, exact)
+        case_sensitive: Case sensitive message matching
+        emoji: Filter by emoji(s)
+        status: Filter by status(es) (mapped to emojis)
+        agents: Filter by agent name(s)
+        meta_filters: Filter by metadata key/value pairs
+        limit: Maximum results to return (legacy, for backward compatibility)
+        page: Page number for pagination (1-based)
+        page_size: Number of results per page
+        compact: Use compact response format with short field names
+        fields: Specific fields to include in response
+        include_metadata: Include metadata field in entries
+
+    Returns:
+        Paginated response with entries and metadata
+    """
     state_snapshot = await server_module.state_manager.record_tool("query_entries")
-    limit = max(1, min(limit, 500))
+
+    # Handle pagination vs legacy limit
+    if page > 1 or page_size != 50:
+        # Use pagination mode
+        limit = None  # Ignore limit in pagination mode
+    else:
+        # Use legacy mode for backward compatibility
+        limit = max(1, min(limit or 50, 500))
+        page_size = limit
     message_mode = (message_mode or "substring").lower()
     if message_mode not in VALID_MESSAGE_MODES:
         return {"ok": False, "error": f"Unsupported message_mode '{message_mode}'."}
@@ -78,51 +115,157 @@ async def query_entries(
                 repo_root=project_data["root"],
                 progress_log_path=project_data["progress_log"],
             )
-        rows = await backend.query_entries(
-            project=record,
-            limit=limit,
-            start=start_bound.isoformat() if start_bound else None,
-            end=end_bound.isoformat() if end_bound else None,
-            agents=_clean_list(agents),
-            emojis=normalised_emoji or None,
-            message=message,
-            message_mode=message_mode,
-            case_sensitive=case_sensitive,
-            meta_filters=meta_normalised or None,
-        )
+
+        # Use pagination if available
+        if hasattr(backend, 'query_entries_paginated'):
+            rows, total_count = await backend.query_entries_paginated(
+                project=record,
+                page=page,
+                page_size=page_size,
+                start=start_bound.isoformat() if start_bound else None,
+                end=end_bound.isoformat() if end_bound else None,
+                agents=_clean_list(agents),
+                emojis=normalised_emoji or None,
+                message=message,
+                message_mode=message_mode,
+                case_sensitive=case_sensitive,
+                meta_filters=meta_normalised or None,
+            )
+            pagination_info = create_pagination_info(page, page_size, total_count)
+        else:
+            # Fallback to legacy method
+            offset = (page - 1) * page_size
+            rows = await backend.query_entries(
+                project=record,
+                limit=page_size,
+                start=start_bound.isoformat() if start_bound else None,
+                end=end_bound.isoformat() if end_bound else None,
+                agents=_clean_list(agents),
+                emojis=normalised_emoji or None,
+                message=message,
+                message_mode=message_mode,
+                case_sensitive=case_sensitive,
+                meta_filters=meta_normalised or None,
+                offset=offset,
+            )
+            # Get total count (less efficient fallback)
+            total_count = await backend.count_query_entries(
+                project=record,
+                start=start_bound.isoformat() if start_bound else None,
+                end=end_bound.isoformat() if end_bound else None,
+                agents=_clean_list(agents),
+                emojis=normalised_emoji or None,
+                message=message,
+                message_mode=message_mode,
+                case_sensitive=case_sensitive,
+                meta_filters=meta_normalised or None,
+            )
+            pagination_info = create_pagination_info(page, page_size, total_count)
+
         reminders_payload = await reminders.get_reminders(
             project_data,
             tool_name="query_entries",
             state=state_snapshot,
         )
-        return {
-            "ok": True,
-            "entries": rows,
+
+        # Format response using the response formatter
+        response = default_formatter.format_response(
+            entries=rows,
+            compact=compact,
+            fields=fields,
+            include_metadata=include_metadata,
+            pagination=pagination_info,
+            extra_data={
+                "recent_projects": list(recent),
+                "reminders": reminders_payload,
+            }
+        )
+
+        # Record token usage
+        if token_estimator:
+            token_estimator.record_operation(
+                operation="query_entries",
+                input_data={
+                    "project": project,
+                    "start": start,
+                    "end": end,
+                    "message": message,
+                    "page": page,
+                    "page_size": page_size,
+                    "compact": compact,
+                    "fields": fields,
+                    "include_metadata": include_metadata
+                },
+                response=response,
+                compact_mode=compact,
+                page_size=page_size
+            )
+
+        return response
+
+    # File-based fallback with pagination
+    all_entries = await _query_file(
+        project_data,
+        limit=None,  # Get all matching entries
+        start=start_bound,
+        end=end_bound,
+        message=message,
+        message_mode=message_mode,
+        case_sensitive=case_sensitive,
+        agents=_clean_list(agents),
+        emojis=normalised_emoji or None,
+        meta_filters=meta_normalised or None,
+    )
+
+    # Apply pagination to file-based results
+    total_count = len(all_entries)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_entries = all_entries[start_idx:end_idx]
+
+    pagination_info = create_pagination_info(page, page_size, total_count)
+
+    reminders_payload = await reminders.get_reminders(
+        project_data,
+        tool_name="query_entries",
+        state=state_snapshot,
+    )
+
+    # Format response using the response formatter
+    response = default_formatter.format_response(
+        entries=paginated_entries,
+        compact=compact,
+        fields=fields,
+        include_metadata=include_metadata,
+        pagination=pagination_info,
+        extra_data={
             "recent_projects": list(recent),
             "reminders": reminders_payload,
         }
+    )
 
-    return {
-        "ok": True,
-        "entries": await _query_file(
-            project_data,
-            limit=limit,
-            start=start_bound,
-            end=end_bound,
-            message=message,
-            message_mode=message_mode,
-            case_sensitive=case_sensitive,
-            agents=_clean_list(agents),
-            emojis=normalised_emoji or None,
-            meta_filters=meta_normalised or None,
-        ),
-        "recent_projects": list(recent),
-        "reminders": await reminders.get_reminders(
-            project_data,
-            tool_name="query_entries",
-            state=state_snapshot,
-        ),
-    }
+    # Record token usage
+    if token_estimator:
+        token_estimator.record_operation(
+            operation="query_entries",
+            input_data={
+                "project": project,
+                "start": start,
+                "end": end,
+                "message": message,
+                "page": page,
+                "page_size": page_size,
+                "compact": compact,
+                "fields": fields,
+                "include_metadata": include_metadata,
+                "backend": "file"
+            },
+            response=response,
+            compact_mode=compact,
+            page_size=page_size
+        )
+
+    return response
 
 
 async def _resolve_project(
@@ -143,7 +286,7 @@ async def _resolve_project(
 async def _query_file(
     project: Dict[str, Any],
     *,
-    limit: int,
+    limit: Optional[int],
     start: Optional[datetime],
     end: Optional[datetime],
     message: Optional[str],
@@ -192,7 +335,7 @@ async def _query_file(
         ):
             continue
         results.append(parsed)
-        if len(results) >= limit:
+        if limit is not None and len(results) >= limit:
             break
     return results
 

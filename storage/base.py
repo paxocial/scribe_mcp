@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from scribe_mcp.storage.models import ProjectRecord
 
@@ -78,8 +78,63 @@ class StorageBackend(ABC):
         project: ProjectRecord,
         limit: int,
         filters: Optional[Dict[str, Any]] = None,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """Return recent entries for the given project."""
+
+    async def fetch_recent_entries_paginated(
+        self,
+        *,
+        project: ProjectRecord,
+        page: int = 1,
+        page_size: int = 50,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Return recent entries with pagination metadata.
+
+        Args:
+            project: Project to fetch entries for
+            page: Page number (1-based)
+            page_size: Number of entries per page
+            filters: Optional filters to apply
+
+        Returns:
+            Tuple of (entries, total_count)
+        """
+        # Calculate offset
+        offset = (page - 1) * page_size
+
+        # Fetch entries for this page
+        entries = await self.fetch_recent_entries(
+            project=project,
+            limit=page_size,
+            filters=filters,
+            offset=offset
+        )
+
+        # Get total count (this varies by backend implementation)
+        total_count = await self.count_entries(project, filters)
+
+        return entries, total_count
+
+    async def count_entries(
+        self,
+        project: ProjectRecord,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """
+        Count total entries matching filters.
+        Default implementation - can be overridden by backends for better performance.
+        """
+        # Default implementation - fetch all and count (inefficient)
+        # Backends should override this with proper COUNT queries
+        all_entries = await self.fetch_recent_entries(
+            project=project,
+            limit=10000,  # Large limit to get most entries
+            filters=filters
+        )
+        return len(all_entries)
 
     async def query_entries(
         self,
@@ -94,8 +149,102 @@ class StorageBackend(ABC):
         message_mode: str = "substring",
         case_sensitive: bool = False,
         meta_filters: Optional[Dict[str, str]] = None,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """Advanced log query for the given project."""
+
+    async def query_entries_paginated(
+        self,
+        *,
+        project: ProjectRecord,
+        page: int = 1,
+        page_size: int = 50,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        agents: Optional[List[str]] = None,
+        emojis: Optional[List[str]] = None,
+        message: Optional[str] = None,
+        message_mode: str = "substring",
+        case_sensitive: bool = False,
+        meta_filters: Optional[Dict[str, str]] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Advanced log query with pagination.
+
+        Args:
+            project: Project to query
+            page: Page number (1-based)
+            page_size: Number of entries per page
+            Other parameters: same as query_entries
+
+        Returns:
+            Tuple of (entries, total_count)
+        """
+        # Calculate offset
+        offset = (page - 1) * page_size
+
+        # Query entries for this page
+        entries = await self.query_entries(
+            project=project,
+            limit=page_size,
+            start=start,
+            end=end,
+            agents=agents,
+            emojis=emojis,
+            message=message,
+            message_mode=message_mode,
+            case_sensitive=case_sensitive,
+            meta_filters=meta_filters,
+            offset=offset
+        )
+
+        # Get total count
+        total_count = await self.count_query_entries(
+            project=project,
+            start=start,
+            end=end,
+            agents=agents,
+            emojis=emojis,
+            message=message,
+            message_mode=message_mode,
+            case_sensitive=case_sensitive,
+            meta_filters=meta_filters
+        )
+
+        return entries, total_count
+
+    async def count_query_entries(
+        self,
+        *,
+        project: ProjectRecord,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        agents: Optional[List[str]] = None,
+        emojis: Optional[List[str]] = None,
+        message: Optional[str] = None,
+        message_mode: str = "substring",
+        case_sensitive: bool = False,
+        meta_filters: Optional[Dict[str, str]] = None,
+    ) -> int:
+        """
+        Count total entries matching query criteria.
+        Default implementation - can be overridden by backends for better performance.
+        """
+        # Default implementation - query all and count (inefficient)
+        # Backends should override this with proper COUNT queries
+        all_entries = await self.query_entries(
+            project=project,
+            limit=10000,  # Large limit to get most entries
+            start=start,
+            end=end,
+            agents=agents,
+            emojis=emojis,
+            message=message,
+            message_mode=message_mode,
+            case_sensitive=case_sensitive,
+            meta_filters=meta_filters
+        )
+        return len(all_entries)
 
     # Agent session and project context management
     @abstractmethod
