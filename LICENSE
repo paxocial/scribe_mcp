@@ -1,3 +1,4 @@
+SPDX-License-Identifier: MIT
 Copyright (c) 2025 Paxocial / Corta Labs
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -7,21 +8,26 @@ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
-1. The Software is provided “AS IS”, WITHOUT WARRANTY OF ANY KIND, express or
+1. The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+2. The Software is provided “AS IS”, WITHOUT WARRANTY OF ANY KIND, express or
    implied, including but not limited to the warranties of merchantability,
-   fitness for a particular purpose, and noninfringement.
+   fitness for a particular purpose, and noninfringement. In no event shall
+   the author or copyright holder be liable for any claim, damages, or other
+   liability, whether in an action of contract, tort, or otherwise, arising
+   from, out of, or in connection with the Software or the use or other
+   dealings in the Software.
 
-2. In no event shall the author or copyright holder be liable for any claim,
-   damages, or other liability, whether in an action of contract, tort, or
-   otherwise, arising from, out of, or in connection with the Software or the
-   use or other dealings in the Software.
+3. You acknowledge that you use this Software entirely at your own risk.
+   No support, maintenance, or guarantee of fitness for *anything* is provided.
 
-3. By using the Software, you acknowledge that you do so entirely at your own
-   risk. The author provides no support, maintenance, or guarantee of fitness
-   for any purpose.
+4. Attribution is appreciated but not required. If you do modify or
+   redistribute this Software, please don’t make us look bad.
 
-4. If you modify or redistribute this Software, you are encouraged (but not
-   required) to credit the original author.
+---
 
-TL;DR — Do whatever the fuck you want. Break it, fork it, tattoo it on your
-forehead. Just don’t come crying when it catches fire.
+### TL;DR (Unofficial Summary)
+
+Do whatever the hell you want — fork it, break it, ship it, teach it kung fu.  
+Just don’t sue anyone if it explodes or becomes self-aware.
