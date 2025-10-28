@@ -37,6 +37,7 @@ from scribe_mcp.templates import (
 )
 from scribe_mcp.utils.time import format_utc
 from scribe_mcp import reminders
+from scribe_mcp.tools.base.parameter_normalizer import normalize_dict_param
 
 
 @app.tool()
@@ -66,18 +67,32 @@ async def rotate_log(
     project, _, recent = await load_active_project(server_module.state_manager)
     reminders_payload: List[Dict[str, Any]] = []
 
-    # Parse custom metadata if provided
+    # Parse custom metadata with BaseTool parameter normalization
     parsed_metadata = None
     if custom_metadata:
         try:
-            parsed_metadata = json.loads(custom_metadata)
-        except json.JSONDecodeError:
-            return {
-                "ok": False,
-                "error": "Invalid JSON in custom_metadata parameter",
-                "suggestion": "Ensure custom_metadata is valid JSON string",
-                "recent_projects": list(recent),
-            }
+            # Use BaseTool parameter normalization for consistent MCP framework handling
+            normalized_metadata = normalize_dict_param(custom_metadata, "custom_metadata")
+            if isinstance(normalized_metadata, dict):
+                parsed_metadata = normalized_metadata
+            else:
+                # Fall back to original JSON parsing if normalization fails
+                pass
+        except ValueError:
+            # FALLBACK: Use original JSON parsing logic
+            pass
+
+        # Fallback to original JSON parsing if normalization failed
+        if parsed_metadata is None:
+            try:
+                parsed_metadata = json.loads(custom_metadata)
+            except json.JSONDecodeError:
+                return {
+                    "ok": False,
+                    "error": "Invalid JSON in custom_metadata parameter",
+                    "suggestion": "Ensure custom_metadata is valid JSON string",
+                    "recent_projects": list(recent),
+                }
 
     if not project:
         return {

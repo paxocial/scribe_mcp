@@ -30,6 +30,7 @@ from scribe_mcp.config.log_config import get_log_definition, resolve_log_path
 from scribe_mcp import reminders
 from scribe_mcp.utils.files import append_line, rotate_file
 from scribe_mcp.utils.time import format_utc, utcnow
+from scribe_mcp.tools.base.parameter_normalizer import normalize_dict_param, normalize_list_param
 
 _RATE_TRACKER: Dict[str, deque[float]] = defaultdict(deque)
 _RATE_LOCKS: Dict[str, asyncio.Lock] = {}
@@ -611,43 +612,57 @@ def _resolve_emoji(
 
 
 def _normalise_meta(meta: Optional[Dict[str, Any]]) -> tuple[tuple[str, str], ...]:
-    """Intelligently normalize metadata parameter with automatic JSON parsing and error recovery."""
+    """Intelligently normalize metadata parameter with automatic JSON parsing and error recovery.
+
+    Enhanced with BaseTool parameter normalization utilities for consistent handling
+    across all MCP tools while preserving all existing proven logic.
+    """
     if not meta:
         return ()
 
-    # INTELLIGENT RECOVERY: Try to parse JSON strings automatically
+    # Use BaseTool parameter normalization for consistent MCP framework handling
     if isinstance(meta, str):
         try:
-            meta = json.loads(meta)
-            if not isinstance(meta, dict):
-                # If JSON parses but isn't a dict, create error metadata
-                return (("parse_error", f"Expected dict, got {type(meta).__name__}"),)
-        except json.JSONDecodeError:
-            # EDGE CASE: Handle common "key=value,key2=value2" or "key=value key2=value2" pattern from CLI usage
-            if '=' in meta:
-                try:
-                    pairs = []
-                    # Try comma-separated first
-                    if ',' in meta:
-                        delimiter = ','
-                    else:
-                        delimiter = ' '
-
-                    for pair in meta.split(delimiter):
-                        pair = pair.strip()
-                        if '=' in pair:
-                            key, value = pair.split('=', 1)
-                            pairs.append((key.strip(), value.strip()))
-                        else:
-                            # If no equals, treat as message
-                            pairs.append(('message', pair.strip()))
-                    return tuple(pairs)
-                except Exception:
-                    # Fall back to treating as single message
-                    return (("message", meta),)
+            # Try our standardized normalization first (handles MCP framework JSON serialization)
+            normalized_meta = normalize_dict_param(meta, "meta")
+            if isinstance(normalized_meta, dict):
+                meta = normalized_meta
             else:
-                # If JSON parsing fails, treat the string as a single value
-                return (("message", meta),)
+                # Fallback to original logic if normalization fails
+                pass
+        except ValueError:
+            # FALLBACK: Use original proven logic for string handling
+            try:
+                meta = json.loads(meta)
+                if not isinstance(meta, dict):
+                    # If JSON parses but isn't a dict, create error metadata
+                    return (("parse_error", f"Expected dict, got {type(meta).__name__}"),)
+            except json.JSONDecodeError:
+                # EDGE CASE: Handle common "key=value,key2=value2" or "key=value key2=value2" pattern from CLI usage
+                if '=' in meta:
+                    try:
+                        pairs = []
+                        # Try comma-separated first
+                        if ',' in meta:
+                            delimiter = ','
+                        else:
+                            delimiter = ' '
+
+                        for pair in meta.split(delimiter):
+                            pair = pair.strip()
+                            if '=' in pair:
+                                key, value = pair.split('=', 1)
+                                pairs.append((key.strip(), value.strip()))
+                            else:
+                                # If no equals, treat as message
+                                pairs.append(('message', pair.strip()))
+                        return tuple(pairs)
+                    except Exception:
+                        # Fall back to treating as single message
+                        return (("message", meta),)
+                else:
+                    # If JSON parsing fails, treat the string as a single value
+                    return (("message", meta),)
 
     # Ensure we have a dictionary at this point
     if not isinstance(meta, dict):

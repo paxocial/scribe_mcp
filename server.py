@@ -173,6 +173,19 @@ async def _startup() -> None:
     if storage_backend:
         await storage_backend.setup()
 
+    # Initialize plugins for the current repository
+    try:
+        from scribe_mcp.config.repo_config import RepoConfig
+        from scribe_mcp.plugins.registry import initialize_plugins
+
+        # Create repository configuration for the current directory
+        repo_config = RepoConfig.from_directory(Path.cwd())
+        initialize_plugins(repo_config)
+        print("🔌 Plugin system initialized")
+    except Exception as e:
+        print(f"⚠️  Plugin initialization failed: {e}")
+        print("   💡 Continuing without plugins (vector search will not be available)")
+
     # Initialize AgentContextManager for agent-scoped project context
     if storage_backend and state_manager:
         agent_context_manager = init_agent_context_manager(storage_backend, state_manager)

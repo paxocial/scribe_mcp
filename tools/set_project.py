@@ -18,6 +18,7 @@ from scribe_mcp.tools.project_utils import (
     slugify_project_name,
 )
 from scribe_mcp import reminders
+from scribe_mcp.tools.base.parameter_normalizer import normalize_dict_param, normalize_list_param
 
 
 @app.tool()
@@ -30,6 +31,18 @@ async def set_project(
     overwrite_docs: bool = False,
     agent_id: Optional[str] = None,  # Agent identification (auto-detected if not provided)
     expected_version: Optional[int] = None,  # Optimistic concurrency control
+    # Advanced parameters
+    description: Optional[str] = None,  # Project description
+    tags: Optional[List[str]] = None,  # Project tags
+    template: Optional[str] = None,  # Custom template name
+    auto_create_dirs: bool = True,  # Auto-create missing directories
+    skip_validation: bool = False,  # Skip path validation for special cases
+    # Reminder and notification settings
+    reminder_settings: Optional[Dict[str, Any]] = None,
+    notification_config: Optional[Dict[str, Any]] = None,
+    # Quick emoji/agent settings (for convenience)
+    emoji: Optional[str] = None,  # Default emoji for the project
+    project_agent: Optional[str] = None,  # Default agent for the project (alias for agent_id)
 ) -> Dict[str, Any]:
     """Register the project (if needed) and mark it as the current context."""
     state_snapshot = await server_module.state_manager.record_tool("set_project")
@@ -42,6 +55,26 @@ async def set_project(
         else:
             agent_id = "Scribe"  # Fallback
 
+    # Use BaseTool parameter normalization for consistent MCP framework handling
+    if isinstance(defaults, str):
+        try:
+            # Try our standardized normalization first (handles MCP framework JSON serialization)
+            normalized_defaults = normalize_dict_param(defaults, "defaults")
+            if isinstance(normalized_defaults, dict):
+                defaults = normalized_defaults
+            else:
+                # Fall back to original JSON parsing if normalization fails
+                pass
+        except ValueError:
+            # FALLBACK: Use original JSON parsing logic
+            try:
+                import json
+                defaults = json.loads(defaults)
+                if not isinstance(defaults, dict):
+                    defaults = {}
+            except (json.JSONDecodeError, TypeError):
+                defaults = {}
+
     # Update agent activity tracking
     agent_identity = server_module.get_agent_identity()
     if agent_identity:
@@ -49,7 +82,22 @@ async def set_project(
             agent_id, "set_project", {"project_name": name, "expected_version": expected_version}
         )
 
-    defaults = _normalise_defaults(defaults or {})
+    # Use project_agent if provided (takes precedence over agent_id for this project)
+    if project_agent:
+        agent_id = project_agent
+
+    # Normalize tags parameter if provided
+    if isinstance(tags, str):
+        try:
+            normalized_tags = normalize_list_param(tags, "tags")
+            if isinstance(normalized_tags, list):
+                tags = normalized_tags
+            else:
+                tags = [tags]  # Fallback: treat as single item
+        except ValueError:
+            tags = [tags]  # Fallback: treat as single item
+
+    defaults = _normalise_defaults(defaults or {}, emoji, agent_id)
     try:
         resolved_root = _resolve_root(root)
     except ValueError as exc:
@@ -202,16 +250,32 @@ def _resolve_log(log: Optional[str], root_path: Path, docs_dir: Path) -> Path:
     return candidate
 
 
-def _normalise_defaults(defaults: Dict[str, Any]) -> Dict[str, Any]:
+def _normalise_defaults(
+    defaults: Dict[str, Any],
+    emoji_param: Optional[str] = None,
+    agent_param: Optional[str] = None
+) -> Dict[str, Any]:
     mapping = {}
-    if "emoji" in defaults and defaults["emoji"]:
-        mapping["emoji"] = defaults["emoji"]
-    if "agent" in defaults and defaults["agent"]:
-        mapping["agent"] = defaults["agent"]
-    if "default_emoji" in defaults and defaults["default_emoji"]:
-        mapping["emoji"] = defaults["default_emoji"]
-    if "default_agent" in defaults and defaults["default_agent"]:
-        mapping["agent"] = defaults["default_agent"]
+
+    # Handle emoji from multiple sources (priority: emoji param > defaults > various default_*)
+    emoji_value = emoji_param
+    if not emoji_value:
+        emoji_value = defaults.get("emoji") or defaults.get("default_emoji")
+    if emoji_value:
+        mapping["emoji"] = emoji_value
+
+    # Handle agent from multiple sources (priority: agent_param > defaults > various default_*)
+    agent_value = agent_param
+    if not agent_value:
+        agent_value = defaults.get("agent") or defaults.get("default_agent")
+    if agent_value:
+        mapping["agent"] = agent_value
+
+    # Copy other defaults (excluding the ones we've already handled)
+    for key, value in defaults.items():
+        if (key not in ["emoji", "default_emoji", "agent", "default_agent"]) and value is not None:
+            mapping[key] = value
+
     return mapping
 
 

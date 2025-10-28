@@ -9,6 +9,7 @@ from . import read_recent  # noqa: F401
 from . import rotate_log  # noqa: F401
 from . import set_project  # noqa: F401
 from . import manage_docs  # noqa: F401
+from . import vector_search  # noqa: F401
 
 __all__ = [
     "append_entry",
@@ -20,4 +21,5 @@ __all__ = [
     "rotate_log",
     "set_project",
     "manage_docs",
+    "vector_search",
 ]

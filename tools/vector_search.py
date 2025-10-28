@@ -46,6 +46,7 @@ def register_vector_tools():
         if indexer and getattr(indexer, 'initialized', False):
             # Register the tools
             app.tool()(vector_search)
+            app.tool()(semantic_search)
             app.tool()(retrieve_by_uuid)
             app.tool()(vector_index_status)
             app.tool()(rebuild_vector_index)
@@ -366,3 +367,28 @@ def _backup_existing_index(vector_indexer) -> Dict[str, Any]:
             "reason": f"Backup failed: {str(e)}",
             "attempted_directory": str(backup_dir)
         }
+
+
+# Also add a semantic_search alias for better naming convention
+async def semantic_search(
+    query: str,
+    k: int = 10,
+    project_slug: Optional[str] = None,
+    agent_name: Optional[str] = None,
+    time_start: Optional[str] = None,
+    time_end: Optional[str] = None,
+    min_similarity: Optional[float] = None
+) -> Dict[str, Any]:
+    """Alias for vector_search with more intuitive naming.
+
+    Provides semantic search capabilities using vector embeddings.
+    """
+    return await vector_search(
+        query=query,
+        k=k,
+        project_slug=project_slug,
+        agent_name=agent_name,
+        time_start=time_start,
+        time_end=time_end,
+        min_similarity=min_similarity
+    )

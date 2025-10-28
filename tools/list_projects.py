@@ -10,25 +10,32 @@ from scribe_mcp.tools.project_utils import load_active_project
 from scribe_mcp import reminders
 from scribe_mcp.utils.response import default_formatter
 from scribe_mcp.utils.tokens import token_estimator
+from scribe_mcp.utils.context_safety import ContextManager
 
 
 @app.tool()
 async def list_projects(
-    limit: Optional[int] = None,
+    limit: Optional[int] = 5,  # Changed default to 5 for context safety
     filter: Optional[str] = None,
     compact: bool = False,
     fields: Optional[List[str]] = None,
+    include_test: bool = False,  # New parameter to control test project visibility
+    page: int = 1,  # New pagination parameter
+    page_size: Optional[int] = None,  # New pagination size override
 ) -> Dict[str, Any]:
-    """Return projects registered in the database or state cache.
+    """Return projects registered in the database or state cache with intelligent filtering.
 
     Args:
-        limit: Maximum number of projects to return
+        limit: Maximum number of projects to return (default: 5 for context safety)
         filter: Filter projects by name (case-insensitive substring match)
         compact: Use compact response format with short field names
         fields: Specific fields to include in response
+        include_test: Include test/temp projects (default: False)
+        page: Page number for pagination (default: 1)
+        page_size: Number of items per page (default: 5 or limit if specified)
 
     Returns:
-        Projects list with optional filtering and formatting
+        Projects list with intelligent filtering, pagination, and context safety
     """
     state_snapshot = await server_module.state_manager.record_tool("list_projects")
     state = await server_module.state_manager.load()
@@ -66,10 +73,8 @@ async def list_projects(
             "defaults": active_project.get("defaults"),
         }
 
-    # Convert to list and apply filters
+    # Convert to list and apply name filter if provided
     projects_list = list(projects_map.values())
-
-    # Apply name filter if provided
     if filter:
         filter_lower = filter.lower()
         projects_list = [
@@ -78,11 +83,23 @@ async def list_projects(
         ]
 
     # Sort by name
-    ordered = sorted(projects_list, key=lambda item: item["name"].lower())
+    projects_list.sort(key=lambda item: item["name"].lower())
 
-    # Apply limit if provided
-    if limit is not None and limit > 0:
-        ordered = ordered[:limit]
+    # Initialize context manager for intelligent filtering and pagination
+    context_manager = ContextManager()
+
+    # Determine page size (use explicit page_size, then limit, then default)
+    effective_page_size = page_size or limit or context_manager.paginator.default_page_size
+
+    # Prepare context-safe response
+    context_response = context_manager.prepare_response(
+        items=projects_list,
+        response_type="projects",
+        include_test=include_test,
+        page=page,
+        page_size=effective_page_size,
+        compact=compact
+    )
 
     # Get reminders
     reminders_payload: List[Dict[str, Any]] = []
@@ -93,17 +110,37 @@ async def list_projects(
             state=state_snapshot,
         )
 
-    # Format response using the projects formatter
-    response = default_formatter.format_projects_response(
-        projects=ordered,
-        compact=compact,
-        fields=fields,
-        extra_data={
-            "recent_projects": list(recent),
-            "active_project": active_project.get("name") if active_project else None,
-            "reminders": reminders_payload,
+    # Format project entries using existing formatter
+    formatted_projects = []
+    for project in context_response["items"]:
+        formatted_project = {
+            k: v for k, v in project.items()
+            if not fields or k in fields
         }
-    )
+        formatted_projects.append(formatted_project)
+
+    # Build final response
+    response = {
+        "ok": True,
+        "projects": formatted_projects,
+        "count": len(formatted_projects),
+        "pagination": context_response["pagination"],
+        "total_available": context_response["total_available"],
+        "filtered": context_response["filtered"],
+        "recent_projects": list(recent),
+        "active_project": active_project.get("name") if active_project else None,
+        "reminders": reminders_payload,
+        "context_safety": context_response["context_safety"]
+    }
+
+    # Add token warnings if needed
+    if "token_warning" in context_response:
+        response["token_warning"] = context_response["token_warning"]
+    elif "token_critical" in context_response:
+        response["token_critical"] = context_response["token_critical"]
+
+    if compact:
+        response["compact"] = True
 
     # Record token usage
     if token_estimator:
@@ -113,11 +150,14 @@ async def list_projects(
                 "limit": limit,
                 "filter": filter,
                 "compact": compact,
-                "fields": fields
+                "fields": fields,
+                "include_test": include_test,
+                "page": page,
+                "page_size": effective_page_size
             },
             response=response,
             compact_mode=compact,
-            page_size=len(ordered)
+            page_size=len(formatted_projects)
         )
 
     return response

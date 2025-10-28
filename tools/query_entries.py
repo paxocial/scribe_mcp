@@ -17,6 +17,7 @@ from scribe_mcp.utils.time import coerce_range_boundary
 from scribe_mcp.utils.response import default_formatter, create_pagination_info
 from scribe_mcp.utils.tokens import token_estimator
 from scribe_mcp import reminders
+from scribe_mcp.tools.base.parameter_normalizer import normalize_dict_param, normalize_list_param
 
 VALID_MESSAGE_MODES = {"substring", "regex", "exact"}
 META_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]+$")
@@ -364,16 +365,66 @@ def _resolve_emojis(
 
 
 def _clean_list(items: Optional[List[str]]) -> List[str]:
+    """Clean list items with BaseTool parameter normalization integration.
+
+    Enhanced with standardized parameter normalization for consistent MCP framework
+    handling while preserving all existing cleaning logic.
+    """
     if not items:
         return []
+
+    # Handle case where items come as JSON string from MCP framework
+    if isinstance(items, str):
+        try:
+            # Try our standardized normalization first (handles MCP framework JSON serialization)
+            normalized_items = normalize_list_param(items, "list_param")
+            if isinstance(normalized_items, list):
+                items = normalized_items
+            else:
+                # Fall back to original string handling if normalization fails
+                pass
+        except ValueError:
+            # FALLBACK: Treat as single item string
+            items = [items]
+
+    # Ensure we have a list at this point
+    if not isinstance(items, list):
+        items = [str(items)]
+
     return [item for item in (entry.strip() for entry in items) if item]
 
 
 def _normalise_meta_filters(
     meta_filters: Optional[Dict[str, Any]],
 ) -> Tuple[Dict[str, str], Optional[str]]:
+    """Normalize meta filters with BaseTool parameter normalization integration.
+
+    Enhanced with standardized parameter normalization for consistent MCP framework
+    handling while preserving all existing validation logic.
+    """
     if not meta_filters:
         return {}, None
+
+    # Use BaseTool parameter normalization for consistent MCP framework handling
+    if isinstance(meta_filters, str):
+        try:
+            # Try our standardized normalization first (handles MCP framework JSON serialization)
+            normalized_meta = normalize_dict_param(meta_filters, "meta_filters")
+            if isinstance(normalized_meta, dict):
+                meta_filters = normalized_meta
+            else:
+                # Fall back to original JSON parsing if normalization fails
+                pass
+        except ValueError:
+            # FALLBACK: Use original JSON parsing logic
+            try:
+                import json
+                meta_filters = json.loads(meta_filters)
+                if not isinstance(meta_filters, dict):
+                    return {}, "Meta filters must be a dictionary."
+            except (json.JSONDecodeError, TypeError):
+                return {}, "Invalid JSON in meta filters."
+
     normalised: Dict[str, str] = {}
     for key, value in meta_filters.items():
         if key is None:
