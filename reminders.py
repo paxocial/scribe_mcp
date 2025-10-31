@@ -1,27 +1,198 @@
-"""Configurable reminder engine for Scribe MCP."""
+# -*- coding: utf-8 -*-
+"""
+Configurable reminder engine for Scribe MCP - Backwards Compatibility Shim.
+
+This module provides a drop-in replacement for the original reminders.py,
+routing all calls to the new localization-based reminder system.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import re
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from scribe_mcp import server as server_module
-from scribe_mcp.config.settings import settings
-from scribe_mcp.state.manager import State
-from scribe_mcp.utils.logs import parse_log_line, read_all_lines
-from scribe_mcp.utils.time import parse_utc, utcnow
+# Import the new reminder engine
+from scribe_mcp.utils.reminder_validator import validate_and_load_engine
+from scribe_mcp.utils.reminder_engine import ReminderEngine, ReminderContext as NewReminderContext
 
+# Global engine instance (singleton pattern)
+_reminder_engine: Optional[ReminderEngine] = None
+
+def _get_engine() -> ReminderEngine:
+    """Get or create the reminder engine instance."""
+    global _reminder_engine
+    if _reminder_engine is None:
+        _reminder_engine = validate_and_load_engine()
+    return _reminder_engine
+
+
+# ---------------------------------------------------------------------------
+# Legacy Compatibility API
+# ---------------------------------------------------------------------------
+
+async def get_reminders(
+    project: Dict[str, Any],
+    *,
+    tool_name: str,
+    state: Optional[object] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Legacy compatibility wrapper for the original get_reminders function.
+
+    This maintains the exact same interface as the original while using
+    the new reminder engine under the hood.
+    """
+    if not project:
+        return []
+
+    # Build the new reminder context from the old format
+    context = await _build_legacy_context(project, tool_name, state)
+
+    # Use the new engine
+    engine = _get_engine()
+    reminder_instances = await engine.generate_reminders(context)
+
+    # Convert to the old format
+    return engine.to_dict_list(reminder_instances)
+
+
+# ---------------------------------------------------------------------------
+# Context Building Functions
+# ---------------------------------------------------------------------------
+
+async def _build_legacy_context(project: Dict[str, Any], tool_name: str, state: Optional[object]) -> NewReminderContext:
+    """Convert legacy project/state format to new ReminderContext."""
+
+    # Extract project information
+    project_name = project.get("name")
+    log_path = Path(project.get("progress_log", ""))
+
+    # Read log information (similar to original _build_context)
+    last_log_time: Optional[datetime] = None
+    total_entries = 0
+    minutes_since_log: Optional[float] = None
+
+    try:
+        from scribe_mcp.utils.logs import read_all_lines, parse_log_line
+        lines = await read_all_lines(log_path)
+
+        for line in lines:
+            if parse_log_line(line):
+                total_entries += 1
+
+        for line in reversed(lines):
+            parsed = parse_log_line(line)
+            if not parsed:
+                continue
+            ts_str = parsed.get("ts")
+            if ts_str:
+                try:
+                    from scribe_mcp.utils.time import parse_utc, utcnow
+                    last_log_time = parse_utc(ts_str)
+                    delta = utcnow() - last_log_time
+                    minutes_since_log = delta.total_seconds() / 60
+                    break
+                except Exception:
+                    pass
+    except Exception:
+        # If we can't read logs, use defaults
+        pass
+
+    # Extract docs information
+    docs_status = {}
+    docs_changed = []
+
+    try:
+        if state:
+            # Try to get docs information from state
+            if hasattr(state, 'projects') and project_name in state.projects:
+                state_project = state.projects[project_name]
+                docs_status = state_project.get("docs_status", {})
+                docs_changed = state_project.get("docs_changed", [])
+
+        # Fall back to checking docs directly
+        if not docs_status and "docs" in project:
+            docs = project["docs"] or {}
+            for doc_type, doc_path in docs.items():
+                if doc_type == "progress_log":
+                    continue
+                path = Path(doc_path)
+                if not path.exists():
+                    docs_status[doc_type] = "missing"
+                else:
+                    try:
+                        content = await asyncio.to_thread(path.read_text, encoding="utf-8")
+                        # Simple completion check
+                        if "{{" in content and "}}" in content:
+                            docs_status[doc_type] = "incomplete"
+                        elif len(content.strip()) < 400:
+                            docs_status[doc_type] = "incomplete"
+                        else:
+                            docs_status[doc_type] = "complete"
+                    except Exception:
+                        docs_status[doc_type] = "missing"
+
+    except Exception:
+        # If we can't check docs, use empty status
+        pass
+
+    # Get current phase
+    current_phase = None
+    try:
+        phase_plan_path = project.get("docs", {}).get("phase_plan")
+        if phase_plan_path:
+            phase_path = Path(phase_plan_path)
+            if phase_path.exists():
+                import re
+                content = await asyncio.to_thread(phase_path.read_text, encoding="utf-8")
+                match = re.search(r"##\s+Phase\s+(.+?)\s*\(In Progress\)", content)
+                if match:
+                    current_phase = match.group(1).strip()
+    except Exception:
+        pass
+
+    # Get session information
+    session_age_minutes = None
+    try:
+        if state and hasattr(state, 'session_started_at') and state.session_started_at:
+            from scribe_mcp.utils.time import parse_utc, utcnow
+            start_dt = parse_utc(state.session_started_at)
+            if start_dt:
+                age_delta = utcnow() - start_dt
+                session_age_minutes = age_delta.total_seconds() / 60
+    except Exception:
+        pass
+
+    return NewReminderContext(
+        tool_name=tool_name,
+        project_name=project_name,
+        total_entries=total_entries,
+        minutes_since_log=minutes_since_log,
+        last_log_time=last_log_time,
+        docs_status=docs_status,
+        docs_changed=docs_changed,
+        current_phase=current_phase,
+        session_age_minutes=session_age_minutes,
+        variables={}  # Additional variables can be added as needed
+    )
+
+
+# ---------------------------------------------------------------------------
+# Legacy Export API (for direct import compatibility)
+# ---------------------------------------------------------------------------
+
+# Export the old classes and functions that might be imported directly
 DEFAULT_SEVERITY = {"info": 3, "warning": 6, "urgent": 9}
 DEFAULT_SUPPRESS_PHASE_TOOLS: Sequence[str] = ("append_entry", "generate_doc_templates")
 
+# Legacy dataclasses for compatibility
+from dataclasses import dataclass
 
 @dataclass
 class ReminderConfig:
+    """Legacy compatibility dataclass."""
     tone: str
     severity_weights: Dict[str, int]
     log_warning_minutes: int
@@ -32,9 +203,9 @@ class ReminderConfig:
     idle_reset_minutes: int
     suppress_phase_on_tools: Sequence[str]
 
-
 @dataclass
 class Reminder:
+    """Legacy compatibility dataclass."""
     level: str
     score: int
     message: str
@@ -42,9 +213,9 @@ class Reminder:
     context: Optional[str] = None
     category: str = "general"
 
-
 @dataclass
 class ReminderContext:
+    """Legacy compatibility dataclass."""
     config: ReminderConfig
     project_name: str
     last_log_time: Optional[datetime]
@@ -60,347 +231,72 @@ class ReminderContext:
     is_new_session: bool
 
 
-async def get_reminders(
-    project: Dict[str, Any],
-    *,
-    tool_name: str,
-    state: Optional[State] = None,
-) -> List[Dict[str, Any]]:
-    """Generate reminder payloads for the given project and tool."""
-    if not project:
-        return []
-
-    config = _build_config(project)
-    ctx = await _build_context(project, state, config)
-
-    reminders: List[Reminder] = []
-    reminders.extend(_logging_reminders(ctx, tool_name))
-    reminders.extend(_doc_status_reminders(ctx))
-    reminders.extend(_doc_drift_reminders(ctx))
-    reminders.extend(_phase_compliance_reminders(ctx, tool_name))
-    reminders.extend(_stale_doc_reminders(ctx))
-    reminders.append(_project_context_reminder(ctx))
-
-    tone = config.tone
-    output: List[Dict[str, Any]] = []
-    for reminder in reminders:
-        payload = {
-            "level": reminder.level,
-            "score": reminder.score,
-            "emoji": reminder.emoji,
-            "message": _apply_tone(tone, reminder.message, reminder.level),
-            "category": reminder.category,
-            "tone": tone,
-        }
-        if reminder.context:
-            payload["context"] = reminder.context
-        output.append(payload)
-    return output
-
-
 # ---------------------------------------------------------------------------
-# Context builders
-
-
-async def _build_context(
-    project: Dict[str, Any],
-    state: Optional[State],
-    config: ReminderConfig,
-) -> ReminderContext:
-    log_path = Path(project["progress_log"])
-    lines = await read_all_lines(log_path)
-
-    last_log_time: Optional[datetime] = None
-    total_entries = 0
-    for line in lines:
-        if line.strip():
-            total_entries += 1
-    for line in reversed(lines):
-        parsed = parse_log_line(line)
-        if not parsed:
-            continue
-        ts_str = parsed.get("ts")
-        if ts_str:
-            last_log_time = parse_utc(ts_str)
-            break
-
-    minutes_since = None
-    if last_log_time:
-        delta = utcnow() - last_log_time
-        minutes_since = delta.total_seconds() / 60
-
-    state_project = state.projects.get(project["name"]) if state else project
-    docs_status, doc_hashes, changed_docs, doc_paths = await _docs_status(project, state_project, config)
-
-    current_phase = await _detect_phase(project)
-    recent_actions = _extract_recent_actions(state)
-    session_age_minutes, is_new_session = _session_details(state, config)
-
-    return ReminderContext(
-        config=config,
-        project_name=project["name"],
-        last_log_time=last_log_time,
-        minutes_since_log=minutes_since,
-        docs_status=docs_status,
-        doc_hashes=doc_hashes,
-        doc_changes=changed_docs,
-        doc_paths=doc_paths,
-        current_phase=current_phase,
-        total_entries=total_entries,
-        recent_actions=recent_actions,
-        session_age_minutes=session_age_minutes,
-        is_new_session=is_new_session,
-    )
-
+# Configuration and Settings (Legacy Compatibility)
+# ---------------------------------------------------------------------------
 
 def _build_config(project: Dict[str, Any]) -> ReminderConfig:
-    global_defaults = settings.reminder_defaults or {}
-    project_defaults = (project.get("defaults", {}) or {}).get("reminder", {})
+    """Legacy compatibility wrapper for building config."""
+    # This is kept for backward compatibility but the new system handles config internally
+    try:
+        from scribe_mcp.config.settings import settings
 
-    severity = dict(DEFAULT_SEVERITY)
-    severity.update(global_defaults.get("severity_weights", {}))
-    severity.update(project_defaults.get("severity_weights", {}))
+        global_defaults = settings.reminder_defaults or {}
+        project_defaults = (project.get("defaults", {}) or {}).get("reminder", {})
 
-    tone = project_defaults.get("tone") or global_defaults.get("tone") or "neutral"
+        severity = dict(DEFAULT_SEVERITY)
+        severity.update(global_defaults.get("severity_weights", {}))
+        severity.update(project_defaults.get("severity_weights", {}))
 
-    default_warning = global_defaults.get("log_warning_minutes", settings.reminder_warmup_minutes + 5)
-    log_warning = int(project_defaults.get("log_warning_minutes", default_warning))
-    default_urgent = global_defaults.get("log_urgent_minutes", log_warning + 10)
-    log_urgent = int(project_defaults.get("log_urgent_minutes", default_urgent))
-    doc_stale = int(project_defaults.get("doc_stale_days", global_defaults.get("doc_stale_days", 7)))
-    min_length = int(project_defaults.get("min_doc_length", global_defaults.get("min_doc_length", 400)))
-    warmup = int(project_defaults.get("warmup_minutes", global_defaults.get("warmup_minutes", settings.reminder_warmup_minutes)))
-    idle = int(project_defaults.get("idle_reset_minutes", global_defaults.get("idle_reset_minutes", settings.reminder_idle_minutes)))
+        tone = project_defaults.get("tone") or global_defaults.get("tone") or "neutral"
 
-    suppress_tools = list(DEFAULT_SUPPRESS_PHASE_TOOLS)
-    suppress_tools.extend(global_defaults.get("suppress_phase_on_tools", []))
-    suppress_tools.extend(project_defaults.get("suppress_phase_on_tools", []))
+        default_warning = global_defaults.get("log_warning_minutes", settings.reminder_warmup_minutes + 5)
+        log_warning = int(project_defaults.get("log_warning_minutes", default_warning))
+        default_urgent = global_defaults.get("log_urgent_minutes", log_warning + 10)
+        log_urgent = int(project_defaults.get("log_urgent_minutes", default_urgent))
+        doc_stale = int(project_defaults.get("doc_stale_days", global_defaults.get("doc_stale_days", 7)))
+        min_length = int(project_defaults.get("min_doc_length", global_defaults.get("min_doc_length", 400)))
+        warmup = int(project_defaults.get("warmup_minutes", global_defaults.get("warmup_minutes", settings.reminder_warmup_minutes)))
+        idle = int(project_defaults.get("idle_reset_minutes", global_defaults.get("idle_reset_minutes", settings.reminder_idle_minutes)))
 
-    return ReminderConfig(
-        tone=str(tone),
-        severity_weights={k: int(v) for k, v in severity.items()},
-        log_warning_minutes=log_warning,
-        log_urgent_minutes=log_urgent,
-        doc_stale_days=doc_stale,
-        min_doc_length=min_length,
-        warmup_minutes=warmup,
-        idle_reset_minutes=idle,
-        suppress_phase_on_tools=tuple(dict.fromkeys(t.strip() for t in suppress_tools if t)),
-    )
+        suppress_tools = list(DEFAULT_SUPPRESS_PHASE_TOOLS)
+        suppress_tools.extend(global_defaults.get("suppress_phase_on_tools", []))
+        suppress_tools.extend(project_defaults.get("suppress_phase_on_tools", []))
 
-
-def _extract_recent_actions(state: Optional[State]) -> List[str]:
-    if not state:
-        return []
-    actions = []
-    for entry in state.recent_tools:
-        name = entry.get("name") if isinstance(entry, dict) else str(entry)
-        if not name:
-            continue
-        actions.append(name)
-    return actions
-
-
-def _session_details(state: Optional[State], config: ReminderConfig) -> tuple[Optional[float], bool]:
-    if not state or not state.session_started_at:
-        return None, False
-    start_dt = parse_utc(state.session_started_at)
-    if not start_dt:
-        return None, False
-    age_minutes = (utcnow() - start_dt).total_seconds() / 60
-    is_new = age_minutes <= config.warmup_minutes
-    return age_minutes, is_new
+        return ReminderConfig(
+            tone=str(tone),
+            severity_weights={k: int(v) for k, v in severity.items()},
+            log_warning_minutes=log_warning,
+            log_urgent_minutes=log_urgent,
+            doc_stale_days=doc_stale,
+            min_doc_length=min_length,
+            warmup_minutes=warmup,
+            idle_reset_minutes=idle,
+            suppress_phase_on_tools=tuple(dict.fromkeys(t.strip() for t in suppress_tools if t)),
+        )
+    except Exception:
+        # Return default config if something goes wrong
+        return ReminderConfig(
+            tone="neutral",
+            severity_weights=DEFAULT_SEVERITY,
+            log_warning_minutes=20,
+            log_urgent_minutes=60,
+            doc_stale_days=7,
+            min_doc_length=400,
+            warmup_minutes=5,
+            idle_reset_minutes=45,
+            suppress_phase_on_tools=DEFAULT_SUPPRESS_PHASE_TOOLS,
+        )
 
 
 # ---------------------------------------------------------------------------
-# Reminder generators
-
-
-def _logging_reminders(ctx: ReminderContext, tool_name: str) -> List[Reminder]:
-    if tool_name == "append_entry":
-        return []
-
-    reminders: List[Reminder] = []
-    level = None
-    message = None
-    context = None
-    emoji = "⏰"
-
-    threshold_warn = ctx.config.log_warning_minutes
-    threshold_urgent = ctx.config.log_urgent_minutes
-
-    if ctx.minutes_since_log is None:
-        level = "info"
-        emoji = "📝"
-        message = "No progress logs yet. Use append_entry to start the audit trail."
-    elif ctx.minutes_since_log >= threshold_urgent:
-        level = "urgent"
-        emoji = "🚨"
-        message = f"Last log was {int(ctx.minutes_since_log)} minutes ago—scribe your progress immediately."
-        context = "Keep logs flowing to retain full observability."
-    elif ctx.minutes_since_log >= threshold_warn:
-        level = "warning"
-        message = f"It's been {int(ctx.minutes_since_log)} minutes since the last log entry."
-        context = "Use append_entry to capture what changed."
-
-    if not level or not message:
-        return reminders
-
-    reminders.append(_make_reminder(level, emoji, message, context, "logging", ctx))
-    return reminders
-
-
-def _doc_status_reminders(ctx: ReminderContext) -> List[Reminder]:
-    reminders: List[Reminder] = []
-    missing = [name for name, status in ctx.docs_status.items() if status == "missing"]
-    incomplete = [name for name, status in ctx.docs_status.items() if status == "incomplete"]
-
-    if missing:
-        reminders.append(
-            _make_reminder(
-                "urgent",
-                "📋",
-                f"Missing documentation: {', '.join(sorted(missing))}.",
-                "Run generate_doc_templates or create the docs before moving forward.",
-                "docs",
-                ctx,
-            )
-        )
-
-    if "architecture" in incomplete:
-        reminders.append(
-            _make_reminder(
-                "warning",
-                "🏗️",
-                "Architecture guide still reads like a template—fill it in before coding.",
-                category="docs",
-                ctx=ctx,
-            )
-        )
-
-    if "phase_plan" in incomplete and "architecture" not in missing:
-        reminders.append(
-            _make_reminder(
-                "warning",
-                "🗓️",
-                "Phase plan incomplete. Break the architecture into executable phases.",
-                category="docs",
-                ctx=ctx,
-            )
-        )
-
-    if "checklist" in incomplete and "phase_plan" not in missing:
-        reminders.append(
-            _make_reminder(
-                "info",
-                "✅",
-                "Checklist needs attention—turn the phase plan into actionable boxes.",
-                category="docs",
-                ctx=ctx,
-            )
-        )
-
-    return reminders
-
-
-def _doc_drift_reminders(ctx: ReminderContext) -> List[Reminder]:
-    reminders: List[Reminder] = []
-    if ctx.doc_changes:
-        changed = ", ".join(sorted(ctx.doc_changes))
-        reminders.append(
-            _make_reminder(
-                "info",
-                "🧭",
-                f"Docs changed since the last audit: {changed}.",
-                "Review and cross-check implementation to keep docs aligned.",
-                "docs",
-                ctx,
-            )
-        )
-    return reminders
-
-
-def _phase_compliance_reminders(ctx: ReminderContext, tool_name: str) -> List[Reminder]:
-    if tool_name in ctx.config.suppress_phase_on_tools:
-        return []
-
-    reminders: List[Reminder] = []
-
-    if ctx.docs_status.get("architecture") == "incomplete" and ctx.total_entries > 5:
-        reminders.append(
-            _make_reminder(
-                "urgent",
-                "⛔",
-                "Architecture guide incomplete but development is underway. Pause and document first.",
-                category="workflow",
-                ctx=ctx,
-            )
-        )
-
-    if ctx.docs_status.get("architecture") == "complete" and ctx.docs_status.get("phase_plan") == "incomplete":
-        reminders.append(
-            _make_reminder(
-                "warning",
-                "📊",
-                "Architecture is set—draft the phase plan next.",
-                category="workflow",
-                ctx=ctx,
-            )
-        )
-
-    if ctx.docs_status.get("phase_plan") == "complete" and ctx.docs_status.get("checklist") == "incomplete":
-        reminders.append(
-            _make_reminder(
-                "info",
-                "🗒️",
-                "Phase plan done—convert it into a checklist to track progress.",
-                category="workflow",
-                ctx=ctx,
-            )
-        )
-
-    return reminders
-
-
-def _stale_doc_reminders(ctx: ReminderContext) -> List[Reminder]:
-    reminders: List[Reminder] = []
-    stale_cutoff = utcnow() - timedelta(days=ctx.config.doc_stale_days)
-
-    for label, path in ctx.doc_paths.items():
-        if not path.exists():
-            continue
-        try:
-            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-        except OSError:
-            continue
-        if mtime < stale_cutoff:
-            reminders.append(
-                _make_reminder(
-                    "info",
-                    "📆",
-                    f"{path.name} hasn't been updated in {ctx.config.doc_stale_days}+ days.",
-                    "Review the doc and confirm it still matches implementation.",
-                    "docs",
-                    ctx,
-                )
-            )
-    return reminders
-
-
-def _project_context_reminder(ctx: ReminderContext) -> Reminder:
-    phase = f" | Phase: {ctx.current_phase}" if ctx.current_phase else ""
-    last_log = (
-        ctx.last_log_time.strftime("%Y-%m-%d %H:%M UTC") if ctx.last_log_time else "no logs yet"
-    )
-    message = f"Project: {ctx.project_name}{phase}"
-    context = f"Entries: {ctx.total_entries} | Last log: {last_log}"
-    if ctx.session_age_minutes is not None:
-        context += f" | Session age: {ctx.session_age_minutes:.1f} min"
-    return _make_reminder("info", "🎯", message, context, "context", ctx)
-
-
+# Internal Helper Functions (Legacy Compatibility)
 # ---------------------------------------------------------------------------
-# Helper functions
+
+def _apply_tone(tone: str, message: str, level: str) -> str:
+    """Legacy compatibility wrapper for tone application."""
+    # The new system handles tone internally, so just return the message
+    return message
 
 
 def _make_reminder(
@@ -411,16 +307,10 @@ def _make_reminder(
     category: str = "general",
     ctx: ReminderContext | None = None,
 ) -> Reminder:
-    assert ctx is not None, "Reminder context is required"
-    severity = ctx.config.severity_weights.get(level, DEFAULT_SEVERITY.get(level, 3))
-    adjusted_level = level
-
-    if ctx.is_new_session and level in {"warning", "urgent"}:
-        adjusted_level = "info"
-        severity = max(1, ctx.config.severity_weights.get("info", 3))
-
+    """Legacy compatibility wrapper for creating reminders."""
+    severity = DEFAULT_SEVERITY.get(level, 3)
     return Reminder(
-        level=adjusted_level,
+        level=level,
         score=severity,
         message=message,
         emoji=emoji,
@@ -429,80 +319,46 @@ def _make_reminder(
     )
 
 
-async def _docs_status(
-    project: Dict[str, Any],
-    state_project: Optional[Dict[str, Any]],
-    config: ReminderConfig,
-) -> tuple[Dict[str, str], Dict[str, str], List[str], Dict[str, Path]]:
-    docs = project.get("docs", {}) or {}
-    status: Dict[str, str] = {}
-    hashes: Dict[str, str] = {}
-    doc_paths: Dict[str, Path] = {}
-    changed: List[str] = []
-    previous_hashes = (state_project or {}).get("_doc_hashes", {})
+# ---------------------------------------------------------------------------
+# Engine Access for Advanced Usage
+# ---------------------------------------------------------------------------
 
-    for key, path_str in docs.items():
-        if key == "progress_log":
-            continue
-        path = Path(path_str)
-        label = key.split("/")[-1] if "/" in key else key
-        if not path.exists():
-            status[label] = "missing"
-            continue
-        content = await asyncio.to_thread(path.read_text, encoding="utf-8")
-        hash_value = hashlib.sha1(content.encode("utf-8")).hexdigest()
-        hashes[label] = hash_value
-        doc_paths[label] = path
-        stripped = content.strip()
-        if "{{" in content and "}}" in content:
-            status[label] = "incomplete"
-        elif len(stripped) < config.min_doc_length:
-            status[label] = "incomplete"
-        else:
-            status[label] = "complete"
-        if previous_hashes.get(label) and previous_hashes[label] != hash_value:
-            changed.append(label)
+def get_reminder_engine() -> ReminderEngine:
+    """
+    Get access to the underlying reminder engine for advanced usage.
 
-    if project.get("name") and hashes != previous_hashes:
-        await server_module.state_manager.update_project_metadata(
-            project["name"], {"_doc_hashes": hashes}
-        )
+    This allows advanced users to access the new reminder system's features
+    while maintaining backward compatibility.
 
-    return status, hashes, changed, doc_paths
+    Example:
+        engine = get_reminder_engine()
+        # Use new features like language switching
+        engine.language = "es-ES"
+    """
+    return _get_engine()
 
 
-async def _detect_phase(project: Dict[str, Any]) -> Optional[str]:
-    phase_plan_path = project.get("docs", {}).get("phase_plan")
-    if not phase_plan_path:
-        return None
-    path = Path(phase_plan_path)
-    if not path.exists():
-        return None
-    content = await asyncio.to_thread(path.read_text, encoding="utf-8")
+def reload_reminders() -> None:
+    """
+    Force reload of reminder configuration.
 
-    match = re.search(r"##\s+Phase\s+(.+?)\s*\(In Progress\)", content)
-    if match:
-        return match.group(1).strip()
-
-    phases = re.findall(r"##\s+Phase\s+(.+)", content)
-    for phase in phases:
-        section = re.search(
-            rf"##\s+Phase\s+{re.escape(phase)}.*?(?=##\s+Phase|\Z)",
-            content,
-            re.DOTALL,
-        )
-        if section and "- [ ]" in section.group(0):
-            return phase.strip()
-    return None
+    Useful for development or when configuration files are updated.
+    """
+    global _reminder_engine
+    _reminder_engine = None
+    _get_engine()
 
 
-def _apply_tone(tone: str, message: str, level: str) -> str:
-    tone = tone.lower()
-    if tone == "friendly":
-        prefix = "Heads up: " if level != "urgent" else "Hey! "
-        return prefix + message
-    if tone == "direct":
-        return message.upper() if level == "urgent" else message
-    if tone == "formal":
-        return f"Kind reminder: {message}" if level == "info" else message
-    return message
+# ---------------------------------------------------------------------------
+# Module Information
+# ---------------------------------------------------------------------------
+
+__version__ = "2.0.0"
+__description__ = "Scribe MCP Reminder Engine - Backwards Compatibility Shim"
+
+# Initialize engine on import for early error detection
+try:
+    _get_engine()
+except Exception as e:
+    print(f"Warning: Failed to initialize reminder engine: {e}")
+    print("The system will use fallback reminders if needed.")

@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 
 **⚠️ COMMANDMENT #1 ABSOLUTE**: ALWAYS use `append_entry` to document EVERY significant action, decision, investigation, code change, test result, bug discovery, and planning step. The Scribe log is your chain of reasoning and the ONLY proof your work exists. If it's not Scribed, it didn't fucking happen.
+- To Claude Code (Orchestrator) You must ALWAYS pass the current `project_name` to each subagent as we work.  To avoid confusion and them accidentally logging to the wrong project.
 
 **⚠️ COMMANDMENT #0: ALWAYS CHECK PROGRESS LOG FIRST**: Before starting ANY work, ALWAYS read `docs/dev_plans/[current_project]/PROGRESS_LOG.md` to understand what has been done, what mistakes were made, and what the current state is. The progress log is the source of truth for project context.
 
@@ -49,6 +50,147 @@ await append_entry(items=json.dumps([
 - Makes project state queryable and analyzable
 
 **If You Missed Entries:** Use bulk mode IMMEDIATELY to backfill your work trail. NEVER let gaps exist in the Scribe log - every action must be traceable. The log is not optional documentation, it's the PRIMARY RECORD of all development activity.
+
+
+---
+
+# 🧩 SCRIBE PROTOCOL — DEVELOPMENT ORCHESTRATION STANDARD
+
+> **Purpose:** The Scribe Protocol defines how Claude Code orchestrates subagents during a structured development cycle.
+> Invoking it (“follow protocol for this development”) triggers a full-cycle workflow using the Scribe MCP toolchain.
+
+---
+
+## 🧭 Core Principle
+
+All work must occur within a defined **dev plan project** initialized via:
+
+```python
+await set_project(name="<project_name>")
+```
+
+The `<project_name>` **must be passed to every subagent** for the duration of the protocol.
+All agents use Scribe tools (`append_entry`, `manage_docs`, etc.) for logging, documentation, and verification.
+
+---
+
+## ⚙️ Subagents Overview
+
+| Agent                | Role                                                                                                                                                        | Primary Tools                                                                           | Stage            |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ---------------- |
+| **Research Agent**   | Performs deep codebase and documentation research to support architectural planning. Produces detailed reports under `docs/dev_plans/<project>/`.           | `set_project`, `append_entry`, `manage_docs`, `query_entries`                           | **Stage 1**      |
+| **Architect Agent**  | Converts approved research into concrete system plans (`ARCHITECTURE_GUIDE.md`, `PHASE_PLAN.md`, `CHECKLIST.md`). Ensures feasibility before coding begins. | `set_project`, `get_project`, `append_entry`, `manage_docs`                             | **Stage 2**      |
+| **Review Agent**     | Performs adversarial quality control. Operates twice: pre-implementation (Stage 3) and post-implementation (Stage 5). Grades all agents and logs verdicts.  | `set_project`, `append_entry`, `manage_docs`, `pytest`, `query_entries`                 | **Stages 3 & 5** |
+| **Coder Agent**      | Implements the approved design exactly as written. Logs every 2–5 meaningful changes and all test results.                                                  | `set_project`, `append_entry`, `manage_docs`, `pytest`, `query_entries`                 | **Stage 4**      |
+| **Bug Hunter Agent** | Diagnoses and resolves defects. Creates timestamped reports under `docs/bugs/`, updates `/docs/bugs/INDEX.md`, and logs to the bug log.                     | `set_project`, `append_entry(log_type="bug")`, `manage_docs`, `pytest`, `query_entries` | **Auxiliary**    |
+
+---
+
+## 🔁 Protocol Sequence
+
+> **Canonical Chain:**
+> **1 Research → 2 Architect → 3 Review → 4 Code → 5 Review**
+
+### 1️⃣ Research Phase
+
+* Claude Code refines the task with the user and defines a precise scope.
+* Calls **Research Agent** with the project name and clear objectives.
+* Research Agent produces one or more reports (`RESEARCH_*.md`) and logs discoveries.
+* If multiple reports exist, an `INDEX.md` must be generated.
+
+### 2️⃣ Architecture Phase
+
+* Claude Code calls **Architect Agent**, passing the same project name.
+* Architect reviews the research, checks feasibility in the codebase, and fills out:
+
+  * `ARCHITECTURE_GUIDE.md`
+  * `PHASE_PLAN.md`
+  * `CHECKLIST.md`
+* Marks completion via `append_entry(agent="Architect", status="success")`.
+
+### 3️⃣ Pre-Implementation Review
+
+* **Review Agent** audits the research and architectural documents.
+* Confirms technical feasibility, coherence, and readiness.
+* Grades each agent; ≥ 93 % required to proceed.
+* If any fail, Claude Code re-dispatches the failing agents to fix their work (never replace files).
+  - **CRITICAL**: Agents MUST FIX THEIR EXISTING DOCUMENTS, NOT CREATE NEW ONES. NO CLUTTER. FIX AND REFINE THE DOCUMENTS/CODE.
+
+### 4️⃣ Implementation Phase
+
+* Upon passing review, **Coder Agent** implements the plan.
+* Logs every 2–5 meaningful commits, test results, and decisions.
+* Creates `IMPLEMENTATION_REPORT_<timestamp>.md`.
+* Stops immediately if requirements are ambiguous or architecture changes mid-task.
+
+### 5️⃣ Final Review
+
+* **Review Agent** runs again, verifying implementation, tests, and documentation.
+* Executes `pytest`, ensures checklists are complete, and issues final grades.
+* If all ≥ 93 %, the project is approved; otherwise, corrections are assigned.
+
+---
+
+## 🔄 Parallel Execution Guidelines
+
+* **Research Agents**: Can work in parallel on different aspects if aware of each other and have specific, non-overlapping deliverables
+* **Coder Agents**: Can work in parallel if scope doesn't overlap
+* **Review Agent**: Can be used for security audits outside of specific projects
+* **Coordination**: Parallel agents must be aware of each other's goals and target files/deliverables
+
+## 📝 Log Types and Usage
+
+* **progress**: Primary log type for most development activities
+* **bug**: Used exclusively by Bug Hunter for bug lifecycle tracking
+* **doc_updates**: Automatically used by manage_docs for documentation changes
+* **security**: For security-related events and audits
+* **Other types**: Can be configured in `config/log_config.json`
+
+---
+
+## 🐞 Bug Handling (Parallel Path)
+
+At any stage, if a defect is discovered:
+
+1. Claude Code calls **Bug Hunter** with the same project name and a short slug.
+2. Bug Hunter creates a folder:
+
+   ```
+   docs/bugs/<category>/<YYYY-MM-DD>_<slug>/
+   ```
+3. Writes `report.md`, reproduction test, and updates `/docs/bugs/INDEX.md`.
+4. Logs lifecycle events (`investigation → fixed → verified`) via `append_entry(log_type="bug")`.
+
+---
+
+## 🧾 Completion and Closure
+
+* Once the final review passes:
+
+  * All documentation (`ARCHITECTURE_GUIDE.md`, `PHASE_PLAN.md`, `CHECKLIST.md`, `IMPLEMENTATION_REPORT`) must be present and up-to-date.
+  * All logs are archived using `rotate_log()`.
+  * (Optional) Claude Code may compile summaries into `/docs/wiki/` for public reference.
+
+---
+
+## 💡 Invocation Summary
+
+**Command:**
+
+> “Follow protocol for this development.”
+
+**Claude Code Behavior:**
+
+1. Ask for a clear task and project name.
+2. Call `set_project(project_name)` once.
+3. Pass that project name to all subsequent subagents.
+4. Orchestrate each stage in proper order with checkpoints and reviews.
+5. Use `append_entry` to log orchestration actions as the `Coordinator`.
+
+---
+
+This Protocol ensures that all development within Scribe MCP is **auditable, reproducible, and traceable** from idea to implementation.
+
 
 
 ---

@@ -21,3 +21,7 @@ state/*.json
 *.faiss
 *.npy
 *.shard
+docs/claude_code_subagents/reference/*
+docs/dev_plans/*
+.scribe/scribe.db
+docs/claude_code_subagents/*
