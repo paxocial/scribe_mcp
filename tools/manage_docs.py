@@ -47,6 +47,79 @@ def _current_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
+def _write_file_atomically(file_path: Path, content: str) -> bool:
+    """Write file atomically using temp file and move operation."""
+    try:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write to temporary file first, then move atomically
+        temp_path = file_path.with_suffix('.tmp')
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        # Verify the temp file was written correctly
+        if temp_path.exists() and temp_path.stat().st_size > 0:
+            temp_path.replace(file_path)
+            return True
+        else:
+            print(f"⚠️ Failed to write {file_path.name}: temporary file not created properly")
+            # Clean up temp file if it exists
+            if temp_path.exists():
+                temp_path.unlink()
+            return False
+
+    except (OSError, IOError) as exc:
+        print(f"⚠️ Failed to write {file_path.name}: {exc}")
+        return False
+    except Exception as exc:
+        print(f"❌ Unexpected error writing {file_path.name}: {exc}")
+        return False
+
+
+def _validate_and_repair_index(index_path: Path, doc_dir: Path) -> bool:
+    """Validate index file and repair if it's broken or out of sync."""
+    try:
+        # Check if index exists and is readable
+        if not index_path.exists():
+            print(f"🔧 Index file {index_path.name} missing, will create new one")
+            return False
+
+        # Try to read the index
+        try:
+            with open(index_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except (UnicodeDecodeError, IOError) as exc:
+            print(f"🔧 Index file {index_path.name} corrupted ({exc}), will repair")
+            # Backup corrupted file
+            backup_path = index_path.with_suffix('.corrupted.backup')
+            if index_path.exists():
+                index_path.rename(backup_path)
+            return False
+
+        # Basic validation - check if it looks like a proper index
+        if not content.strip().startswith('#'):
+            print(f"🔧 Index file {index_path.name} doesn't look like valid index, will repair")
+            backup_path = index_path.with_suffix('.invalid.backup')
+            index_path.rename(backup_path)
+            return False
+
+        # Count actual documents vs indexed documents
+        if doc_dir.exists():
+            actual_docs = list(doc_dir.glob("*.md"))
+            actual_docs = [d for d in actual_docs if d.name != "INDEX.md" and not d.name.startswith("_")]
+
+            # Simple heuristic: if index says 0 docs but we have actual docs, it's stale
+            if "Total Documents:** 0" in content and actual_docs:
+                print(f"🔧 Index file {index_path.name} stale (shows 0 docs but {len(actual_docs)} found), will repair")
+                return False
+
+        return True
+
+    except Exception as exc:
+        print(f"🔧 Error validating index {index_path.name}: {exc}, will repair")
+        return False
+
+
 async def _get_or_create_storage_project(backend: Any, project: Dict[str, Any]) -> Any:
     """Fetch or create the backing storage record for a project."""
     timeout = server_module.settings.storage_timeout_seconds
@@ -499,7 +572,18 @@ async def _handle_special_document_creation(
                 "error": "doc_name is required for research document creation",
                 "recent_projects": recent_projects,
             }
-        safe_name = doc_name.replace(" ", "_")
+        # Sanitize the doc_name for filesystem safety
+        import re
+        # Replace spaces and special chars with underscores, keep alphanumeric and basic symbols
+        safe_name = re.sub(r'[^\w\-_\.]', '_', doc_name)
+        # Remove multiple consecutive underscores
+        safe_name = re.sub(r'_+', '_', safe_name)
+        # Remove leading/trailing underscores
+        safe_name = safe_name.strip('_')
+        # Ensure it's not empty after sanitization
+        if not safe_name:
+            safe_name = f"research_{int(datetime.now().timestamp())}"
+
         research_dir = docs_dir / "research"
         target_path = research_dir / f"{safe_name}.md"
         template_name = "RESEARCH_REPORT_TEMPLATE.md"
@@ -512,13 +596,23 @@ async def _handle_special_document_creation(
         index_updater = lambda: _update_research_index(research_dir, agent_id)
     elif action == "create_bug_report":
         category = metadata.get("category")
-        if not category:
+        if not category or not category.strip():
             return {
                 "ok": False,
-                "error": "metadata with 'category' is required for bug report creation",
+                "error": "metadata with non-empty 'category' is required for bug report creation",
                 "recent_projects": recent_projects,
             }
-        slug = metadata.get("slug") or f"bug_{int(now.timestamp())}"
+
+        # Sanitize category
+        import re
+        category = re.sub(r'[^\w\-_\.]', '_', category.strip())
+
+        slug = metadata.get("slug")
+        if slug:
+            # Sanitize slug as well
+            slug = re.sub(r'[^\w\-_\.]', '_', str(slug).strip())
+        if not slug:
+            slug = f"bug_{int(now.timestamp())}"
         bug_dir = project_root / "docs" / "bugs" / category / f"{now.strftime('%Y-%m-%d')}_{slug}"
         target_path = bug_dir / "report.md"
         template_name = "BUG_REPORT_TEMPLATE.md"
@@ -668,7 +762,12 @@ async def _handle_special_document_creation(
         )
 
         if index_updater:
-            await index_updater()
+            try:
+                await index_updater()
+            except Exception as exc:
+                print(f"⚠️ Failed to update index for {doc_label}: {exc}")
+                # Don't fail the whole operation if index update fails
+                # The document was created successfully, just the index is stale
 
         return {
             "ok": True,
@@ -691,11 +790,16 @@ async def _update_research_index(research_dir: Path, agent_id: str) -> None:
     from datetime import datetime
     index_path = research_dir / "INDEX.md"
 
+    # Self-healing: validate and repair index if needed
+    if not _validate_and_repair_index(index_path, research_dir):
+        print(f"🔧 Auto-repairing research index for {research_dir.name}")
+
     # Get all research documents
     research_docs = []
     if research_dir.exists():
-        for doc_path in research_dir.glob("RESEARCH_*.md"):
-            if doc_path.name != "INDEX.md":
+        # Look for all .md files except INDEX.md and any template files
+        for doc_path in research_dir.glob("*.md"):
+            if doc_path.name != "INDEX.md" and not doc_path.name.startswith("_"):
                 stat = doc_path.stat()
                 research_docs.append({
                     "name": doc_path.stem,
@@ -736,10 +840,9 @@ This directory contains research documents generated during the development proc
 
 *This index is automatically updated when research documents are created or modified.*"""
 
-    # Write the index
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(index_path, 'w', encoding='utf-8') as f:
-        f.write(content)
+    # Write the index atomically
+    if not _write_file_atomically(index_path, content):
+        print(f"⚠️ Failed to update research index at {index_path}")
 
 
 async def _update_bug_index(bugs_dir: Path, agent_id: str) -> None:
@@ -1058,6 +1161,8 @@ async def _render_review_report_template(
         print(f"⚠️ Template engine error for review report: {e}")
         # Fallback to basic content if template engine fails
         stage = prepared_metadata.get("stage", "unknown")
+        overall_decision = prepared_metadata.get("overall_decision", "[PENDING]")
+        final_decision = prepared_metadata.get("final_decision", overall_decision)
         return f"""# Review Report: {stage.replace('_', ' ').title()} Stage
 
 **Review Date:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")}
@@ -1070,14 +1175,14 @@ async def _render_review_report_template(
 <!-- ID: executive_summary -->
 ## Executive Summary
 
-**Overall Decision:** {{ overall_decision | default('[APPROVED/REJECTED/REQUIRES_REVISION]') }}
+**Overall Decision:** {overall_decision}
 
 ---
 
 <!-- ID: final_decision -->
 ## Final Decision
 
-**{{ final_decision | default('[APPROVED/REJECTED/REQUIRES_REVISION]') }}**
+**{final_decision}**
 
 *This review report is part of the quality assurance process for {project.get('name')}.*
 """
@@ -1123,6 +1228,8 @@ async def _render_agent_report_card_template(
         # Fallback to basic content if template engine fails
         agent_name = prepared_metadata.get("agent_name", agent_id)
         stage = prepared_metadata.get("stage", "unknown")
+        overall_grade = prepared_metadata.get("overall_grade", "[PENDING]")
+        final_recommendation = prepared_metadata.get("final_recommendation", "[PENDING]")
         return f"""# Agent Performance Report Card
 
 **Agent:** {agent_name}
@@ -1136,14 +1243,14 @@ async def _render_agent_report_card_template(
 <!-- ID: executive_summary -->
 ## Executive Summary
 
-**Overall Grade:** {{ overall_grade | default('[Score]%') }}
+**Overall Grade:** {overall_grade}
 
 ---
 
 <!-- ID: final_assessment -->
 ## Final Assessment
 
-**Overall Recommendation:** {{ final_recommendation | default('[RECOMMENDATION]') }}
+**Overall Recommendation:** {final_recommendation}
 
 *This agent report card is part of the performance management system for {project.get('name')}.*
 """

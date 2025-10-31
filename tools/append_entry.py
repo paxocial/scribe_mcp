@@ -17,20 +17,22 @@ import asyncio
 from scribe_mcp import server as server_module
 from scribe_mcp.config.settings import settings
 from scribe_mcp.server import app
-from scribe_mcp.tools.constants import STATUS_EMOJI
 from scribe_mcp.tools.agent_project_utils import (
-    get_agent_project_data,
     ensure_agent_session,
     validate_agent_session,
 )
-from scribe_mcp.tools.project_utils import (
-    load_active_project,
-)
-from scribe_mcp.config.log_config import get_log_definition, resolve_log_path
 from scribe_mcp import reminders
 from scribe_mcp.utils.files import append_line, rotate_file
 from scribe_mcp.utils.time import format_utc, utcnow
-from scribe_mcp.tools.base.parameter_normalizer import normalize_dict_param, normalize_list_param
+from scribe_mcp.shared.logging_utils import (
+    ProjectResolutionError,
+    compose_log_line as shared_compose_line,
+    default_status_emoji,
+    ensure_metadata_requirements,
+    normalize_metadata,
+    resolve_log_definition as shared_resolve_log_definition,
+    resolve_logging_context,
+)
 
 _RATE_TRACKER: Dict[str, deque[float]] = defaultdict(deque)
 _RATE_LOCKS: Dict[str, asyncio.Lock] = {}
@@ -351,17 +353,25 @@ async def append_entry(
             agent_id, "append_entry", {"message_length": len(message), "status": status, "bulk_mode": items is not None}
         )
 
-    # Use AgentContextManager as primary source for project data
-    project, recent = await get_agent_project_data(agent_id)
-
-    reminders_payload: List[Dict[str, Any]] = []
-    if not project:
+    try:
+        context = await resolve_logging_context(
+            tool_name="append_entry",
+            server_module=server_module,
+            agent_id=agent_id,
+            require_project=True,
+            state_snapshot=state_snapshot,
+        )
+    except ProjectResolutionError as exc:
         return {
             "ok": False,
-            "error": "No project configured.",
+            "error": str(exc),
             "suggestion": f"Invoke set_project with agent_id='{agent_id}' before appending entries",
-            "reminders": reminders_payload,
+            "recent_projects": list(exc.recent_projects),
         }
+
+    project = context.project or {}
+    recent = list(context.recent_projects)
+    reminders_payload: List[Dict[str, Any]] = list(context.reminders)
 
     # Validate that either message, items, or items_list is provided
     if not items and not items_list and not message:
@@ -601,87 +611,12 @@ def _resolve_emoji(
     status: Optional[str],
     project: Dict[str, Any],
 ) -> str:
-    if explicit:
-        return explicit
-    if status and status in STATUS_EMOJI:
-        return STATUS_EMOJI[status]
-    defaults = project.get("defaults") or {}
-    if defaults.get("emoji"):
-        return defaults["emoji"]
-    return STATUS_EMOJI["info"]
+    return default_status_emoji(explicit=explicit, status=status, project=project)
 
 
 def _normalise_meta(meta: Optional[Dict[str, Any]]) -> tuple[tuple[str, str], ...]:
-    """Intelligently normalize metadata parameter with automatic JSON parsing and error recovery.
-
-    Enhanced with BaseTool parameter normalization utilities for consistent handling
-    across all MCP tools while preserving all existing proven logic.
-    """
-    if not meta:
-        return ()
-
-    # Use BaseTool parameter normalization for consistent MCP framework handling
-    if isinstance(meta, str):
-        try:
-            # Try our standardized normalization first (handles MCP framework JSON serialization)
-            normalized_meta = normalize_dict_param(meta, "meta")
-            if isinstance(normalized_meta, dict):
-                meta = normalized_meta
-            else:
-                # Fallback to original logic if normalization fails
-                pass
-        except ValueError:
-            # FALLBACK: Use original proven logic for string handling
-            try:
-                meta = json.loads(meta)
-                if not isinstance(meta, dict):
-                    # If JSON parses but isn't a dict, create error metadata
-                    return (("parse_error", f"Expected dict, got {type(meta).__name__}"),)
-            except json.JSONDecodeError:
-                # EDGE CASE: Handle common "key=value,key2=value2" or "key=value key2=value2" pattern from CLI usage
-                if '=' in meta:
-                    try:
-                        pairs = []
-                        # Try comma-separated first
-                        if ',' in meta:
-                            delimiter = ','
-                        else:
-                            delimiter = ' '
-
-                        for pair in meta.split(delimiter):
-                            pair = pair.strip()
-                            if '=' in pair:
-                                key, value = pair.split('=', 1)
-                                pairs.append((key.strip(), value.strip()))
-                            else:
-                                # If no equals, treat as message
-                                pairs.append(('message', pair.strip()))
-                        return tuple(pairs)
-                    except Exception:
-                        # Fall back to treating as single message
-                        return (("message", meta),)
-                else:
-                    # If JSON parsing fails, treat the string as a single value
-                    return (("message", meta),)
-
-    # Ensure we have a dictionary at this point
-    if not isinstance(meta, dict):
-        return (("parse_error", f"Expected dict or JSON string, got {type(meta).__name__}"),)
-
-    try:
-        normalised = []
-        for key, value in sorted(meta.items()):
-            normalised.append((_sanitize_meta_key(str(key)), _stringify(value)))
-        return tuple(normalised)
-    except Exception as exc:
-        # ULTIMATE FALLBACK: Never let bad metadata break the log entry
-        return (("meta_error", str(exc)),)
-
-
-def _stringify(value: Any) -> str:
-    if isinstance(value, (str, int, float, bool)):
-        return _clean_meta_value(str(value))
-    return _clean_meta_value(json.dumps(value, sort_keys=True))
+    """Delegate metadata normalization to the shared logging utility."""
+    return normalize_metadata(meta)
 
 
 def _compose_line(
@@ -694,24 +629,15 @@ def _compose_line(
     meta_pairs: tuple[tuple[str, str], ...],
     entry_id: Optional[str] = None,
 ) -> str:
-    segments = [
-        f"[{emoji}]",
-        f"[{timestamp}]",
-        f"[Agent: {agent}]",
-        f"[Project: {project_name}]",
-    ]
-
-    # Add entry_id if provided
-    if entry_id:
-        segments.append(f"[ID: {entry_id}]")
-
-    segments.append(message)
-
-    base = " ".join(segments)
-    if meta_pairs:
-        meta_text = "; ".join(f"{key}={value}" for key, value in meta_pairs)
-        return f"{base} | {meta_text}"
-    return base
+    return shared_compose_line(
+        emoji=emoji,
+        timestamp=timestamp,
+        agent=agent,
+        project_name=project_name,
+        message=message,
+        meta_pairs=meta_pairs,
+        entry_id=entry_id,
+    )
 
 
 def _resolve_timestamp(timestamp_utc: Optional[str]) -> Tuple[Optional[datetime], str, Optional[str]]:
@@ -738,21 +664,12 @@ def _sanitize_identifier(value: str) -> str:
     return sanitized or "Scribe"
 
 
-def _sanitize_meta_key(value: str) -> str:
-    cleaned = value.replace(" ", "_").replace("|", "").strip()
-    return cleaned or "meta_key"
-
-
 def _validate_message(message: str) -> Optional[str]:
     if any(ch in message for ch in ("\n", "\r")):
         return "Message cannot contain newline characters."
     if "|" in message:
         return "Message cannot contain pipe characters."  # avoids delimiter collisions
     return None
-
-
-def _clean_meta_value(value: str) -> str:
-    return value.replace("\n", " ").replace("\r", " ").replace("|", " ")
 
 
 async def _enforce_rate_limit(project_name: str) -> Optional[Dict[str, Any]]:
@@ -787,20 +704,11 @@ def _resolve_log_target(
     log_type: str,
     cache: Dict[str, Tuple[Path, Dict[str, Any]]],
 ) -> Tuple[Path, Dict[str, Any]]:
-    log_key = (log_type or "progress").lower()
-    if log_key not in cache:
-        definition = get_log_definition(log_key)
-        path = resolve_log_path(project, definition)
-        cache[log_key] = (path, definition)
-    return cache[log_key]
+    return shared_resolve_log_definition(project, log_type, cache=cache)
 
 
 def _validate_log_requirements(definition: Dict[str, Any], meta_payload: Dict[str, Any]) -> Optional[str]:
-    required = definition.get("metadata_requirements") or []
-    missing = [key for key in required if key not in meta_payload]
-    if missing:
-        return f"Missing metadata for log entry: {', '.join(missing)}"
-    return None
+    return ensure_metadata_requirements(definition, meta_payload)
 
 
 async def _append_bulk_entries(
