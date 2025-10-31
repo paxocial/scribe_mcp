@@ -75,6 +75,20 @@ class StorageBackend(ABC):
     ) -> None:
         """Record a documentation change (optional for storage backends)."""
 
+    async def record_agent_report_card(
+        self,
+        project: ProjectRecord,
+        *,
+        file_path: str,
+        agent_name: str,
+        stage: Optional[str],
+        overall_grade: Optional[float],
+        performance_level: Optional[str],
+        metadata: Optional[Dict[str, Any]],
+    ) -> None:
+        """Persist agent report card metadata (optional for storage backends)."""
+        raise NotImplementedError
+
     @abstractmethod
     async def fetch_recent_entries(
         self,

@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Optional
+import hashlib
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional, Callable, Awaitable
 
 from scribe_mcp import server as server_module, reminders
 from scribe_mcp.server import app
@@ -31,6 +35,164 @@ def _normalize_metadata(metadata: Optional[Dict[str, Any] | str]) -> Dict[str, A
             return json.loads(str(metadata))
         except (json.JSONDecodeError, TypeError, ValueError):
             return {}
+
+
+def _hash_text(content: str) -> str:
+    """Return a deterministic hash for stored document content."""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _current_timestamp() -> str:
+    """Return the current UTC timestamp for metadata usage."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+async def _get_or_create_storage_project(backend: Any, project: Dict[str, Any]) -> Any:
+    """Fetch or create the backing storage record for a project."""
+    timeout = server_module.settings.storage_timeout_seconds
+    async with asyncio.timeout(timeout):
+        storage_record = await backend.fetch_project(project["name"])
+    if not storage_record:
+        async with asyncio.timeout(timeout):
+            storage_record = await backend.upsert_project(
+                name=project["name"],
+                repo_root=project["root"],
+                progress_log_path=project["progress_log"],
+            )
+    return storage_record
+
+
+def _build_special_metadata(
+    project: Dict[str, Any],
+    metadata: Dict[str, Any],
+    agent_id: str,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Prepare metadata payload for template rendering and storage."""
+    prepared = metadata.copy()
+    prepared.setdefault("project_name", project.get("name"))
+    prepared.setdefault("project_root", project.get("root"))
+    prepared.setdefault("agent_id", agent_id)
+    prepared.setdefault("agent_name", prepared.get("agent_name", agent_id))
+    prepared.setdefault("timestamp", prepared.get("timestamp", _current_timestamp()))
+    if extra:
+        for key, value in extra.items():
+            prepared.setdefault(key, value)
+    return prepared
+
+
+async def _render_special_template(
+    project: Dict[str, Any],
+    agent_id: str,
+    template_name: str,
+    metadata: Dict[str, Any],
+    extra_metadata: Optional[Dict[str, Any]] = None,
+    prepared_metadata: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Render a special document template using the shared Jinja2 engine."""
+    try:
+        from scribe_mcp.template_engine import Jinja2TemplateEngine, TemplateEngineError
+
+        engine = Jinja2TemplateEngine(
+            project_root=Path(project.get("root", "")),
+            project_name=project.get("name", ""),
+            security_mode="sandbox",
+        )
+        if prepared_metadata is None:
+            prepared_metadata = _build_special_metadata(
+                project,
+                metadata,
+                agent_id,
+                extra=extra_metadata,
+            )
+        return engine.render_template(
+            template_name=f"documents/{template_name}",
+            metadata=prepared_metadata,
+        )
+    except (ImportError, TemplateEngineError) as exc:
+        raise DocumentOperationError(f"Failed to render template '{template_name}': {exc}") from exc
+
+
+async def _record_special_doc_change(
+    backend: Any,
+    project: Dict[str, Any],
+    agent_id: str,
+    doc_label: str,
+    target_path: Path,
+    metadata: Dict[str, Any],
+    before_hash: str,
+    after_hash: str,
+) -> None:
+    """Persist document change information for special documents."""
+    if not backend:
+        return
+    try:
+        storage_record = await _get_or_create_storage_project(backend, project)
+    except Exception as exc:  # pragma: no cover - defensive logging mirror behaviour above
+        print(f"⚠️  Failed to prepare storage record for {doc_label}: {exc}")
+        return
+
+    action = "create" if not before_hash else "update"
+    try:
+        await backend.record_doc_change(
+            storage_record,
+            doc=doc_label,
+            section=None,
+            action=action,
+            agent=agent_id,
+            metadata=metadata,
+            sha_before=before_hash,
+            sha_after=after_hash,
+        )
+    except Exception as exc:
+        print(f"⚠️  Failed to record special doc change for {doc_label}: {exc}")
+
+
+def _parse_numeric_grade(value: Any) -> Optional[float]:
+    """Convert percentage-like values to float."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        text = str(value).strip()
+        if text.endswith("%"):
+            text = text[:-1]
+        if not text:
+            return None
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _record_agent_report_card_metadata(
+    backend: Any,
+    project: Dict[str, Any],
+    agent_id: str,
+    target_path: Path,
+    metadata: Dict[str, Any],
+) -> None:
+    """Persist structured agent report card metadata when supported."""
+    if not backend:
+        return
+    try:
+        storage_record = await _get_or_create_storage_project(backend, project)
+    except Exception as exc:
+        print(f"⚠️  Failed to prepare storage project for agent card: {exc}")
+        return
+
+    try:
+        await backend.record_agent_report_card(
+            storage_record,
+            file_path=str(target_path),
+            agent_name=metadata.get("agent_name", agent_id),
+            stage=metadata.get("stage"),
+            overall_grade=_parse_numeric_grade(metadata.get("overall_grade")),
+            performance_level=metadata.get("performance_level"),
+            metadata=metadata,
+        )
+    except Exception as exc:
+        print(f"⚠️  Failed to record agent report card metadata: {exc}")
 
 
 @app.tool()
@@ -64,7 +226,9 @@ async def manage_docs(
     if agent_identity:
         agent_id = await agent_identity.get_or_create_agent_id()
 
-    # Handle research, bug, and review document creation
+    backend = server_module.storage_backend
+
+    # Handle research, bug, review, and agent report card creation
     if action in ["create_research_doc", "create_bug_report", "create_review_report", "create_agent_report_card"]:
         return await _handle_special_document_creation(
             project,
@@ -75,6 +239,7 @@ async def manage_docs(
             metadata=metadata,
             dry_run=dry_run,
             agent_id=agent_id,
+            storage_backend=backend,
             recent_projects=list(recent),
         )
 
@@ -96,20 +261,10 @@ async def manage_docs(
             "recent_projects": list(recent),
         }
 
-    backend = server_module.storage_backend
     storage_record = None
     if backend and not dry_run:
         try:
-            timeout = server_module.settings.storage_timeout_seconds
-            async with asyncio.timeout(timeout):
-                storage_record = await backend.fetch_project(project["name"])
-            if not storage_record:
-                async with asyncio.timeout(timeout):
-                    storage_record = await backend.upsert_project(
-                        name=project["name"],
-                        repo_root=project["root"],
-                        progress_log_path=project["progress_log"],
-                    )
+            storage_record = await _get_or_create_storage_project(backend, project)
             await backend.record_doc_change(
                 storage_record,
                 doc=doc,
@@ -310,6 +465,7 @@ Examples:
     return asyncio.run(_run_manage_docs(args))
 
 
+
 async def _handle_special_document_creation(
     project: Dict[str, Any],
     action: str,
@@ -319,244 +475,125 @@ async def _handle_special_document_creation(
     metadata: Optional[Dict[str, Any]],
     dry_run: bool,
     agent_id: str,
+    storage_backend: Any,
     recent_projects: list,
 ) -> Dict[str, Any]:
-    """Handle creation of research documents and bug reports."""
-    from pathlib import Path
-    from datetime import datetime
-    import json
-
-    # Ensure metadata is a dict using bulletproof normalization
+    """Handle creation of research, bug, review, and agent report card documents."""
     metadata = _normalize_metadata(metadata)
 
-    # Validate required parameters
-    if action == "create_research_doc" and not doc_name:
-        return {
-            "ok": False,
-            "error": "doc_name is required for research document creation",
-            "recent_projects": recent_projects,
-        }
+    project_root = Path(project.get("root", ""))
+    docs_dir = project_root / "docs" / "dev_plans" / project.get("name", "")
+    now = datetime.now(timezone.utc)
+    timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S UTC")
 
-    if action == "create_bug_report":
-        if not metadata or not metadata.get("category"):
+    template_name = ""
+    doc_label = ""
+    target_path: Optional[Path] = None
+    index_updater: Optional[Callable[[], Awaitable[None]]] = None
+    extra_metadata: Dict[str, Any] = {}
+
+    if action == "create_research_doc":
+        if not doc_name:
+            return {
+                "ok": False,
+                "error": "doc_name is required for research document creation",
+                "recent_projects": recent_projects,
+            }
+        safe_name = doc_name.replace(" ", "_")
+        research_dir = docs_dir / "research"
+        target_path = research_dir / f"{safe_name}.md"
+        template_name = "RESEARCH_REPORT_TEMPLATE.md"
+        doc_label = "research_report"
+        extra_metadata = {
+            "title": doc_name.replace("_", " ").title(),
+            "doc_name": safe_name,
+            "researcher": metadata.get("researcher", agent_id),
+        }
+        index_updater = lambda: _update_research_index(research_dir, agent_id)
+    elif action == "create_bug_report":
+        category = metadata.get("category")
+        if not category:
             return {
                 "ok": False,
                 "error": "metadata with 'category' is required for bug report creation",
                 "recent_projects": recent_projects,
             }
-
-    # Generate document path
-    project_root = Path(project.get("root", ""))
-    docs_dir = project_root / "docs" / "dev_plans" / project.get("name", "")
-
-    if action == "create_research_doc":
-        # Create research directory
-        research_dir = docs_dir / "research"
-        target_path = research_dir / f"{doc_name}.md"
-
-        # Generate default content if not provided
-        if not content:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
-            content = f"""# {doc_name.replace('_', ' ').title()}
-
-**Research Date:** {datetime.now().strftime("%Y-%m-%d")}
-**Researcher:** {agent_id}
-**Project:** {project.get('name')}
-**Document Version:** 1.0
-
----
-
-## Executive Summary
-
-<!-- Executive summary of research findings -->
-
----
-
-## Research Scope
-
-**Research Goal:** [Describe the primary research objective]
-
-**Investigation Areas:**
-- [ ] Area 1
-- [ ] Area 2
-- [ ] Area 3
-
----
-
-## Findings
-
-### Finding 1
-**Details:** [Describe the finding]
-
-**Evidence:** [Provide evidence/code references]
-
-**Confidence:** High/Medium/Low
-
----
-
-## Technical Analysis
-
-### Code Patterns Identified
-- Pattern 1: [Description]
-- Pattern 2: [Description]
-
-### Dependencies
-- External: [List]
-- Internal: [List]
-
----
-
-## Risks and Considerations
-
-### Technical Risks
-- **Risk:** [Description]
-- **Mitigation:** [Strategy]
-
-### Implementation Considerations
-- **Complexity:** [Assessment]
-- **Timeline:** [Estimate]
-
----
-
-## Recommendations
-
-1. **Recommendation 1:** [Details]
-2. **Recommendation 2:** [Details]
-
----
-
-## Next Steps
-
-- [ ] Step 1
-- [ ] Step 2
-- [ ] Step 3
-
----
-
-*This research document is part of the development audit trail for {project.get('name')}.*
-"""
-
-    elif action == "create_review_report":
-        # Create review report in project docs directory
-        timestamp = datetime.now().strftime("%Y-%m-%d")
-        stage = metadata.get("stage", "unknown")
-        target_path = docs_dir / f"REVIEW_REPORT_{stage}_{timestamp}_{datetime.now().strftime('%H%M')}.md"
-
-        # Generate default content using Jinja2 template if not provided
-        if not content:
-            content = await _render_review_report_template(project, agent_id, stage, metadata)
-
-    elif action == "create_agent_report_card":
-        # Create agent report card in project docs directory
-        agent_name = metadata.get("agent_name", "unknown_agent")
-        stage = metadata.get("stage", "unknown")
-        target_path = docs_dir / f"AGENT_REPORT_CARD_{agent_name}_{stage}_{datetime.now().strftime('%Y%m%d_%H%M')}.md"
-
-        # Generate default content using Jinja2 template if not provided
-        if not content:
-            content = await _render_agent_report_card_template(project, agent_id, agent_name, stage, metadata)
-
-    elif action == "create_bug_report":
-        # Create bug report directory structure
-        from scribe_mcp.utils.time import format_utc
-        timestamp = datetime.now().strftime("%Y-%m-%d")
-        category = metadata.get("category", "general")
-        slug = metadata.get("slug", f"bug_{int(datetime.now().timestamp())}")
-
-        bug_dir = project_root / "docs" / "bugs" / category / f"{timestamp}_{slug}"
+        slug = metadata.get("slug") or f"bug_{int(now.timestamp())}"
+        bug_dir = project_root / "docs" / "bugs" / category / f"{now.strftime('%Y-%m-%d')}_{slug}"
         target_path = bug_dir / "report.md"
+        template_name = "BUG_REPORT_TEMPLATE.md"
+        doc_label = "bug_report"
+        extra_metadata = {
+            "slug": slug,
+            "category": category,
+            "reported_at": metadata.get("reported_at", timestamp_str),
+        }
+        index_updater = lambda: _update_bug_index(project_root / "docs" / "bugs", agent_id)
+    elif action == "create_review_report":
+        stage = metadata.get("stage", "unknown")
+        target_path = docs_dir / f"REVIEW_REPORT_{stage}_{now.strftime('%Y-%m-%d')}_{now.strftime('%H%M')}.md"
+        template_name = "REVIEW_REPORT_TEMPLATE.md"
+        doc_label = "review_report"
+        extra_metadata = {"stage": stage}
+        index_updater = lambda: _update_review_index(docs_dir, agent_id)
+    elif action == "create_agent_report_card":
+        card_agent = metadata.get("agent_name", agent_id)
+        stage = metadata.get("stage", "unknown")
+        target_path = docs_dir / f"AGENT_REPORT_CARD_{card_agent}_{stage}_{now.strftime('%Y%m%d_%H%M')}.md"
+        template_name = "AGENT_REPORT_CARD_TEMPLATE.md"
+        doc_label = "agent_report_card"
+        extra_metadata = {
+            "agent_name": card_agent,
+            "stage": stage,
+        }
+        index_updater = lambda: _update_agent_card_index(docs_dir, agent_id)
+    else:
+        return {
+            "ok": False,
+            "error": f"Unsupported special document action: {action}",
+            "recent_projects": recent_projects,
+        }
 
-        # Generate default bug report content
-        if not content:
-            content = f"""# Bug Report: {metadata.get('title', 'Untitled Bug')}
+    prepared_metadata = _build_special_metadata(project, metadata, agent_id, extra_metadata)
 
-**Bug ID:** {slug}
-**Category:** {category}
-**Severity:** {metadata.get('severity', 'medium')}
-**Status:** INVESTIGATING
-**Report Date:** {format_utc()}
-**Reporter:** {agent_id}
-**Project:** {project.get('name')}
+    rendered_content = content
+    if not rendered_content:
+        try:
+            if action == "create_review_report":
+                rendered_content = await _render_review_report_template(
+                    project,
+                    agent_id,
+                    prepared_metadata,
+                )
+            elif action == "create_agent_report_card":
+                rendered_content = await _render_agent_report_card_template(
+                    project,
+                    agent_id,
+                    prepared_metadata,
+                )
+            else:
+                rendered_content = await _render_special_template(
+                    project,
+                    agent_id,
+                    template_name,
+                    metadata,
+                    extra_metadata=extra_metadata,
+                    prepared_metadata=prepared_metadata,
+                )
+        except DocumentOperationError as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "recent_projects": recent_projects,
+            }
 
----
+    if rendered_content is None:
+        return {
+            "ok": False,
+            "error": "Failed to render document content.",
+            "recent_projects": recent_projects,
+        }
 
-## Bug Description
-
-### Summary
-[Brief description of the bug]
-
-### Expected Behavior
-[What should happen]
-
-### Actual Behavior
-[What actually happens]
-
-### Steps to Reproduce
-1. [Step 1]
-2. [Step 2]
-3. [Step 3]
-
-### Environment
-- **Component:** {metadata.get('component', 'unknown')}
-- **Version:** [Version if applicable]
-
----
-
-## Investigation Details
-
-### Root Cause Analysis
-[Analysis of what's causing the bug]
-
-### Affected Areas
-- **Files:** [List of affected files]
-- **Components:** [List of affected components]
-
----
-
-## Resolution Plan
-
-### Immediate Actions
-- [ ] [Action 1]
-- [ ] [Action 2]
-
-### Long-term Fixes
-- [ ] [Fix 1]
-- [ ] [Fix 2]
-
----
-
-## Testing Strategy
-
-### Reproduction Test
-- [ ] Create minimal reproduction case
-- [ ] Verify bug can be consistently reproduced
-
-### Fix Verification
-- [ ] Test fix against reproduction case
-- [ ] Verify no regression in other areas
-
----
-
-## Timeline
-
-- **Investigation:** [Time estimate]
-- **Fix Development:** [Time estimate]
-- **Testing:** [Time estimate]
-- **Deployment:** [Time estimate]
-
----
-
-## Related Issues
-
-- **Links:** [Related issues or discussions]
-- **Dependencies:** [Any dependencies affecting this bug]
-
----
-
-*This bug report is tracked in the project audit trail for {project.get('name')}.*
-"""
-
-    # Safety check
     try:
         target_path.resolve().relative_to(project_root.resolve())
     except ValueError:
@@ -571,49 +608,72 @@ async def _handle_special_document_creation(
             "ok": True,
             "dry_run": True,
             "path": str(target_path),
-            "content": content,
+            "content": rendered_content,
             "recent_projects": recent_projects,
         }
 
-    # Create directories and write file
+    before_hash = ""
+    if target_path.exists():
+        try:
+            before_hash = _hash_text(target_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            before_hash = ""
+
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(rendered_content, encoding="utf-8")
 
-        # Write the document
-        with open(target_path, 'w', encoding='utf-8') as f:
-            f.write(content)
+        after_hash = _hash_text(rendered_content)
 
-        # Log the creation
-        # Use bulletproof metadata normalization
-        log_meta = _normalize_metadata(metadata)
-        log_meta.update({
-            "document_type": action,
-            "file_path": str(target_path),
-            "file_size": target_path.stat().st_size,
-        })
+        await _record_special_doc_change(
+            storage_backend,
+            project,
+            agent_id,
+            doc_label,
+            target_path,
+            prepared_metadata,
+            before_hash,
+            after_hash,
+        )
+        if doc_label == "agent_report_card":
+            await _record_agent_report_card_metadata(
+                storage_backend,
+                project,
+                agent_id,
+                target_path,
+                prepared_metadata,
+            )
+
+        log_meta = _normalize_metadata(prepared_metadata)
+        log_meta.update(
+            {
+                "document_type": doc_label,
+                "file_path": str(target_path),
+                "file_size": target_path.stat().st_size,
+            }
+        )
+        for key, value in list(log_meta.items()):
+            if isinstance(value, (dict, list)):
+                try:
+                    log_meta[key] = json.dumps(value, sort_keys=True)
+                except (TypeError, ValueError):
+                    log_meta[key] = str(value)
 
         await append_entry(
-            message=f"Created {action.replace('_', ' ')}: {target_path.name}",
+            message=f"Created {doc_label.replace('_', ' ')}: {target_path.name}",
             status="success",
             meta=log_meta,
             agent=agent_id,
             log_type="doc_updates",
         )
 
-        # Update INDEX files if needed
-        if action == "create_research_doc":
-            await _update_research_index(docs_dir / "research", agent_id)
-        elif action == "create_bug_report":
-            await _update_bug_index(project_root / "docs" / "bugs", agent_id)
-        elif action == "create_review_report":
-            await _update_review_index(docs_dir, agent_id)
-        elif action == "create_agent_report_card":
-            await _update_agent_card_index(docs_dir, agent_id)
+        if index_updater:
+            await index_updater()
 
         return {
             "ok": True,
             "path": str(target_path),
-            "document_type": action,
+            "document_type": doc_label,
             "file_size": target_path.stat().st_size,
             "recent_projects": recent_projects,
         }
@@ -621,7 +681,7 @@ async def _handle_special_document_creation(
     except Exception as exc:
         return {
             "ok": False,
-            "error": f"Failed to create document: {str(exc)}",
+            "error": f"Failed to create document: {exc}",
             "recent_projects": recent_projects,
         }
 
@@ -966,8 +1026,7 @@ This directory contains agent performance evaluation reports generated during th
 async def _render_review_report_template(
     project: Dict[str, Any],
     agent_id: str,
-    stage: str,
-    metadata: Dict[str, Any]
+    prepared_metadata: Dict[str, Any],
 ) -> str:
     """Render review report using Jinja2 template."""
     try:
@@ -981,13 +1040,11 @@ async def _render_review_report_template(
         )
 
         # Prepare template context
-        template_context = {
-            "project_name": project.get("name", ""),
-            "agent_id": agent_id,
-            "stage": stage,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC"),
-            **metadata
-        }
+        template_context = prepared_metadata.copy()
+        template_context.setdefault("project_name", project.get("name", ""))
+        template_context.setdefault("agent_id", agent_id)
+        template_context.setdefault("timestamp", _current_timestamp())
+        template_context.setdefault("stage", prepared_metadata.get("stage", "unknown"))
 
         # Render template
         rendered = engine.render_template(
@@ -1000,6 +1057,7 @@ async def _render_review_report_template(
     except (TemplateEngineError, ImportError) as e:
         print(f"⚠️ Template engine error for review report: {e}")
         # Fallback to basic content if template engine fails
+        stage = prepared_metadata.get("stage", "unknown")
         return f"""# Review Report: {stage.replace('_', ' ').title()} Stage
 
 **Review Date:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")}
@@ -1031,9 +1089,7 @@ async def _render_review_report_template(
 async def _render_agent_report_card_template(
     project: Dict[str, Any],
     agent_id: str,
-    agent_name: str,
-    stage: str,
-    metadata: Dict[str, Any]
+    prepared_metadata: Dict[str, Any],
 ) -> str:
     """Render agent report card using Jinja2 template."""
     try:
@@ -1047,14 +1103,12 @@ async def _render_agent_report_card_template(
         )
 
         # Prepare template context
-        template_context = {
-            "project_name": project.get("name", ""),
-            "agent_id": agent_id,
-            "agent_name": agent_name,
-            "stage": stage,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC"),
-            **metadata
-        }
+        template_context = prepared_metadata.copy()
+        template_context.setdefault("project_name", project.get("name", ""))
+        template_context.setdefault("agent_id", agent_id)
+        template_context.setdefault("timestamp", _current_timestamp())
+        template_context.setdefault("agent_name", prepared_metadata.get("agent_name", agent_id))
+        template_context.setdefault("stage", prepared_metadata.get("stage", "unknown"))
 
         # Render template
         rendered = engine.render_template(
@@ -1067,6 +1121,8 @@ async def _render_agent_report_card_template(
     except (TemplateEngineError, ImportError) as e:
         print(f"⚠️ Template engine error for agent report card: {e}")
         # Fallback to basic content if template engine fails
+        agent_name = prepared_metadata.get("agent_name", agent_id)
+        stage = prepared_metadata.get("stage", "unknown")
         return f"""# Agent Performance Report Card
 
 **Agent:** {agent_name}

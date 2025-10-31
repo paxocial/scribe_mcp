@@ -1,10 +1,10 @@
 # Agent Performance Report Card
 
-**Agent:** {{ agent_name }}
-**Review Date:** {{ timestamp }}
-**Reviewer:** {{ agent_id }}
-**Project:** {{ project_name }}
-**Stage:** {{ stage }}
+**Agent:** {{ agent_name | default(project_name | default("Unknown Agent")) }}
+**Review Date:** {{ timestamp | default(date_utc | default("1970-01-01 00:00:00 UTC")) }}
+**Reviewer:** {{ agent_id | default(author | default("Scribe")) }}
+**Project:** {{ project_name | default(PROJECT_NAME | default("Unknown Project")) }}
+**Stage:** {{ stage | default("unspecified") }}
 **Report Type:** Performance Evaluation
 
 ---
@@ -12,9 +12,9 @@
 <!-- ID: executive_summary -->
 ## Executive Summary
 
-**Overall Grade:** {{ overall_grade | default('[Score]%') }}
-**Performance Level:** {{ performance_level | default('[EXCELLENT/GOOD/SATISFACTORY/NEEDS_IMPROVEMENT/POOR]') }}
-**Recommendation:** {{ recommendation | default('[CONTINUE_TRAINING/RETRAIN/DISMISS]') }}
+**Overall Grade:** {{ overall_grade | default(metadata.overall_grade | default('[Score]%')) }}
+**Performance Level:** {{ performance_level | default(metadata.performance_level | default('[EXCELLENT/GOOD/SATISFACTORY/NEEDS_IMPROVEMENT/POOR]')) }}
+**Recommendation:** {{ recommendation | default(metadata.recommendation | default('[CONTINUE_TRAINING/RETRAIN/DISMISS]')) }}
 
 ---
 

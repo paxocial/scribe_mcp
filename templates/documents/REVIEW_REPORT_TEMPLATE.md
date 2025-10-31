@@ -1,19 +1,24 @@
-# Review Report: {{ stage.replace('_', ' ').title() }} Stage
+# Review Report: {{ (stage | default(metadata.stage | default("stage_unspecified"))).replace('_', ' ').title() }} Stage
 
-**Review Date:** {{ timestamp }}
-**Reviewer:** {{ agent_id }}
-**Project:** {{ project_name }}
-**Stage:** {{ stage }}
-**Review Type:** {{ "Pre-Implementation" if stage.startswith("Stage") else "Post-Implementation" }}
+{% set stage_value = stage | default(metadata.stage | default("stage_unspecified")) %}
+{% set review_timestamp = timestamp | default(date_utc | default("1970-01-01 00:00:00 UTC")) %}
+{% set reviewer_name = agent_id | default(author | default("Scribe Reviewer")) %}
+{% set review_project = project_name | default(PROJECT_NAME | default("Unknown Project")) %}
+**Review Date:** {{ review_timestamp }}
+**Reviewer:** {{ reviewer_name }}
+**Project:** {{ review_project }}
+**Stage:** {{ stage_value }}
+{% set review_type = "Pre-Implementation" if stage_value.startswith("Stage") else "Post-Implementation" %}
+**Review Type:** {{ review_type }}
 
 ---
 
 <!-- ID: executive_summary -->
 ## Executive Summary
 
-**Overall Decision:** {{ overall_decision | default('[APPROVED/REJECTED/REQUIRES_REVISION]') }}
+**Overall Decision:** {{ overall_decision | default(metadata.overall_decision | default('[APPROVED/REJECTED/REQUIRES_REVISION]')) }}
 
-**Confidence Level:** {{ confidence_level | default('[High/Medium/Low]') }}
+**Confidence Level:** {{ confidence_level | default(metadata.confidence_level | default('[High/Medium/Low]')) }}
 
 **Key Findings:**
 - [ ] {{ key_finding_1 | default('Finding 1') }}

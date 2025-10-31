@@ -263,6 +263,45 @@ class SQLiteStorage(StorageBackend):
                 (project.id,),
             )
 
+    async def record_agent_report_card(
+        self,
+        project: ProjectRecord,
+        *,
+        file_path: str,
+        agent_name: str,
+        stage: Optional[str],
+        overall_grade: Optional[float],
+        performance_level: Optional[str],
+        metadata: Optional[Dict[str, Any]],
+    ) -> None:
+        await self._initialise()
+        meta_json = json.dumps(metadata or {}, sort_keys=True)
+        async with self._write_lock:
+            await self._execute(
+                """
+                INSERT INTO agent_report_cards
+                    (project_id, file_path, agent_name, stage, overall_grade, performance_level, metadata, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id, file_path)
+                DO UPDATE SET agent_name = excluded.agent_name,
+                              stage = excluded.stage,
+                              overall_grade = excluded.overall_grade,
+                              performance_level = excluded.performance_level,
+                              metadata = excluded.metadata,
+                              updated_at = excluded.updated_at;
+                """,
+                (
+                    project.id,
+                    file_path,
+                    agent_name,
+                    stage,
+                    overall_grade,
+                    performance_level,
+                    meta_json,
+                    utcnow().isoformat(),
+                ),
+            )
+
     async def fetch_recent_entries(
         self,
         *,
@@ -724,15 +763,19 @@ class SQLiteStorage(StorageBackend):
                     """
                     CREATE TABLE IF NOT EXISTS document_sections (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        project_id INTEGER NOT NULL REFERENCES scribe_projects(id) ON DELETE CASCADE,
-                        document_type TEXT NOT NULL,
-                        section_id TEXT NOT NULL,
+                        project_id INTEGER REFERENCES scribe_projects(id) ON DELETE CASCADE,
+                        project_root TEXT,
+                        document_type TEXT,
+                        section_id TEXT,
+                        file_path TEXT,
+                        relative_path TEXT,
                         content TEXT NOT NULL,
                         file_hash TEXT NOT NULL,
                         metadata TEXT,
                         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE(project_id, document_type, section_id)
+                        UNIQUE(project_id, document_type, section_id),
+                        UNIQUE(project_root, file_path)
                     );
                     """,
                     """
@@ -751,12 +794,13 @@ class SQLiteStorage(StorageBackend):
                     """
                     CREATE TABLE IF NOT EXISTS document_changes (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        project_id INTEGER NOT NULL REFERENCES scribe_projects(id) ON DELETE CASCADE,
-                        document_path TEXT NOT NULL,
+                        project_id INTEGER REFERENCES scribe_projects(id) ON DELETE CASCADE,
+                        project_root TEXT,
+                        file_path TEXT,
                         change_type TEXT NOT NULL,
                         old_content_hash TEXT,
                         new_content_hash TEXT,
-                        change_summary TEXT NOT NULL,
+                        change_summary TEXT,
                         metadata TEXT,
                         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                     );
@@ -764,13 +808,30 @@ class SQLiteStorage(StorageBackend):
                     """
                     CREATE TABLE IF NOT EXISTS sync_status (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        project_id INTEGER NOT NULL REFERENCES scribe_projects(id) ON DELETE CASCADE,
+                        project_id INTEGER REFERENCES scribe_projects(id) ON DELETE CASCADE,
+                        project_root TEXT,
                         file_path TEXT NOT NULL,
+                        relative_path TEXT,
                         last_sync_at TEXT,
                         last_file_hash TEXT,
                         last_db_hash TEXT,
                         sync_status TEXT NOT NULL DEFAULT 'synced',
                         conflict_details TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(project_id, file_path)
+                    );
+                    """,
+                    """
+                    CREATE TABLE IF NOT EXISTS agent_report_cards (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        project_id INTEGER NOT NULL REFERENCES scribe_projects(id) ON DELETE CASCADE,
+                        file_path TEXT NOT NULL,
+                        agent_name TEXT NOT NULL,
+                        stage TEXT,
+                        overall_grade REAL,
+                        performance_level TEXT,
+                        metadata TEXT,
                         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(project_id, file_path)
@@ -813,7 +874,98 @@ class SQLiteStorage(StorageBackend):
                     """,
                 ]
             )
+            await self._migrate_document_sections()
+            await self._ensure_column("document_changes", "project_root", "TEXT")
+            await self._ensure_column("document_changes", "file_path", "TEXT")
+            await self._ensure_column("sync_status", "project_root", "TEXT")
+            await self._ensure_column("sync_status", "relative_path", "TEXT")
+            await self._ensure_column("document_sections", "project_root", "TEXT")
+            await self._ensure_column("document_sections", "file_path", "TEXT")
+            await self._ensure_column("document_sections", "relative_path", "TEXT")
+            await self._ensure_index("CREATE UNIQUE INDEX IF NOT EXISTS idx_document_sections_file_path ON document_sections(project_root, file_path);")
+            await self._ensure_index("CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_status_file_path ON sync_status(project_root, file_path);")
+            await self._ensure_index("CREATE INDEX IF NOT EXISTS idx_agent_report_cards_project_agent ON agent_report_cards(project_id, agent_name);")
+            await self._ensure_index("CREATE INDEX IF NOT EXISTS idx_agent_report_cards_stage ON agent_report_cards(stage);")
             self._initialised = True
+
+    async def _migrate_document_sections(self) -> None:
+        await asyncio.to_thread(self._migrate_document_sections_sync)
+
+    def _migrate_document_sections_sync(self) -> None:
+        conn = self._connect()
+        try:
+            cursor = conn.execute("PRAGMA table_info(document_sections);")
+            columns = cursor.fetchall()
+            if not columns:
+                return
+            column_map = {row["name"]: row for row in columns}
+            needs_rebuild = False
+            document_type_info = column_map.get("document_type")
+            if "project_root" not in column_map or "file_path" not in column_map or (document_type_info and document_type_info["notnull"]):
+                needs_rebuild = True
+            if not needs_rebuild:
+                return
+
+            conn.execute("ALTER TABLE document_sections RENAME TO document_sections_legacy;")
+            conn.execute(
+                """
+                CREATE TABLE document_sections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER REFERENCES scribe_projects(id) ON DELETE CASCADE,
+                    project_root TEXT,
+                    document_type TEXT,
+                    section_id TEXT,
+                    file_path TEXT,
+                    relative_path TEXT,
+                    content TEXT NOT NULL,
+                    file_hash TEXT NOT NULL,
+                    metadata TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(project_id, document_type, section_id),
+                    UNIQUE(project_root, file_path)
+                );
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO document_sections (project_id, document_type, section_id, content, file_hash, metadata, created_at, updated_at)
+                SELECT project_id, document_type, section_id, content, file_hash, metadata, created_at, updated_at
+                FROM document_sections_legacy;
+                """
+            )
+            conn.execute("DROP TABLE document_sections_legacy;")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    async def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        await asyncio.to_thread(self._ensure_column_sync, table, column, definition)
+
+    def _ensure_column_sync(self, table: str, column: str, definition: str) -> None:
+        conn = self._connect()
+        try:
+            cursor = conn.execute(f"PRAGMA table_info({table});")
+            existing = {row["name"] for row in cursor.fetchall()}
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition};")
+                conn.commit()
+        finally:
+            conn.close()
+
+    async def _ensure_index(self, statement: str) -> None:
+        await asyncio.to_thread(self._ensure_index_sync, statement)
+
+    def _ensure_index_sync(self, statement: str) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(statement)
+            conn.commit()
+        finally:
+            conn.close()
 
     async def _execute(self, query: str, params: tuple[Any, ...]) -> None:
         await asyncio.to_thread(self._execute_sync, query, params)

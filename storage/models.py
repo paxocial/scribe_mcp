@@ -159,6 +159,20 @@ class SyncStatusRecord:
     updated_at: Optional[datetime] = None
 
 
+@dataclass
+class AgentReportCardRecord:
+    id: int
+    project_id: int
+    file_path: str
+    agent_name: str
+    stage: Optional[str]
+    overall_grade: Optional[float]
+    performance_level: Optional[str]
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
 # Vector Index Models
 
 @dataclass

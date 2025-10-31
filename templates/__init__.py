@@ -21,6 +21,10 @@ TEMPLATE_FILENAMES = {
     "doc_log": "DOC_LOG_TEMPLATE.md",
     "security_log": "SECURITY_LOG_TEMPLATE.md",
     "bug_log": "BUG_LOG_TEMPLATE.md",
+    "research_report": "RESEARCH_REPORT_TEMPLATE.md",
+    "bug_report": "BUG_REPORT_TEMPLATE.md",
+    "review_report": "REVIEW_REPORT_TEMPLATE.md",
+    "agent_report_card": "AGENT_REPORT_CARD_TEMPLATE.md",
 }
 
 _PROJECT_VARIABLES_CACHE: Dict[str, Any] | None = None
