@@ -402,6 +402,16 @@ async def _render_content(
     metadata: Optional[Dict[str, Any]],
 ) -> str:
     """Render content using Jinja2 template engine with fallback to direct content."""
+    # Handle case where metadata comes as JSON string from MCP framework
+    if metadata is None:
+        metadata = {}
+    elif isinstance(metadata, str):
+        try:
+            import json
+            metadata = json.loads(metadata)
+        except (json.JSONDecodeError, TypeError):
+            metadata = {}
+
     if template_name:
         try:
             # Import template engine dynamically to avoid circular imports

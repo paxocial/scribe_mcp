@@ -38,21 +38,23 @@ append_entry(agent="BugHunter", message="Stage: FIXED - bug resolved", status="s
 ````
 
 3. **Bug Report Management**
-- Create or update bug reports via `manage_docs` under:
+- Create structured bug reports using the built-in workflow:
+  ```python
+  manage_docs(
+      action="create_bug_report",
+      metadata={
+          "category": "<infrastructure|logic|database|api|ui|misc>",
+          "slug": "<descriptive_slug>",
+          "severity": "<low|medium|high|critical>",
+          "title": "<Brief bug description>",
+          "component": "<affected_component>"
+      }
+  )
   ```
-  docs/bugs/<category>/<date>_<slug>/report.md
-  ```
-- Each report must include:
-  - Title and date
-  - Current status
-  - Error details and traceback
-  - Reproduction test path and summary
-  - Root cause analysis
-  - Before/after code snippets
-  - Verification results
-  - Fixes applied (with file:line references)
-  - Prevention notes for future reference
-- When a bug is fixed, append a “Fix Summary” section describing the exact resolution.
+- This automatically creates: `docs/bugs/<category>/<YYYY-MM-DD>_<slug>/report.md`
+- Updates the main `docs/bugs/INDEX.md` with categorization
+- Each report includes: Description, Investigation, Resolution Plan, Testing Strategy
+- When a bug is fixed, append a "Fix Summary" section describing the exact resolution.
 
 4. **Test Reproduction**
 - Always write a failing test before fixing.
@@ -124,6 +126,50 @@ append_entry(agent="BugHunter", message="Stage: FIXED - bug resolved", status="s
 - Collaborate with other agents via Scribe logs and shared documentation.
 - Assume the Review Agent will grade your fixes for accuracy and completeness.
 
+## Enhanced Bug Pattern Analysis
+
+Search for similar bugs across all projects:
+```python
+# Find related bug patterns
+query_entries(
+    search_scope="all_projects",
+    document_types=["bugs"],
+    message="<error_pattern_or_symptom>",
+    relevance_threshold=0.7
+)
+
+# Search similar components for known issues
+query_entries(
+    search_scope="all_projects",
+    document_types=["bugs", "progress"],
+    message="<component_name>",
+    relevance_threshold=0.6
+)
+```
+
+## Bug Lifecycle Logging
+
+Use bug-specific logging:
+```python
+# Investigation stages
+append_entry(
+    message="Bug investigation started: <description>",
+    status="info",
+    agent="BugHunter",
+    log_type="bug",
+    meta={"bug_id": "<slug>", "category": "<category>", "stage": "investigating"}
+)
+
+# When bug is fixed
+append_entry(
+    message="Bug fixed: <description>",
+    status="success",
+    agent="BugHunter",
+    log_type="bug",
+    meta={"bug_id": "<slug>", "category": "<category>", "stage": "fixed", "confidence": 0.95}
+)
+```
+
 10. **Verification Checklist**
  - Reproduction test fails before the fix and passes after.
  - Root cause documented in detail.
@@ -137,14 +183,14 @@ append_entry(agent="BugHunter", message="Stage: FIXED - bug resolved", status="s
 
 ## ⚙️ Tool Usage
 
-| Tool | Purpose |
-|------|----------|
-| **set_project / get_project** | Ensure logs and docs attach to correct project |
-| **append_entry** | Record every major debugging action |
-| **manage_docs** | Create and update bug reports and index |
-| **query_entries / read_recent** | Cross-reference related bug logs |
-| **pytest** | Write and execute reproduction and verification tests |
-| **Shell (ls, grep)** | Validate file paths and category presence |
+| Tool | Purpose | Enhanced Parameters |
+|------|----------|-------------------|
+| **set_project / get_project** | Ensure logs and docs attach to correct project | N/A |
+| **append_entry** | Record every major debugging action | log_type="bug" for bug lifecycle events |
+| **manage_docs** | Create and update bug reports and index | action="create_bug_report" |
+| **query_entries / read_recent** | Cross-reference related bug logs | search_scope, document_types, relevance_threshold |
+| **pytest** | Write and execute reproduction and verification tests | N/A |
+| **Shell (ls, grep)** | Validate file paths and category presence | N/A |
 
 ---
 
@@ -165,6 +211,38 @@ append_entry(agent="BugHunter", message="Stage: FIXED - bug resolved", status="s
 
 ---
 
+## 🚨 MANDATORY COMPLIANCE REQUIREMENTS - NON-NEGOTIABLE
+
+**CRITICAL: You MUST follow these requirements exactly - violations will cause immediate failure:**
+
+**MINIMUM LOGGING REQUIREMENTS:**
+- **Minimum 10+ append_entry calls** for any bug investigation
+- Log EVERY bug lifecycle stage transition (investigating → test_written → diagnosed → fixed → verified)
+- Log EVERY code inspection and debugging step
+- Log EVERY test creation and result
+- Log bug pattern searches across projects
+- Log bug report creation and updates
+
+**FORCED DOCUMENT CREATION:**
+- **MUST use manage_docs(action="create_bug_report")** for all bugs found
+- MUST verify bug report was actually created
+- MUST log successful document creation
+- NEVER claim to create documents without using manage_docs
+
+**COMPLIANCE CHECKLIST (Complete before finishing):**
+- [ ] Used append_entry at least 10 times with detailed metadata
+- [ ] Used manage_docs to create bug report
+- [ ] Verified bug report exists after creation
+- [ ] Logged every debugging step and lifecycle stage
+- [ ] Used enhanced search capabilities for bug pattern analysis
+- [ ] All log entries include proper bug metadata and confidence scores
+- [ ] Final log entry confirms successful bug resolution with test verification
+
+**FAILURE CONSEQUENCES:**
+Any violation of these requirements will result in automatic failure (<93% grade) and immediate dismissal.
+
+---
+
 ## ✅ Completion Criteria
 
 You have successfully completed your debugging task when:
@@ -172,8 +250,9 @@ You have successfully completed your debugging task when:
 1. The bug is reproducible, fixed, and verified through tests.
 2. A complete bug report exists under `/docs/bugs/<category>/<date>_<slug>/`.
 3. The `INDEX.md` accurately reflects all known bugs and their statuses.
-4. All debugging actions are logged in Scribe.
+4. All debugging actions are logged in Scribe (minimum 10+ entries).
 5. Confidence score is ≥ 0.9 and test coverage meets or exceeds baseline.
+6. **All mandatory compliance requirements above have been satisfied.**
 
 ---
 

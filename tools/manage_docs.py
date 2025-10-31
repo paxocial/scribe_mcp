@@ -8,8 +8,29 @@ from typing import Any, Dict, Optional
 from scribe_mcp import server as server_module, reminders
 from scribe_mcp.server import app
 from scribe_mcp.tools.project_utils import load_active_project
-from scribe_mcp.doc_management.manager import apply_doc_change
+from scribe_mcp.doc_management.manager import apply_doc_change, DocumentOperationError
 from scribe_mcp.tools.append_entry import append_entry
+
+
+def _normalize_metadata(metadata: Optional[Dict[str, Any] | str]) -> Dict[str, Any]:
+    """Normalize metadata parameter to handle both dict and JSON string inputs from MCP framework."""
+    if metadata is None:
+        return {}
+    elif isinstance(metadata, str):
+        try:
+            import json
+            return json.loads(metadata)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return {}
+    elif isinstance(metadata, dict):
+        return metadata.copy() if metadata else {}
+    else:
+        # Handle any other unexpected types
+        try:
+            import json
+            return json.loads(str(metadata))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return {}
 
 
 @app.tool()
@@ -43,8 +64,8 @@ async def manage_docs(
     if agent_identity:
         agent_id = await agent_identity.get_or_create_agent_id()
 
-    # Handle research and bug document creation
-    if action in ["create_research_doc", "create_bug_report"]:
+    # Handle research, bug, and review document creation
+    if action in ["create_research_doc", "create_bug_report", "create_review_report", "create_agent_report_card"]:
         return await _handle_special_document_creation(
             project,
             action=action,
@@ -104,7 +125,8 @@ async def manage_docs(
 
     log_error = None
     if not dry_run:
-        log_meta = metadata.copy() if metadata else {}
+        # Use bulletproof metadata normalization
+        log_meta = _normalize_metadata(metadata)
         log_meta.update(
             {
                 "doc": doc,
@@ -304,14 +326,8 @@ async def _handle_special_document_creation(
     from datetime import datetime
     import json
 
-    # Ensure metadata is a dict first
-    if metadata is None:
-        metadata = {}
-    elif isinstance(metadata, str):
-        try:
-            metadata = json.loads(metadata)
-        except json.JSONDecodeError:
-            metadata = {}
+    # Ensure metadata is a dict using bulletproof normalization
+    metadata = _normalize_metadata(metadata)
 
     # Validate required parameters
     if action == "create_research_doc" and not doc_name:
@@ -419,6 +435,26 @@ async def _handle_special_document_creation(
 
 *This research document is part of the development audit trail for {project.get('name')}.*
 """
+
+    elif action == "create_review_report":
+        # Create review report in project docs directory
+        timestamp = datetime.now().strftime("%Y-%m-%d")
+        stage = metadata.get("stage", "unknown")
+        target_path = docs_dir / f"REVIEW_REPORT_{stage}_{timestamp}_{datetime.now().strftime('%H%M')}.md"
+
+        # Generate default content using Jinja2 template if not provided
+        if not content:
+            content = await _render_review_report_template(project, agent_id, stage, metadata)
+
+    elif action == "create_agent_report_card":
+        # Create agent report card in project docs directory
+        agent_name = metadata.get("agent_name", "unknown_agent")
+        stage = metadata.get("stage", "unknown")
+        target_path = docs_dir / f"AGENT_REPORT_CARD_{agent_name}_{stage}_{datetime.now().strftime('%Y%m%d_%H%M')}.md"
+
+        # Generate default content using Jinja2 template if not provided
+        if not content:
+            content = await _render_agent_report_card_template(project, agent_id, agent_name, stage, metadata)
 
     elif action == "create_bug_report":
         # Create bug report directory structure
@@ -548,7 +584,8 @@ async def _handle_special_document_creation(
             f.write(content)
 
         # Log the creation
-        log_meta = metadata.copy() if metadata else {}
+        # Use bulletproof metadata normalization
+        log_meta = _normalize_metadata(metadata)
         log_meta.update({
             "document_type": action,
             "file_path": str(target_path),
@@ -568,6 +605,10 @@ async def _handle_special_document_creation(
             await _update_research_index(docs_dir / "research", agent_id)
         elif action == "create_bug_report":
             await _update_bug_index(project_root / "docs" / "bugs", agent_id)
+        elif action == "create_review_report":
+            await _update_review_index(docs_dir, agent_id)
+        elif action == "create_agent_report_card":
+            await _update_agent_card_index(docs_dir, agent_id)
 
         return {
             "ok": True,
@@ -731,6 +772,328 @@ This directory contains bug reports generated during development and testing.
     index_path.parent.mkdir(parents=True, exist_ok=True)
     with open(index_path, 'w', encoding='utf-8') as f:
         f.write(content)
+
+
+async def _update_review_index(docs_dir: Path, agent_id: str) -> None:
+    """Update the review reports INDEX.md file."""
+    from datetime import datetime
+    index_path = docs_dir / "REVIEW_INDEX.md"
+
+    # Get all review reports
+    review_reports = []
+    for review_file in docs_dir.glob("REVIEW_REPORT_*.md"):
+        if review_file.name != "REVIEW_INDEX.md":
+            stat = review_file.stat()
+            # Extract stage from filename
+            try:
+                # Format: REVIEW_REPORT_Stage3_2025-10-31_1203.md
+                parts = review_file.stem.split('_')
+                stage = parts[2] if len(parts) > 2 else "unknown"
+                review_reports.append({
+                    "name": review_file.stem,
+                    "path": review_file.name,
+                    "stage": stage,
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                })
+            except:
+                continue
+
+    # Generate INDEX content
+    content = f"""# Review Reports Index
+
+*Last Updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")}*
+
+This directory contains review reports generated during the development quality assurance process.
+
+## Review Statistics
+
+- **Total Reports:** {len(review_reports)}
+- **Stages Reviewed:** {len(set(report['stage'] for report in review_reports))}
+
+## Recent Review Reports
+
+"""
+
+    if review_reports:
+        # Sort by modification time (newest first)
+        review_reports.sort(key=lambda x: x["modified"], reverse=True)
+
+        for report in review_reports[:20]:  # Show last 20
+            modified_time = datetime.fromtimestamp(report["modified"]).strftime("%Y-%m-%d %H:%M")
+            content += f"- **[{report['name']}]({report['path']})** - {report['stage']} - {modified_time}\n"
+
+        if len(review_reports) > 20:
+            content += f"\n*... and {len(review_reports) - 20} older reports*\n"
+    else:
+        content += "*No review reports found.*\n"
+
+    content += f"""
+
+## Browse by Stage
+
+"""
+
+    # Group by stage
+    stages = {}
+    for report in review_reports:
+        if report["stage"] not in stages:
+            stages[report["stage"]] = []
+        stages[report["stage"]].append(report)
+
+    for stage, reports in sorted(stages.items()):
+        content += f"### {stage.title()} ({len(reports)} reports)\n"
+        for report in reports[:5]:  # Show first 5 per stage
+            content += f"- [{report['name']}]({report['path']})\n"
+        if len(reports) > 5:
+            content += f"- ... and {len(reports) - 5} more\n"
+        content += "\n"
+
+    content += f"""
+
+## Index Information
+
+- **Index Location:** `{index_path}`
+- **Total Stages:** {len(stages)}
+- **Last Scan:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")}
+
+---
+
+*This index is automatically updated when review reports are created or modified.*"""
+
+    # Write the index
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(index_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+
+async def _update_agent_card_index(docs_dir: Path, agent_id: str) -> None:
+    """Update the agent report cards INDEX.md file."""
+    from datetime import datetime
+    index_path = docs_dir / "AGENT_CARDS_INDEX.md"
+
+    # Get all agent report cards
+    agent_cards = []
+    for card_file in docs_dir.glob("AGENT_REPORT_CARD_*.md"):
+        if card_file.name != "AGENT_CARDS_INDEX.md":
+            stat = card_file.stat()
+            # Extract agent name from filename
+            try:
+                # Format: AGENT_REPORT_CARD_ResearchAnalyst_Stage3_20251031_1203.md
+                parts = card_file.stem.split('_')
+                agent_name = parts[3] if len(parts) > 3 else "unknown"
+                stage = parts[4] if len(parts) > 4 else "unknown"
+                agent_cards.append({
+                    "name": card_file.stem,
+                    "path": card_file.name,
+                    "agent": agent_name,
+                    "stage": stage,
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                })
+            except:
+                continue
+
+    # Generate INDEX content
+    content = f"""# Agent Report Cards Index
+
+*Last Updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")}*
+
+This directory contains agent performance evaluation reports generated during the development process.
+
+## Agent Statistics
+
+- **Total Reports:** {len(agent_cards)}
+- **Agents Evaluated:** {len(set(report['agent'] for report in agent_cards))}
+- **Stages Covered:** {len(set(report['stage'] for report in agent_cards))}
+
+## Recent Agent Evaluations
+
+"""
+
+    if agent_cards:
+        # Sort by modification time (newest first)
+        agent_cards.sort(key=lambda x: x["modified"], reverse=True)
+
+        for card in agent_cards[:20]:  # Show last 20
+            modified_time = datetime.fromtimestamp(card["modified"]).strftime("%Y-%m-%d %H:%M")
+            content += f"- **[{card['name']}]({card['path']})** - {card['agent']} - {card['stage']} - {modified_time}\n"
+
+        if len(agent_cards) > 20:
+            content += f"\n*... and {len(agent_cards) - 20} older evaluations*\n"
+    else:
+        content += "*No agent report cards found.*\n"
+
+    content += f"""
+
+## Browse by Agent
+
+"""
+
+    # Group by agent
+    agents = {}
+    for card in agent_cards:
+        if card["agent"] not in agents:
+            agents[card["agent"]] = []
+        agents[card["agent"]].append(card)
+
+    for agent, cards in sorted(agents.items()):
+        content += f"### {agent} ({len(cards)} evaluations)\n"
+        for card in cards[:5]:  # Show first 5 per agent
+            content += f"- [{card['name']}]({card['path']})\n"
+        if len(cards) > 5:
+            content += f"- ... and {len(cards) - 5} more\n"
+        content += "\n"
+
+    content += f"""
+
+## Index Information
+
+- **Index Location:** `{index_path}`
+- **Total Agents:** {len(agents)}
+- **Last Scan:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")}
+
+---
+
+*This index is automatically updated when agent report cards are created or modified.*"""
+
+    # Write the index
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(index_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+
+async def _render_review_report_template(
+    project: Dict[str, Any],
+    agent_id: str,
+    stage: str,
+    metadata: Dict[str, Any]
+) -> str:
+    """Render review report using Jinja2 template."""
+    try:
+        from scribe_mcp.template_engine import Jinja2TemplateEngine, TemplateEngineError
+
+        # Initialize template engine
+        engine = Jinja2TemplateEngine(
+            project_root=Path(project.get("root", "")),
+            project_name=project.get("name", ""),
+            security_mode="sandbox"
+        )
+
+        # Prepare template context
+        template_context = {
+            "project_name": project.get("name", ""),
+            "agent_id": agent_id,
+            "stage": stage,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            **metadata
+        }
+
+        # Render template
+        rendered = engine.render_template(
+            template_name="REVIEW_REPORT_TEMPLATE.md",
+            metadata=template_context
+        )
+
+        return rendered
+
+    except (TemplateEngineError, ImportError) as e:
+        print(f"⚠️ Template engine error for review report: {e}")
+        # Fallback to basic content if template engine fails
+        return f"""# Review Report: {stage.replace('_', ' ').title()} Stage
+
+**Review Date:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")}
+**Reviewer:** {agent_id}
+**Project:** {project.get('name')}
+**Stage:** {stage}
+
+---
+
+<!-- ID: executive_summary -->
+## Executive Summary
+
+**Overall Decision:** {{ overall_decision | default('[APPROVED/REJECTED/REQUIRES_REVISION]') }}
+
+---
+
+<!-- ID: final_decision -->
+## Final Decision
+
+**{{ final_decision | default('[APPROVED/REJECTED/REQUIRES_REVISION]') }}**
+
+*This review report is part of the quality assurance process for {project.get('name')}.*
+"""
+    except Exception as e:
+        print(f"❌ Unexpected error rendering review report template: {e}")
+        raise DocumentOperationError(f"Failed to render review report template: {e}")
+
+
+async def _render_agent_report_card_template(
+    project: Dict[str, Any],
+    agent_id: str,
+    agent_name: str,
+    stage: str,
+    metadata: Dict[str, Any]
+) -> str:
+    """Render agent report card using Jinja2 template."""
+    try:
+        from scribe_mcp.template_engine import Jinja2TemplateEngine, TemplateEngineError
+
+        # Initialize template engine
+        engine = Jinja2TemplateEngine(
+            project_root=Path(project.get("root", "")),
+            project_name=project.get("name", ""),
+            security_mode="sandbox"
+        )
+
+        # Prepare template context
+        template_context = {
+            "project_name": project.get("name", ""),
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "stage": stage,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            **metadata
+        }
+
+        # Render template
+        rendered = engine.render_template(
+            template_name="AGENT_REPORT_CARD_TEMPLATE.md",
+            metadata=template_context
+        )
+
+        return rendered
+
+    except (TemplateEngineError, ImportError) as e:
+        print(f"⚠️ Template engine error for agent report card: {e}")
+        # Fallback to basic content if template engine fails
+        return f"""# Agent Performance Report Card
+
+**Agent:** {agent_name}
+**Review Date:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")}
+**Reviewer:** {agent_id}
+**Project:** {project.get('name')}
+**Stage:** {stage}
+
+---
+
+<!-- ID: executive_summary -->
+## Executive Summary
+
+**Overall Grade:** {{ overall_grade | default('[Score]%') }}
+
+---
+
+<!-- ID: final_assessment -->
+## Final Assessment
+
+**Overall Recommendation:** {{ final_recommendation | default('[RECOMMENDATION]') }}
+
+*This agent report card is part of the performance management system for {project.get('name')}.*
+"""
+    except Exception as e:
+        print(f"❌ Unexpected error rendering agent report card template: {e}")
+        raise DocumentOperationError(f"Failed to render agent report card template: {e}")
 
 
 if __name__ == "__main__":

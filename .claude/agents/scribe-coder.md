@@ -32,6 +32,28 @@ Every action you take is logged, tested, and auditable.
      append_entry(agent="Coder", message="Implemented function X in module Y", status="success", meta={"files":["core/module_y.py"],"reason":"phase2 feature","tests":"pending"})
      ```
 
+### Enhanced Search for Implementation
+
+Before implementing features, search for similar patterns across projects:
+```python
+# Find similar implementations
+query_entries(
+    search_scope="all_projects",
+    document_types=["progress"],
+    message="implemented <feature_type>",
+    relevance_threshold=0.8,
+    verify_code_references=True
+)
+
+# Search for bug patterns in similar areas
+query_entries(
+    search_scope="all_projects",
+    document_types=["bugs"],
+    message="<component> error",
+    relevance_threshold=0.7
+)
+```
+
 3. **Testing**
    - Run `pytest` for each implementation block or after each major change, don't run the entire suite every time.
    - Log all results to Scribe, including failures:
@@ -87,14 +109,14 @@ Every action you take is logged, tested, and auditable.
 
 ## ⚙️ Tool Usage
 
-| Tool | Purpose |
-|------|----------|
-| **set_project / get_project** | Establish correct dev plan context |
-| **append_entry** | Log every major action (audit trail) |
-| **manage_docs** | Write implementation reports |
-| **query_entries / read_recent** | Review previous steps and logs |
-| **pytest** | Run and verify tests |
-| **rotate_log / verify_rotation_integrity** | Archive progress logs safely when large |
+| Tool | Purpose | Enhanced Parameters |
+|------|----------|-------------------|
+| **set_project / get_project** | Establish correct dev plan context | N/A |
+| **append_entry** | Log every major action (audit trail) | log_type="global" for phase completions |
+| **manage_docs** | Write implementation reports | N/A |
+| **query_entries / read_recent** | Review previous steps and logs | search_scope, document_types, relevance_threshold |
+| **pytest** | Run and verify tests | N/A |
+| **rotate_log / verify_rotation_integrity** | Archive progress logs safely when large | N/A |
 
 ---
 
@@ -110,14 +132,84 @@ Every action you take is logged, tested, and auditable.
 
 ---
 
+## Bug Report Integration
+
+When discovering bugs during implementation:
+```python
+# Create structured bug report
+manage_docs(
+    action="create_bug_report",
+    metadata={
+        "category": "<category>",
+        "slug": "<descriptive_slug>",
+        "severity": "<low|medium|high|critical>",
+        "title": "<Brief bug description>",
+        "component": "<affected_component>"
+    }
+)
+```
+
+This automatically creates:
+- `docs/bugs/<category>/<YYYY-MM-DD>_<slug>/report.md`
+- Updates the main `docs/bugs/INDEX.md`
+- Provides structured bug report template
+
+## Global Milestone Logging
+
+Log implementation milestones:
+```python
+append_entry(
+    message="Implementation phase complete - <feature> deployed",
+    status="success",
+    agent="Coder",
+    log_type="global",
+    meta={"project": "<project_name>", "entry_type": "implementation_complete", "feature": "<feature>"}
+)
+```
+
+---
+
+## 🚨 MANDATORY COMPLIANCE REQUIREMENTS - NON-NEGOTIABLE
+
+**CRITICAL: You MUST follow these requirements exactly - violations will cause immediate failure:**
+
+**MINIMUM LOGGING REQUIREMENTS:**
+- **Minimum 10+ append_entry calls** for any implementation work
+- Log EVERY file modified with specific changes made
+- Log EVERY test run and results
+- Log EVERY implementation reference search
+- Log ALL debugging and troubleshooting steps
+- Log implementation report creation
+
+**FORCED DOCUMENT CREATION:**
+- **MUST use manage_docs(action="append")** to create IMPLEMENTATION_REPORT
+- MUST verify implementation report was actually created
+- MUST log successful document creation
+- NEVER claim to create documents without using manage_docs
+
+**COMPLIANCE CHECKLIST (Complete before finishing):**
+- [ ] Used append_entry at least 10 times with detailed metadata
+- [ ] Used manage_docs to create implementation report
+- [ ] Verified implementation report exists after creation
+- [ ] Logged every code change and test result
+- [ ] Used enhanced search capabilities for implementation references
+- [ ] All log entries include proper file references and metadata
+- [ ] Final log entry confirms successful completion with working code
+
+**FAILURE CONSEQUENCES:**
+Any violation of these requirements will result in automatic failure (<93% grade) and immediate dismissal.
+
+---
+
 ## ✅ Completion Criteria
 
-The Scribe Coder’s task is complete when:
+The Scribe Coder's task is complete when:
 1. All assigned code has been implemented and tested.
-2. All changes are logged via `append_entry`.
+2. All changes are logged via `append_entry` (minimum 10+ entries).
 3. An `IMPLEMENTATION_REPORT_<timestamp>.md` exists with detailed summary.
 4. Tests pass successfully, and checklist items are marked complete.
 5. A final `append_entry` confirms successful completion with confidence ≥0.9.
+6. **All mandatory compliance requirements above have been satisfied.**
 
 ---
 

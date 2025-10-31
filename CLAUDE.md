@@ -10,6 +10,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **⚠️ COMMANDMENT #1 ABSOLUTE**: ALWAYS use `append_entry` to document EVERY significant action, decision, investigation, code change, test result, bug discovery, and planning step. The Scribe log is your chain of reasoning and the ONLY proof your work exists. If it's not Scribed, it didn't fucking happen.
 - To Claude Code (Orchestrator) You must ALWAYS pass the current `project_name` to each subagent as we work.  To avoid confusion and them accidentally logging to the wrong project.
 
+**🌍 GLOBAL LOG USAGE**: For repository-wide milestones and cross-project events, use `log_type="global"` with required metadata `["project", "entry_type"]`:
+```python
+await append_entry(
+    message="Phase 4 implementation complete - Enhanced search capabilities deployed",
+    status="success",
+    agent="ScribeCoordinator",
+    log_type="global",
+    meta={"project": "scribe_mcp_enhancement", "entry_type": "manual_milestone", "phase": 4}
+)
+```
+
 **⚠️ COMMANDMENT #0: ALWAYS CHECK PROGRESS LOG FIRST**: Before starting ANY work, ALWAYS read `docs/dev_plans/[current_project]/PROGRESS_LOG.md` to understand what has been done, what mistakes were made, and what the current state is. The progress log is the source of truth for project context.
 
 **What Gets Logged (Non-Negotiable):**
@@ -78,11 +89,11 @@ All agents use Scribe tools (`append_entry`, `manage_docs`, etc.) for logging, d
 
 | Agent                | Role                                                                                                                                                        | Primary Tools                                                                           | Stage            |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ---------------- |
-| **Research Agent**   | Performs deep codebase and documentation research to support architectural planning. Produces detailed reports under `docs/dev_plans/<project>/`.           | `set_project`, `append_entry`, `manage_docs`, `query_entries`                           | **Stage 1**      |
-| **Architect Agent**  | Converts approved research into concrete system plans (`ARCHITECTURE_GUIDE.md`, `PHASE_PLAN.md`, `CHECKLIST.md`). Ensures feasibility before coding begins. | `set_project`, `get_project`, `append_entry`, `manage_docs`                             | **Stage 2**      |
-| **Review Agent**     | Performs adversarial quality control. Operates twice: pre-implementation (Stage 3) and post-implementation (Stage 5). Grades all agents and logs verdicts.  | `set_project`, `append_entry`, `manage_docs`, `pytest`, `query_entries`                 | **Stages 3 & 5** |
-| **Coder Agent**      | Implements the approved design exactly as written. Logs every 2–5 meaningful changes and all test results.                                                  | `set_project`, `append_entry`, `manage_docs`, `pytest`, `query_entries`                 | **Stage 4**      |
-| **Bug Hunter Agent** | Diagnoses and resolves defects. Creates timestamped reports under `docs/bugs/`, updates `/docs/bugs/INDEX.md`, and logs to the bug log.                     | `set_project`, `append_entry(log_type="bug")`, `manage_docs`, `pytest`, `query_entries` | **Auxiliary**    |
+| **Research Agent**   | Performs deep codebase and documentation research with cross-project search capabilities. Produces detailed reports under `docs/dev_plans/<project>/research/`. | `set_project`, `append_entry`, `manage_docs`, `query_entries` (Phase 4 enhanced)        | **Stage 1**      |
+| **Architect Agent**  | Converts approved research into concrete system plans with architectural pattern validation. Creates `ARCHITECTURE_GUIDE.md`, `PHASE_PLAN.md`, `CHECKLIST.md`. | `set_project`, `get_project`, `append_entry`, `manage_docs`, `query_entries` (Phase 4) | **Stage 2**      |
+| **Review Agent**     | Performs adversarial quality control with cross-project validation. Operates twice: pre-implementation (Stage 3) and post-implementation (Stage 5). Grades all agents. | `set_project`, `append_entry`, `manage_docs`, `pytest`, `query_entries` (Phase 4)        | **Stages 3 & 5** |
+| **Coder Agent**      | Implements approved design with implementation reference search. Logs every meaningful change and test result.                                               | `set_project`, `append_entry`, `manage_docs`, `pytest`, `query_entries` (Phase 4)        | **Stage 4**      |
+| **Bug Hunter Agent** | Diagnoses defects with bug pattern analysis across projects. Creates structured bug reports with automatic indexing.                                        | `set_project`, `append_entry(log_type="bug")`, `manage_docs`, `pytest`, `query_entries` | **Auxiliary**    |
 
 ---
 
@@ -131,6 +142,36 @@ All agents use Scribe tools (`append_entry`, `manage_docs`, etc.) for logging, d
 
 ---
 
+## 🔍 Phase 4 Enhanced Search Capabilities
+
+All subagents now have enhanced search capabilities that enable cross-project learning and validation:
+
+### **Enhanced Search Parameters:**
+- **search_scope**: `project`|`global`|`all_projects`|`research`|`bugs`|`all`
+- **document_types**: `["progress", "research", "architecture", "bugs", "global"]`
+- **relevance_threshold**: `0.0-1.0` quality filtering
+- **verify_code_references**: Validate referenced code exists
+- **time_range**: Temporal filtering (`"last_30d"`, `"last_7d"`, `"today"`)
+
+### **Cross-Project Learning:**
+- **Research Agent**: Search existing research across all projects before starting new investigations
+- **Architect Agent**: Validate architectural patterns with cross-project search
+- **Coder Agent**: Find similar implementations before coding new features
+- **Review Agent**: Use cross-project validation for quality assurance
+- **Bug Hunter**: Search for related bug patterns across projects
+
+### **Global Repository Log:**
+Use `log_type="global"` for repository-wide milestones:
+```python
+await append_entry(
+    message="Phase 4 complete - Enhanced search deployed",
+    status="success",
+    agent="ScribeCoordinator",
+    log_type="global",
+    meta={"project": "project_name", "entry_type": "phase_complete", "phase": 4}
+)
+```
+
 ## 🔄 Parallel Execution Guidelines
 
 * **Research Agents**: Can work in parallel on different aspects if aware of each other and have specific, non-overlapping deliverables
@@ -173,19 +214,97 @@ At any stage, if a defect is discovered:
 
 ---
 
+## 🎭 Claude Code Orchestrator Responsibilities
+
+**🚨 CRITICAL ORCHESTRATOR DUTIES:**
+
+### **1. Project Management**
+- **Always** obtain clear task definition and project name from user
+- **Always** call `set_project(project_name)` before any subagent work
+- **Always** pass the exact same `project_name` to EVERY subagent in their prompts
+- **Never** allow agents to work without proper project context
+
+### **2. Protocol Enforcement**
+- **Strict 1→2→3→4→5 sequence** - no skipping stages
+- **Quality Gates**: ≥93% required to proceed between stages
+- **Agent Coordination**: Monitor handoffs and ensure proper documentation
+- **Error Recovery**: Re-dispatch failing agents to FIX existing work, never replace
+
+### **3. Enhanced Search Orchestration**
+Direct agents to use Phase 4 capabilities when relevant:
+- **Research Agent**: "Search across all projects with `search_scope='all_projects'` and `document_types=['research']` for related investigations"
+- **Architect Agent**: "Validate architectural patterns using `query_entries(search_scope='all_projects', document_types=['architecture', 'research'])`"
+- **Coder Agent**: "Search for similar implementations with `query_entries(search_scope='all_projects', document_types=['progress'], verify_code_references=True)`"
+- **Review Agent**: "Use cross-project validation with `query_entries(search_scope='all', relevance_threshold=0.9)` for quality assurance"
+- **Bug Hunter**: "Search for bug patterns with `query_entries(search_scope='all_projects', document_types=['bugs'])`"
+
+### **4. Global Log Coordination**
+Ensure repository-wide milestones are properly logged:
+- Phase completions: `log_type="global"` with `entry_type="phase_complete"`
+- Architectural decisions: `log_type="global"` with `entry_type="architecture_complete"`
+- Implementation milestones: `log_type="global"` with `entry_type="implementation_complete"`
+- Security audits: `log_type="global"` with `entry_type="security_audit"`
+
+### **5. Quality Assurance**
+- **Review agent outputs** before proceeding to next stage
+- **Verify documentation completeness** at each handoff
+- **Confirm proper Scribe logging** by all agents
+- **Validate file creation** and indexing updates
+
+### **6. Comprehensive Subagent Directory**
+
+**Available Subagents for Deployment:**
+
+#### **🔍 scribe-research-analyst** (Stage 1)
+- **Purpose**: Deep codebase investigation and research documentation
+- **Deploy When**: User needs comprehensive understanding of existing systems
+- **Key Capabilities**: Cross-project research, code reference verification, structured report generation
+- **Output**: `RESEARCH_<topic>_<timestamp>.md` files in `docs/dev_plans/<project>/research/`
+- **Prompt Requirement**: Always include `project_name="<current_project>"` and specific investigation objectives
+
+#### **🏗️ scribe-architect** (Stage 2)
+- **Purpose**: Convert research into actionable technical plans
+- **Deploy When**: Research is complete and architectural planning is needed
+- **Key Capabilities**: Architectural design, phase planning, checklist creation, feasibility validation
+- **Output**: `ARCHITECTURE_GUIDE.md`, `PHASE_PLAN.md`, `CHECKLIST.md`
+- **Prompt Requirement**: Always include `project_name="<current_project>"` and reference to completed research
+
+#### **🔍 scribe-review-agent** (Stages 3 & 5)
+- **Purpose**: Adversarial quality control and validation
+- **Deploy When**: Pre-implementation review (Stage 3) or post-implementation validation (Stage 5)
+- **Key Capabilities**: Cross-project validation, security auditing, agent grading, quality gates
+- **Output**: Review reports, agent grades, quality assessments
+- **Prompt Requirement**: Always include `project_name="<current_project>"` and specific review scope
+
+#### **💻 scribe-coder** (Stage 4)
+- **Purpose**: Implement approved architectural designs
+- **Deploy When**: Architecture is approved and implementation is ready
+- **Key Capabilities**: Code implementation, testing, implementation reference search, bug reporting
+- **Output**: Working code, test results, implementation reports
+- **Prompt Requirement**: Always include `project_name="<current_project>"` and reference to approved architecture
+
+#### **🐞 scribe-bug-hunter** (Auxiliary)
+- **Purpose**: Diagnose and resolve defects with pattern analysis
+- **Deploy When**: Bugs are discovered at any stage of development
+- **Key Capabilities**: Bug investigation, pattern analysis, structured bug reports, reproduction testing
+- **Output**: Bug reports in `docs/bugs/<category>/<date>_<slug>/`, updated indexes
+- **Prompt Requirement**: Always include `project_name="<current_project>"` and bug description
+
 ## 💡 Invocation Summary
 
 **Command:**
 
-> “Follow protocol for this development.”
+> "Follow protocol for this development."
 
 **Claude Code Behavior:**
 
 1. Ask for a clear task and project name.
 2. Call `set_project(project_name)` once.
-3. Pass that project name to all subsequent subagents.
+3. Pass that project name to all subsequent subagents in their prompts.
 4. Orchestrate each stage in proper order with checkpoints and reviews.
 5. Use `append_entry` to log orchestration actions as the `Coordinator`.
+6. **NEW**: Leverage Phase 4 enhanced search capabilities for cross-project learning
+7. **NEW**: Ensure global log integration for repository-wide milestones
 
 ---
 
@@ -195,28 +314,99 @@ This Protocol ensures that all development within Scribe MCP is **auditable, rep
 
 ---
 
-### ✍️ `manage_docs` — Mandatory Doc Updates (Before Any Coding)
-- **When to use:** Immediately after `set_project` finishes and before touching product code. Draft your plan in `ARCHITECTURE_GUIDE.md`, `PHASE_PLAN.md`, and `CHECKLIST.md`, get it approved by the human, and only then begin implementation.
-- **Why:** This tool applies structured Markdown changes (replace sections, append blocks, toggle checklist proofs) using the Jinja templating engine, writes atomically, and auto-logs the change via `doc_updates`.
-- **Actions supported:**
-  - `replace_section` — requires a valid `section` anchor (e.g. `problem_statement`).
-  - `append` — adds freeform/Jinja-rendered content to the end of the doc.
-  - `status_update` — flips checklist `[ ]`/`[x]` items and attaches proofs.
-- **Usage pattern:**
-```jsonc
-{
-  "action": "replace_section",
-  "doc": "architecture",
-  "section": "problem_statement",
-  "content": "- **Context:** {{ project_name }} ships the approved plan.\n- **Goals:** ...",
-  "metadata": {
-    "requested_by": "user",
-    "phase": "foundation"
-  }
-}
+### ✍️ Enhanced `manage_docs` — Structured Documentation System
+
+**🚨 CRITICAL TOOL MASTERY - All agents must understand these workflows:**
+
+#### **Core Documentation Actions:**
+- **`replace_section`** — Update specific sections with section anchors (most common for architecture)
+- **`append`** — Add content to document end
+- **`status_update`** — Toggle checklist items with proofs
+- **`create_research_doc`** — Generate structured research documents automatically
+- **`create_bug_report`** — Create structured bug reports with automatic indexing
+
+#### **Architecture Documents (Architect Agent):**
+```python
+# Update architecture sections
+manage_docs(
+    action="replace_section",
+    doc="architecture",
+    section="problem_statement",  # Requires <!-- ID: problem_statement --> anchor
+    content="## Problem Statement\n**Context:** ...\n**Goals:** ...",
+    metadata={"confidence": 0.9, "verified_by_code": True}
+)
+
+# Update checklist items
+manage_docs(
+    action="status_update",
+    doc="checklist",
+    section="phase_1_task_1",
+    metadata={"status": "done", "proof": "code_review_completed"}
+)
 ```
-- **Customization:** Every section is editable, checklist checkmarks can be toggled with proofs (`status_update`), and you can inject fragments/templates for reusable content. If a section is missing or the selector is wrong, the tool errors without writing—fix the anchor and rerun.
-- **Approval gate:** Do not start coding until the user confirms the manage_docs-updated plan. Update docs again if the plan changes mid-task.
+
+#### **Research Documents (Research Agent):**
+```python
+# Create structured research documents (Phase 5 enhanced)
+manage_docs(
+    action="create_research_doc",
+    doc_name="RESEARCH_<topic>_<YYYYMMDD>_<HHMM>",
+    metadata={"research_goal": "<primary objective>", "confidence_areas": ["area1", "area2"]}
+)
+# Automatically creates: docs/dev_plans/<project>/research/RESEARCH_<topic>_<timestamp>.md
+# Auto-updates: research/INDEX.md
+```
+
+#### **Bug Reports (Bug Hunter/Coder Agent):**
+```python
+# Create structured bug reports (Phase 5 enhanced)
+manage_docs(
+    action="create_bug_report",
+    metadata={
+        "category": "<infrastructure|logic|database|api|ui|misc>",
+        "slug": "<descriptive_slug>",
+        "severity": "<low|medium|high|critical>",
+        "title": "<Brief bug description>",
+        "component": "<affected_component>"
+    }
+)
+# Automatically creates: docs/bugs/<category>/<YYYY-MM-DD>_<slug>/report.md
+# Auto-updates: docs/bugs/INDEX.md
+```
+
+#### **Implementation Reports (Coder Agent):**
+```python
+# Create implementation documentation
+manage_docs(
+    action="append",
+    doc="implementation",
+    content="## Implementation Report\n**Scope:** ...\n**Files Modified:** ...\n**Test Results:** ..."
+)
+```
+
+#### **🎯 Section Anchors (Critical for replace_section):**
+Every replace_section action requires valid section anchors:
+```markdown
+<!-- ID: problem_statement -->
+<!-- ID: system_overview -->
+<!-- ID: component_design -->
+<!-- ID: data_flow -->
+<!-- ID: api_design -->
+<!-- ID: security_considerations -->
+<!-- ID: deployment_strategy -->
+```
+
+#### **🔄 Automatic Features:**
+- **Index Management**: Research and bug indexes updated automatically
+- **Audit Logging**: All changes logged to `doc_updates` log type automatically
+- **File Verification**: Atomic writes with verification
+- **Template Generation**: Research and bug report templates auto-generated
+
+#### **⚠️ Approval Gates:**
+- **Architecture**: Get user approval before implementation begins
+- **Research**: Templates auto-generated but should be reviewed
+- **Bug Reports**: Created immediately when bugs discovered
+- **Implementation**: Log after every meaningful code change
 
 ---
 
