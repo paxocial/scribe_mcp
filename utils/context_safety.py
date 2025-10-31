@@ -143,7 +143,20 @@ class ResponsePaginator:
         if page_size is None:
             page_size = self.default_page_size
 
-        # Validate inputs
+        # Validate inputs (ensure integers)
+        try:
+            page = int(page)
+        except (ValueError, TypeError):
+            page = 1
+
+        try:
+            page_size = int(page_size) if page_size is not None else None
+        except (ValueError, TypeError):
+            page_size = None
+
+        if page_size is None:
+            page_size = self.default_page_size
+
         if page < 1:
             page = 1
         if page_size < 1:
@@ -233,7 +246,7 @@ class ContextManager:
             items, include_test=include_test
         )
 
-        # Apply pagination
+        # Apply pagination (ensure integer parameters)
         paginated_items, pagination_info = self.paginator.paginate(
             filtered_items, page=page, page_size=page_size
         )

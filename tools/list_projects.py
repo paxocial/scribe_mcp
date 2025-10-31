@@ -88,8 +88,18 @@ async def list_projects(
     # Initialize context manager for intelligent filtering and pagination
     context_manager = ContextManager()
 
-    # Determine page size (use explicit page_size, then limit, then default)
-    effective_page_size = page_size or limit or context_manager.paginator.default_page_size
+    # Determine page size (use explicit page_size, then limit, then default) with type conversion
+    try:
+        limit_int = int(limit) if limit is not None else None
+    except (ValueError, TypeError):
+        limit_int = None
+
+    try:
+        page_size_int = int(page_size) if page_size is not None else None
+    except (ValueError, TypeError):
+        page_size_int = None
+
+    effective_page_size = page_size_int or limit_int or context_manager.paginator.default_page_size
 
     # Prepare context-safe response
     context_response = context_manager.prepare_response(

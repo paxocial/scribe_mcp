@@ -12,11 +12,34 @@ LOG_LINE_PATTERN = re.compile(
 )
 
 
+def _is_template_entry(timestamp: str, emoji: str, agent: str, message: str) -> bool:
+    """Check if this appears to be a template/example entry rather than a real one."""
+    # Check for placeholder patterns
+    template_indicators = [
+        "YYYY-MM-DD", "HH:MM:SS", "<name>", "EMOJI", "Message text",
+        "key=value", "placeholder", "example", "template"
+    ]
+
+    combined_text = f"{timestamp} {emoji} {agent} {message}".lower()
+
+    return any(indicator.lower() in combined_text for indicator in template_indicators)
+
+
 def parse_log_line(line: str) -> Optional[Dict[str, Any]]:
     """Parse a canonical Scribe log line into structured fields."""
     match = LOG_LINE_PATTERN.match(line.strip())
     if not match:
         return None
+
+    timestamp = match.group("timestamp")
+    emoji = match.group("emoji")
+    agent = match.group("agent")
+    message = match.group("message")
+
+    # Filter out template/example entries
+    if _is_template_entry(timestamp, emoji, agent, message):
+        return None
+
     meta_text = match.group("meta")
     meta: Dict[str, str] = {}
     if meta_text:
@@ -25,11 +48,11 @@ def parse_log_line(line: str) -> Optional[Dict[str, Any]]:
             if key:
                 meta[key] = value
     return {
-        "ts": match.group("timestamp"),
-        "emoji": match.group("emoji"),
-        "agent": match.group("agent"),
+        "ts": timestamp,
+        "emoji": emoji,
+        "agent": agent,
         "project": match.group("project"),
-        "message": match.group("message"),
+        "message": message,
         "meta": meta,
         "raw_line": line.strip(),
     }
