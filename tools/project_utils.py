@@ -20,7 +20,7 @@ _SLUG_CLEANER = re.compile(r"[^0-9a-z_]+")
 
 def slugify_project_name(name: str) -> str:
     """Return a filesystem-friendly slug for the provided project name."""
-    normalised = name.strip().lower().replace(" ", "_")
+    normalised = name.strip().lower().replace(" ", "_").replace("-", "_")
     return _SLUG_CLEANER.sub("_", normalised).strip("_") or "project"
 
 

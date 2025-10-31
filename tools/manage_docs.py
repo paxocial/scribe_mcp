@@ -21,8 +21,10 @@ async def manage_docs(
     template: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
     dry_run: bool = False,
+    doc_name: Optional[str] = None,
+    target_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Apply structured updates to architecture/phase/checklist documents."""
+    """Apply structured updates to architecture/phase/checklist documents and create research/bug documents."""
     state_snapshot = await server_module.state_manager.record_tool("manage_docs")
     project, _, recent = await load_active_project(server_module.state_manager)
     reminders_payload: list[Dict[str, Any]] = []
@@ -40,6 +42,20 @@ async def manage_docs(
     agent_id = "Scribe"
     if agent_identity:
         agent_id = await agent_identity.get_or_create_agent_id()
+
+    # Handle research and bug document creation
+    if action in ["create_research_doc", "create_bug_report"]:
+        return await _handle_special_document_creation(
+            project,
+            action=action,
+            doc_name=doc_name,
+            target_dir=target_dir,
+            content=content,
+            metadata=metadata,
+            dry_run=dry_run,
+            agent_id=agent_id,
+            recent_projects=list(recent),
+        )
 
     try:
         change = await apply_doc_change(
@@ -270,6 +286,451 @@ Examples:
 
     # Run the operation
     return asyncio.run(_run_manage_docs(args))
+
+
+async def _handle_special_document_creation(
+    project: Dict[str, Any],
+    action: str,
+    doc_name: Optional[str],
+    target_dir: Optional[str],
+    content: Optional[str],
+    metadata: Optional[Dict[str, Any]],
+    dry_run: bool,
+    agent_id: str,
+    recent_projects: list,
+) -> Dict[str, Any]:
+    """Handle creation of research documents and bug reports."""
+    from pathlib import Path
+    from datetime import datetime
+    import json
+
+    # Ensure metadata is a dict first
+    if metadata is None:
+        metadata = {}
+    elif isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
+
+    # Validate required parameters
+    if action == "create_research_doc" and not doc_name:
+        return {
+            "ok": False,
+            "error": "doc_name is required for research document creation",
+            "recent_projects": recent_projects,
+        }
+
+    if action == "create_bug_report":
+        if not metadata or not metadata.get("category"):
+            return {
+                "ok": False,
+                "error": "metadata with 'category' is required for bug report creation",
+                "recent_projects": recent_projects,
+            }
+
+    # Generate document path
+    project_root = Path(project.get("root", ""))
+    docs_dir = project_root / "docs" / "dev_plans" / project.get("name", "")
+
+    if action == "create_research_doc":
+        # Create research directory
+        research_dir = docs_dir / "research"
+        target_path = research_dir / f"{doc_name}.md"
+
+        # Generate default content if not provided
+        if not content:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+            content = f"""# {doc_name.replace('_', ' ').title()}
+
+**Research Date:** {datetime.now().strftime("%Y-%m-%d")}
+**Researcher:** {agent_id}
+**Project:** {project.get('name')}
+**Document Version:** 1.0
+
+---
+
+## Executive Summary
+
+<!-- Executive summary of research findings -->
+
+---
+
+## Research Scope
+
+**Research Goal:** [Describe the primary research objective]
+
+**Investigation Areas:**
+- [ ] Area 1
+- [ ] Area 2
+- [ ] Area 3
+
+---
+
+## Findings
+
+### Finding 1
+**Details:** [Describe the finding]
+
+**Evidence:** [Provide evidence/code references]
+
+**Confidence:** High/Medium/Low
+
+---
+
+## Technical Analysis
+
+### Code Patterns Identified
+- Pattern 1: [Description]
+- Pattern 2: [Description]
+
+### Dependencies
+- External: [List]
+- Internal: [List]
+
+---
+
+## Risks and Considerations
+
+### Technical Risks
+- **Risk:** [Description]
+- **Mitigation:** [Strategy]
+
+### Implementation Considerations
+- **Complexity:** [Assessment]
+- **Timeline:** [Estimate]
+
+---
+
+## Recommendations
+
+1. **Recommendation 1:** [Details]
+2. **Recommendation 2:** [Details]
+
+---
+
+## Next Steps
+
+- [ ] Step 1
+- [ ] Step 2
+- [ ] Step 3
+
+---
+
+*This research document is part of the development audit trail for {project.get('name')}.*
+"""
+
+    elif action == "create_bug_report":
+        # Create bug report directory structure
+        from scribe_mcp.utils.time import format_utc
+        timestamp = datetime.now().strftime("%Y-%m-%d")
+        category = metadata.get("category", "general")
+        slug = metadata.get("slug", f"bug_{int(datetime.now().timestamp())}")
+
+        bug_dir = project_root / "docs" / "bugs" / category / f"{timestamp}_{slug}"
+        target_path = bug_dir / "report.md"
+
+        # Generate default bug report content
+        if not content:
+            content = f"""# Bug Report: {metadata.get('title', 'Untitled Bug')}
+
+**Bug ID:** {slug}
+**Category:** {category}
+**Severity:** {metadata.get('severity', 'medium')}
+**Status:** INVESTIGATING
+**Report Date:** {format_utc()}
+**Reporter:** {agent_id}
+**Project:** {project.get('name')}
+
+---
+
+## Bug Description
+
+### Summary
+[Brief description of the bug]
+
+### Expected Behavior
+[What should happen]
+
+### Actual Behavior
+[What actually happens]
+
+### Steps to Reproduce
+1. [Step 1]
+2. [Step 2]
+3. [Step 3]
+
+### Environment
+- **Component:** {metadata.get('component', 'unknown')}
+- **Version:** [Version if applicable]
+
+---
+
+## Investigation Details
+
+### Root Cause Analysis
+[Analysis of what's causing the bug]
+
+### Affected Areas
+- **Files:** [List of affected files]
+- **Components:** [List of affected components]
+
+---
+
+## Resolution Plan
+
+### Immediate Actions
+- [ ] [Action 1]
+- [ ] [Action 2]
+
+### Long-term Fixes
+- [ ] [Fix 1]
+- [ ] [Fix 2]
+
+---
+
+## Testing Strategy
+
+### Reproduction Test
+- [ ] Create minimal reproduction case
+- [ ] Verify bug can be consistently reproduced
+
+### Fix Verification
+- [ ] Test fix against reproduction case
+- [ ] Verify no regression in other areas
+
+---
+
+## Timeline
+
+- **Investigation:** [Time estimate]
+- **Fix Development:** [Time estimate]
+- **Testing:** [Time estimate]
+- **Deployment:** [Time estimate]
+
+---
+
+## Related Issues
+
+- **Links:** [Related issues or discussions]
+- **Dependencies:** [Any dependencies affecting this bug]
+
+---
+
+*This bug report is tracked in the project audit trail for {project.get('name')}.*
+"""
+
+    # Safety check
+    try:
+        target_path.resolve().relative_to(project_root.resolve())
+    except ValueError:
+        return {
+            "ok": False,
+            "error": f"Generated document path {target_path} is outside project root",
+            "recent_projects": recent_projects,
+        }
+
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "path": str(target_path),
+            "content": content,
+            "recent_projects": recent_projects,
+        }
+
+    # Create directories and write file
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write the document
+        with open(target_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        # Log the creation
+        log_meta = metadata.copy() if metadata else {}
+        log_meta.update({
+            "document_type": action,
+            "file_path": str(target_path),
+            "file_size": target_path.stat().st_size,
+        })
+
+        await append_entry(
+            message=f"Created {action.replace('_', ' ')}: {target_path.name}",
+            status="success",
+            meta=log_meta,
+            agent=agent_id,
+            log_type="doc_updates",
+        )
+
+        # Update INDEX files if needed
+        if action == "create_research_doc":
+            await _update_research_index(docs_dir / "research", agent_id)
+        elif action == "create_bug_report":
+            await _update_bug_index(project_root / "docs" / "bugs", agent_id)
+
+        return {
+            "ok": True,
+            "path": str(target_path),
+            "document_type": action,
+            "file_size": target_path.stat().st_size,
+            "recent_projects": recent_projects,
+        }
+
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"Failed to create document: {str(exc)}",
+            "recent_projects": recent_projects,
+        }
+
+
+async def _update_research_index(research_dir: Path, agent_id: str) -> None:
+    """Update the research INDEX.md file."""
+    from datetime import datetime
+    index_path = research_dir / "INDEX.md"
+
+    # Get all research documents
+    research_docs = []
+    if research_dir.exists():
+        for doc_path in research_dir.glob("RESEARCH_*.md"):
+            if doc_path.name != "INDEX.md":
+                stat = doc_path.stat()
+                research_docs.append({
+                    "name": doc_path.stem,
+                    "path": doc_path.name,
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                })
+
+    # Generate INDEX content
+    content = f"""# Research Documents Index
+
+*Last Updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")}*
+
+This directory contains research documents generated during the development process.
+
+## Available Research Documents
+
+"""
+
+    if research_docs:
+        # Sort by modification time (newest first)
+        research_docs.sort(key=lambda x: x["modified"], reverse=True)
+
+        for doc in research_docs:
+            modified_time = datetime.fromtimestamp(doc["modified"]).strftime("%Y-%m-%d %H:%M")
+            content += f"- **[{doc['name']}]({doc['path']})** - {modified_time} ({doc['size']} bytes)\n"
+    else:
+        content += "*No research documents found.*\n"
+
+    content += f"""
+
+## Index Information
+
+- **Total Documents:** {len(research_docs)}
+- **Index Location:** `{index_path.relative_to(research_dir.parent.parent)}`
+
+---
+
+*This index is automatically updated when research documents are created or modified.*"""
+
+    # Write the index
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(index_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+
+async def _update_bug_index(bugs_dir: Path, agent_id: str) -> None:
+    """Update the main bugs INDEX.md file."""
+    from datetime import datetime
+    index_path = bugs_dir / "INDEX.md"
+
+    # Get all bug reports
+    bug_reports = []
+    if bugs_dir.exists():
+        for category_dir in bugs_dir.iterdir():
+            if category_dir.is_dir() and category_dir.name != "archived":
+                for bug_dir in category_dir.iterdir():
+                    if bug_dir.is_dir():
+                        report_path = bug_dir / "report.md"
+                        if report_path.exists():
+                            stat = report_path.stat()
+                            bug_reports.append({
+                                "category": category_dir.name,
+                                "slug": bug_dir.name,
+                                "path": str(report_path.relative_to(bugs_dir)),
+                                "size": stat.st_size,
+                                "modified": stat.st_mtime,
+                            })
+
+    # Generate INDEX content
+    content = f"""# Bug Reports Index
+
+*Last Updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")}*
+
+This directory contains bug reports generated during development and testing.
+
+## Bug Statistics
+
+- **Total Reports:** {len(bug_reports)}
+- **Categories:** {len(set(report['category'] for report in bug_reports))}
+
+## Recent Bug Reports
+
+"""
+
+    if bug_reports:
+        # Sort by modification time (newest first)
+        bug_reports.sort(key=lambda x: x["modified"], reverse=True)
+
+        for bug in bug_reports[:20]:  # Show last 20
+            modified_time = datetime.fromtimestamp(bug["modified"]).strftime("%Y-%m-%d %H:%M")
+            content += f"- **[{bug['category']}/{bug['slug']}]({bug['path']})** - {modified_time}\n"
+
+        if len(bug_reports) > 20:
+            content += f"\n*... and {len(bug_reports) - 20} older reports*\n"
+    else:
+        content += "*No bug reports found.*\n"
+
+    content += f"""
+
+## Browse by Category
+
+"""
+
+    # Group by category
+    categories = {}
+    for bug in bug_reports:
+        if bug["category"] not in categories:
+            categories[bug["category"]] = []
+        categories[bug["category"]].append(bug)
+
+    for category, bugs in sorted(categories.items()):
+        content += f"### {category.title()} ({len(bugs)} reports)\n"
+        for bug in bugs[:5]:  # Show first 5 per category
+            content += f"- [{bug['slug']}]({bug['path']})\n"
+        if len(bugs) > 5:
+            content += f"- ... and {len(bugs) - 5} more\n"
+        content += "\n"
+
+    content += f"""
+---
+
+## Index Information
+
+- **Index Location:** `{index_path}`
+- **Total Categories:** {len(categories)}
+- **Last Scan:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")}
+
+---
+
+*This index is automatically updated when bug reports are created or modified.*"""
+
+    # Write the index
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(index_path, 'w', encoding='utf-8') as f:
+        f.write(content)
 
 
 if __name__ == "__main__":

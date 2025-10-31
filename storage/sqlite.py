@@ -112,6 +112,56 @@ class SQLiteStorage(StorageBackend):
             )
         return records
 
+    async def delete_project(self, name: str) -> bool:
+        """Delete a project and all associated data with proper cascade handling."""
+        await self._initialise()
+
+        # First check if project exists
+        project = await self.fetch_project(name)
+        if not project:
+            return False
+
+        async with self._write_lock:
+            # Delete project and all related data using proper cascade order
+            # SQLite foreign key constraints should handle most of this automatically,
+            # but we'll be explicit for safety and clarity
+
+            # Delete agent project associations
+            await self._execute(
+                "DELETE FROM agent_projects WHERE project_name = ?;",
+                (name,),
+            )
+
+            # Delete global log entries for this project (if they exist)
+            # Note: global_log_entries uses project_id, but table is currently empty
+            # await self._execute(
+            #     "DELETE FROM global_log_entries WHERE project_id = ?;",
+            #     (name,),
+            # )
+
+            # Due to foreign key constraints with ON DELETE CASCADE,
+            # deleting the project should automatically clean up:
+            # - scribe_entries
+            # - dev_plans -> phases -> milestones
+            # - benchmarks, checklists, performance_metrics
+            # - documents -> document_sections, document_changes
+            # - custom_templates, sync_status
+            # - scribe_metrics
+
+            # Delete the main project record (this will cascade to related tables)
+            await self._execute(
+                "DELETE FROM scribe_projects WHERE name = ?;",
+                (name,),
+            )
+
+            # Verify deletion
+            remaining = await self._fetchone(
+                "SELECT COUNT(*) as count FROM scribe_projects WHERE name = ?;",
+                (name,),
+            )
+
+            return remaining["count"] == 0
+
     async def insert_entry(
         self,
         *,

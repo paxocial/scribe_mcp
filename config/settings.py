@@ -80,7 +80,8 @@ class Settings:
         if sqlite_override:
             sqlite_path = Path(sqlite_override).expanduser()
         else:
-            sqlite_path = (project_root / ".scribe" / "scribe.db").resolve()
+            # Use new data/ directory location
+            sqlite_path = (project_root / "data" / "scribe_projects.db").resolve()
 
         allow_network = os.environ.get("SCRIBE_ALLOW_NETWORK", "false").lower() in {
             "1",

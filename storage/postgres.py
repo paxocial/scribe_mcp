@@ -66,6 +66,23 @@ class PostgresStorage(StorageBackend):
 
         return await ops.list_projects(pool)
 
+    async def delete_project(self, name: str) -> bool:
+        """Delete a project and all associated data."""
+        pool = await self._ensure_pool()
+
+        # Check if project exists first
+        project = await self.fetch_project(name)
+        if not project:
+            return False
+
+        # The actual database operations should be implemented in scribe_mcp.db.ops
+        # For now, we'll add a placeholder that raises NotImplementedError
+        # TODO: Implement delete_project in scribe_mcp.db.ops module
+        raise NotImplementedError(
+            "delete_project not yet implemented for PostgreSQL backend. "
+            "Add implementation to scribe_mcp.db.ops module."
+        )
+
     async def insert_entry(
         self,
         *,

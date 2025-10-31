@@ -1,6 +1,7 @@
 """Import tool modules to trigger MCP registration."""
 
 from . import append_entry  # noqa: F401
+from . import delete_project  # noqa: F401
 from . import generate_doc_templates  # noqa: F401
 from . import get_project  # noqa: F401
 from . import list_projects  # noqa: F401
@@ -13,6 +14,7 @@ from . import vector_search  # noqa: F401
 
 __all__ = [
     "append_entry",
+    "delete_project",
     "generate_doc_templates",
     "get_project",
     "list_projects",

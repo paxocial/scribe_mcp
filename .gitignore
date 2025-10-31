@@ -18,6 +18,11 @@ state/*.json
 *.db
 # Vector index artifacts
 .scribe_vectors/
+
+# Enhanced Scribe data directory
+data/*.db
+data/backups/*
+data/snapshots/*
 *.faiss
 *.npy
 *.shard
@@ -25,3 +30,6 @@ docs/claude_code_subagents/reference/*
 docs/dev_plans/*
 .scribe/scribe.db
 docs/claude_code_subagents/*
+docs/archived_projects/*
+docs/archived_global_logs/*
+docs/bugs/*

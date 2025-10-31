@@ -42,6 +42,10 @@ class StorageBackend(ABC):
         """Return all known projects."""
 
     @abstractmethod
+    async def delete_project(self, name: str) -> bool:
+        """Delete a project and all associated data. Returns True if project was deleted."""
+
+    @abstractmethod
     async def insert_entry(
         self,
         *,
