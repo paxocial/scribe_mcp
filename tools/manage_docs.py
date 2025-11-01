@@ -9,11 +9,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Callable, Awaitable
 
-from scribe_mcp import server as server_module, reminders
+from scribe_mcp import server as server_module
 from scribe_mcp.server import app
-from scribe_mcp.tools.project_utils import load_active_project
 from scribe_mcp.doc_management.manager import apply_doc_change, DocumentOperationError
 from scribe_mcp.tools.append_entry import append_entry
+from scribe_mcp.shared.logging_utils import (
+    LoggingContext,
+    ProjectResolutionError,
+)
+from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
+
+
+class _ManageDocsHelper(LoggingToolMixin):
+    def __init__(self) -> None:
+        self.server_module = server_module
+
+
+_MANAGE_DOCS_HELPER = _ManageDocsHelper()
 
 
 def _normalize_metadata(metadata: Optional[Dict[str, Any] | str]) -> Dict[str, Any]:
@@ -282,17 +294,20 @@ async def manage_docs(
 ) -> Dict[str, Any]:
     """Apply structured updates to architecture/phase/checklist documents and create research/bug documents."""
     state_snapshot = await server_module.state_manager.record_tool("manage_docs")
-    project, _, recent = await load_active_project(server_module.state_manager)
-    reminders_payload: list[Dict[str, Any]] = []
+    try:
+        context = await _MANAGE_DOCS_HELPER.prepare_context(
+            tool_name="manage_docs",
+            agent_id=None,
+            require_project=True,
+            state_snapshot=state_snapshot,
+        )
+    except ProjectResolutionError as exc:
+        payload = _MANAGE_DOCS_HELPER.translate_project_error(exc)
+        payload.setdefault("suggestion", "Invoke set_project before managing docs.")
+        payload.setdefault("reminders", [])
+        return payload
 
-    if not project:
-        return {
-            "ok": False,
-            "error": "No project configured.",
-            "suggestion": "Invoke set_project before managing docs.",
-            "recent_projects": list(recent),
-            "reminders": reminders_payload,
-        }
+    project = context.project or {}
 
     agent_identity = server_module.get_agent_identity()
     agent_id = "Scribe"
@@ -313,7 +328,8 @@ async def manage_docs(
             dry_run=dry_run,
             agent_id=agent_id,
             storage_backend=backend,
-            recent_projects=list(recent),
+            helper=_MANAGE_DOCS_HELPER,
+            context=context,
         )
 
     try:
@@ -328,11 +344,11 @@ async def manage_docs(
             dry_run=dry_run,
         )
     except Exception as exc:
-        return {
+        response = {
             "ok": False,
             "error": str(exc),
-            "recent_projects": list(recent),
         }
+        return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
 
     storage_record = None
     if backend and not dry_run:
@@ -374,12 +390,6 @@ async def manage_docs(
         except Exception as exc:
             log_error = str(exc)
 
-    reminders_payload = await reminders.get_reminders(
-        project,
-        tool_name="manage_docs",
-        state=state_snapshot,
-    )
-
     response: Dict[str, Any] = {
         "ok": change.success,
         "doc": doc,
@@ -388,8 +398,6 @@ async def manage_docs(
         "path": str(change.path) if change.success else "",
         "dry_run": dry_run,
         "diff": change.diff_preview,
-        "recent_projects": list(recent),
-        "reminders": reminders_payload,
     }
 
     # Add error information if operation failed
@@ -407,7 +415,7 @@ async def manage_docs(
     if dry_run:
         response["preview"] = change.content_written
 
-    return response
+    return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
 
 
 def manage_docs_main():
@@ -549,7 +557,8 @@ async def _handle_special_document_creation(
     dry_run: bool,
     agent_id: str,
     storage_backend: Any,
-    recent_projects: list,
+    helper: LoggingToolMixin,
+    context: LoggingContext,
 ) -> Dict[str, Any]:
     """Handle creation of research, bug, review, and agent report card documents."""
     metadata = _normalize_metadata(metadata)
@@ -567,11 +576,12 @@ async def _handle_special_document_creation(
 
     if action == "create_research_doc":
         if not doc_name:
-            return {
-                "ok": False,
-                "error": "doc_name is required for research document creation",
-                "recent_projects": recent_projects,
-            }
+            return helper.apply_context_payload(
+                helper.error_response(
+                    "doc_name is required for research document creation",
+                ),
+                context,
+            )
         # Sanitize the doc_name for filesystem safety
         import re
         # Replace spaces and special chars with underscores, keep alphanumeric and basic symbols
@@ -597,11 +607,12 @@ async def _handle_special_document_creation(
     elif action == "create_bug_report":
         category = metadata.get("category")
         if not category or not category.strip():
-            return {
-                "ok": False,
-                "error": "metadata with non-empty 'category' is required for bug report creation",
-                "recent_projects": recent_projects,
-            }
+            return helper.apply_context_payload(
+                helper.error_response(
+                    "metadata with non-empty 'category' is required for bug report creation",
+                ),
+                context,
+            )
 
         # Sanitize category
         import re
@@ -642,11 +653,10 @@ async def _handle_special_document_creation(
         }
         index_updater = lambda: _update_agent_card_index(docs_dir, agent_id)
     else:
-        return {
-            "ok": False,
-            "error": f"Unsupported special document action: {action}",
-            "recent_projects": recent_projects,
-        }
+        return helper.apply_context_payload(
+            helper.error_response(f"Unsupported special document action: {action}"),
+            context,
+        )
 
     prepared_metadata = _build_special_metadata(project, metadata, agent_id, extra_metadata)
 
@@ -675,36 +685,37 @@ async def _handle_special_document_creation(
                     prepared_metadata=prepared_metadata,
                 )
         except DocumentOperationError as exc:
-            return {
-                "ok": False,
-                "error": str(exc),
-                "recent_projects": recent_projects,
-            }
+            return helper.apply_context_payload(
+                helper.error_response(str(exc)),
+                context,
+            )
 
     if rendered_content is None:
-        return {
-            "ok": False,
-            "error": "Failed to render document content.",
-            "recent_projects": recent_projects,
-        }
+        return helper.apply_context_payload(
+            helper.error_response("Failed to render document content."),
+            context,
+        )
 
     try:
         target_path.resolve().relative_to(project_root.resolve())
     except ValueError:
-        return {
-            "ok": False,
-            "error": f"Generated document path {target_path} is outside project root",
-            "recent_projects": recent_projects,
-        }
+        return helper.apply_context_payload(
+            helper.error_response(
+                f"Generated document path {target_path} is outside project root",
+            ),
+            context,
+        )
 
     if dry_run:
-        return {
-            "ok": True,
-            "dry_run": True,
-            "path": str(target_path),
-            "content": rendered_content,
-            "recent_projects": recent_projects,
-        }
+        return helper.apply_context_payload(
+            {
+                "ok": True,
+                "dry_run": True,
+                "path": str(target_path),
+                "content": rendered_content,
+            },
+            context,
+        )
 
     before_hash = ""
     if target_path.exists():
@@ -712,6 +723,8 @@ async def _handle_special_document_creation(
             before_hash = _hash_text(target_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError):
             before_hash = ""
+
+    log_warning: Optional[str] = None
 
     try:
         target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -741,6 +754,9 @@ async def _handle_special_document_creation(
         log_meta = _normalize_metadata(prepared_metadata)
         log_meta.update(
             {
+                "doc": doc_label,
+                "section": "",
+                "action": "create",
                 "document_type": doc_label,
                 "file_path": str(target_path),
                 "file_size": target_path.stat().st_size,
@@ -753,13 +769,16 @@ async def _handle_special_document_creation(
                 except (TypeError, ValueError):
                     log_meta[key] = str(value)
 
-        await append_entry(
-            message=f"Created {doc_label.replace('_', ' ')}: {target_path.name}",
-            status="success",
-            meta=log_meta,
-            agent=agent_id,
-            log_type="doc_updates",
-        )
+        try:
+            await append_entry(
+                message=f"Created {doc_label.replace('_', ' ')}: {target_path.name}",
+                status="success",
+                meta=log_meta,
+                agent=agent_id,
+                log_type="doc_updates",
+            )
+        except Exception as exc:
+            log_warning = str(exc)
 
         if index_updater:
             try:
@@ -769,20 +788,22 @@ async def _handle_special_document_creation(
                 # Don't fail the whole operation if index update fails
                 # The document was created successfully, just the index is stale
 
-        return {
+        success_payload: Dict[str, Any] = {
             "ok": True,
             "path": str(target_path),
             "document_type": doc_label,
             "file_size": target_path.stat().st_size,
-            "recent_projects": recent_projects,
         }
+        if log_warning:
+            success_payload["log_warning"] = log_warning
+
+        return helper.apply_context_payload(success_payload, context)
 
     except Exception as exc:
-        return {
-            "ok": False,
-            "error": f"Failed to create document: {exc}",
-            "recent_projects": recent_projects,
-        }
+        return helper.apply_context_payload(
+            helper.error_response(f"Failed to create document: {exc}"),
+            context,
+        )
 
 
 async def _update_research_index(research_dir: Path, agent_id: str) -> None:

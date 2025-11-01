@@ -291,8 +291,15 @@ def atomic_write(file_path: Union[str, Path], content: str, mode: str = 'w') -> 
             f.flush()
             os.fsync(f.fileno())
 
-        # Atomic rename
-        temp_path.replace(file_path)
+        # Atomic rename with retry for Windows compatibility
+        for attempt in range(5):
+            try:
+                temp_path.replace(file_path)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.1)
 
         # Sync parent directory
         dir_fd = os.open(file_path.parent, os.O_RDONLY)
@@ -353,7 +360,12 @@ def preflight_backup(file_path: Union[str, Path]) -> Path:
     return backup_path
 
 
-def verify_file_integrity(file_path: Union[str, Path]) -> Dict[str, Any]:
+def verify_file_integrity(
+    file_path: Union[str, Path],
+    *,
+    include_line_count: bool = True,
+    include_hash: bool = True,
+) -> Dict[str, Any]:
     """
     Verify file integrity and return metadata.
 
@@ -374,27 +386,40 @@ def verify_file_integrity(file_path: Union[str, Path]) -> Dict[str, Any]:
     try:
         stat = file_path.stat()
 
-        # Calculate SHA-256 hash
-        sha256_hash = hashlib.sha256()
-        with open(file_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                sha256_hash.update(chunk)
-
-        # Count lines if it's a text file
+        sha256_digest = None
         line_count = None
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                line_count = sum(1 for _ in f)
-        except UnicodeDecodeError:
-            # Binary file
-            pass
+        with open(file_path, 'rb') as f:
+            sha256_hash = hashlib.sha256() if include_hash else None
+            newline_count = 0
+            last_byte = None
+            while True:
+                chunk = f.read(4096)
+                if not chunk:
+                    break
+                if include_hash and sha256_hash is not None:
+                    sha256_hash.update(chunk)
+                if include_line_count:
+                    newline_count += chunk.count(b"\n")
+                    last_byte = chunk[-1]
+
+        if include_hash and sha256_hash is not None:
+            sha256_digest = sha256_hash.hexdigest()
+
+        if include_line_count:
+            if newline_count > 0:
+                line_count = newline_count
+                if stat.st_size > 0 and last_byte is not None and last_byte != ord("\n"):
+                    line_count += 1
+            elif stat.st_size > 0:
+                # No newline characters; treat entire file as single line
+                line_count = 1
 
         return {
             'exists': True,
             'size_bytes': stat.st_size,
             'size_mb': round(stat.st_size / (1024 * 1024), 3),
             'line_count': line_count,
-            'sha256': sha256_hash.hexdigest(),
+            'sha256': sha256_digest,
             'modified_time': datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
             'created_time': datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc).isoformat()
         }
@@ -524,9 +549,8 @@ async def rotate_file(path: Path, suffix: str | None, confirm: bool = False, dry
     if not path.exists():
         raise AtomicFileError(f"Cannot rotate non-existent file: {path}")
 
-    # Verify file has content (prevent rotating empty files)
-    file_info = verify_file_integrity(path)
-    if file_info.get('line_count', 0) == 0:
+    file_stat = path.stat()
+    if file_stat.st_size == 0:
         raise AtomicFileError(f"Cannot rotate empty file: {path}")
 
     if dry_run or not confirm:

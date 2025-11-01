@@ -12,6 +12,9 @@ import uuid
 from pathlib import Path
 from datetime import datetime
 import time
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scribe_mcp.utils.integrity import (
     compute_file_hash,
@@ -434,6 +437,29 @@ class TestConvenienceFunctions:
 
         manager = get_state_manager(str(self.temp_dir))
         assert isinstance(manager, RotationStateManager)
+
+
+def test_entry_count_estimation_cache_invalidation():
+    """Ensure cached snapshot mismatches fall back to EMA estimation."""
+    from tools.rotate_log import _estimate_entry_count
+
+    snapshot = {"size_bytes": 1024, "mtime_ns": 1000, "inode": 42}
+    cached = {
+        "size_bytes": 1024,
+        "mtime_ns": 1000,
+        "line_count": 20,
+        "ema_bytes_per_line": 64.0,
+        "initialized": True,
+    }
+
+    precise = _estimate_entry_count(snapshot, cached)
+    assert precise.approximate is False
+    assert precise.method == "cache"
+
+    mutated_snapshot = {"size_bytes": 2048, "mtime_ns": 2000, "inode": 42}
+    fallback = _estimate_entry_count(mutated_snapshot, cached)
+    assert fallback.approximate is True
+    assert fallback.method == "ema"
 
 
 if __name__ == "__main__":

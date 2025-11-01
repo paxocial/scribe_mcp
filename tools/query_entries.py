@@ -10,19 +10,32 @@ from typing import Any, Dict, List, Optional, Tuple
 from scribe_mcp import server as server_module
 from scribe_mcp.server import app
 from scribe_mcp.tools.constants import STATUS_EMOJI
-from scribe_mcp.tools.project_utils import load_active_project, load_project_config
+from scribe_mcp.tools.project_utils import load_project_config
 from scribe_mcp.utils.logs import parse_log_line, read_all_lines
 from scribe_mcp.utils.search import message_matches
 from scribe_mcp.utils.time import coerce_range_boundary
-from scribe_mcp.utils.response import default_formatter, create_pagination_info
+from scribe_mcp.utils.response import create_pagination_info
 from scribe_mcp.utils.tokens import token_estimator
-from scribe_mcp import reminders
-from scribe_mcp.tools.base.parameter_normalizer import normalize_dict_param, normalize_list_param
+from scribe_mcp.shared.logging_utils import (
+    LoggingContext,
+    ProjectResolutionError,
+    clean_list as shared_clean_list,
+    normalize_meta_filters,
+    resolve_logging_context,
+)
+from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
 
 VALID_MESSAGE_MODES = {"substring", "regex", "exact"}
 VALID_SEARCH_SCOPES = {"project", "global", "all_projects", "research", "bugs", "all"}
 VALID_DOCUMENT_TYPES = {"progress", "research", "architecture", "bugs", "global"}
-META_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]+$")
+
+
+class _QueryEntriesHelper(LoggingToolMixin):
+    def __init__(self) -> None:
+        self.server_module = server_module
+
+
+_HELPER = _QueryEntriesHelper()
 
 
 @app.tool()
@@ -109,7 +122,7 @@ async def query_entries(
             return {"ok": False, "error": f"Invalid regex for message filter: {exc}"}
 
     normalised_emoji = _resolve_emojis(emoji, status)
-    meta_normalised, meta_error = _normalise_meta_filters(meta_filters)
+    meta_normalised, meta_error = normalize_meta_filters(meta_filters)
     if meta_error:
         return {"ok": False, "error": meta_error}
 
@@ -142,6 +155,8 @@ async def query_entries(
     end_bound, end_error = _normalise_boundary(end, end=True)
     if end_error:
         return {"ok": False, "error": end_error}
+
+    context: Optional[LoggingContext] = None
 
     # Handle cross-project search for enhanced scopes
     if search_scope != "project":
@@ -176,18 +191,29 @@ async def query_entries(
             verify_code_references=verify_code_references,
             relevance_threshold=relevance_threshold,
             state_snapshot=state_snapshot,
+            helper=_HELPER,
+            context=None,
         )
 
     # Single project mode (existing behavior)
-    project_data, active_name, recent = await _resolve_project(project)
-    reminders_payload: List[Dict[str, Any]] = []
-    if not project_data:
+    try:
+        context = await _HELPER.prepare_context(
+            tool_name="query_entries",
+            agent_id=None,
+            explicit_project=project,
+            require_project=True,
+            state_snapshot=state_snapshot,
+        )
+    except ProjectResolutionError as exc:
+        target = project or "current project"
         return {
             "ok": False,
-            "error": f"Project '{project or active_name}' is not configured.",
-            "recent_projects": list(recent),
-            "reminders": reminders_payload,
+            "error": f"Project '{target}' is not configured.",
+            "recent_projects": list(exc.recent_projects),
+            "reminders": [],
         }
+
+    project_data = context.project or {}
 
     backend = server_module.storage_backend
     if backend:
@@ -245,23 +271,14 @@ async def query_entries(
             )
             pagination_info = create_pagination_info(page, page_size, total_count)
 
-        reminders_payload = await reminders.get_reminders(
-            project_data,
-            tool_name="query_entries",
-            state=state_snapshot,
-        )
-
-        # Format response using the response formatter
-        response = default_formatter.format_response(
+        response = _HELPER.success_with_entries(
             entries=rows,
+            context=context,
             compact=compact,
             fields=fields,
             include_metadata=include_metadata,
             pagination=pagination_info,
-            extra_data={
-                "recent_projects": list(recent),
-                "reminders": reminders_payload,
-            }
+            extra_data={},
         )
 
         # Record token usage
@@ -308,23 +325,14 @@ async def query_entries(
 
     pagination_info = create_pagination_info(page, page_size, total_count)
 
-    reminders_payload = await reminders.get_reminders(
-        project_data,
-        tool_name="query_entries",
-        state=state_snapshot,
-    )
-
-    # Format response using the response formatter
-    response = default_formatter.format_response(
+    response = _HELPER.success_with_entries(
         entries=paginated_entries,
+        context=context,
         compact=compact,
         fields=fields,
         include_metadata=include_metadata,
         pagination=pagination_info,
-        extra_data={
-            "recent_projects": list(recent),
-            "reminders": reminders_payload,
-        }
+        extra_data={},
     )
 
     # Record token usage
@@ -351,21 +359,6 @@ async def query_entries(
     return response
 
 
-async def _resolve_project(
-    project_name: Optional[str],
-) -> Tuple[Optional[Dict[str, Any]], Optional[str], Tuple[str, ...]]:
-    if not project_name:
-        return await load_active_project(server_module.state_manager)
-
-    state = await server_module.state_manager.load()
-    project = state.get_project(project_name)
-    if project:
-        return project, project_name, tuple(state.recent_projects)
-
-    config = load_project_config(project_name)
-    return config, project_name, tuple(state.recent_projects)
-
-
 async def _resolve_cross_project_projects(
     search_scope: str,
     document_types: Optional[List[str]],
@@ -374,13 +367,7 @@ async def _resolve_cross_project_projects(
     state = await server_module.state_manager.load()
     projects: List[Dict[str, Any]] = []
 
-    if search_scope == "project":
-        # Single project mode (existing behavior)
-        project, active_name, _ = await load_active_project(server_module.state_manager)
-        if project:
-            projects.append(project)
-
-    elif search_scope == "all_projects":
+    if search_scope == "all_projects":
         # Search all configured projects
         for project_name in state.projects:
             # Try to get complete project data from state first
@@ -554,6 +541,8 @@ async def _handle_cross_project_search(
     verify_code_references: bool,
     relevance_threshold: float,
     state_snapshot: Dict[str, Any],
+    helper: LoggingToolMixin,
+    context: Optional[LoggingContext],
 ) -> Dict[str, Any]:
     """Handle cross-project search with result aggregation and pagination."""
     all_results: List[Dict[str, Any]] = []
@@ -612,17 +601,18 @@ async def _handle_cross_project_search(
     # Create pagination info
     pagination_info = create_pagination_info(page, page_size, total_count)
 
-    # Get reminders for active project
-    active_project_data, _, _ = await load_active_project(server_module.state_manager)
-    reminders_payload = await reminders.get_reminders(
-        active_project_data or projects[0],  # Fallback to first project
-        tool_name="query_entries",
-        state=state_snapshot,
-    )
+    if context is None:
+        context = await helper.prepare_context(
+            tool_name="query_entries",
+            agent_id=None,
+            explicit_project=None,
+            require_project=False,
+            state_snapshot=state_snapshot,
+        )
 
-    # Format response
-    response = default_formatter.format_response(
+    response = helper.success_with_entries(
         entries=paginated_results,
+        context=context,
         compact=compact,
         fields=fields,
         include_metadata=include_metadata,
@@ -632,9 +622,7 @@ async def _handle_cross_project_search(
             "document_types": document_types,
             "projects_searched": list(project_context.keys()),
             "total_results_across_projects": total_count,
-            "recent_projects": list(project_context.keys()),
-            "reminders": reminders_payload,
-        }
+        },
     )
 
     # Record token usage
@@ -1103,11 +1091,11 @@ def _resolve_emojis(
 ) -> List[str]:
     result: List[str] = []
     seen = set()
-    for item in emojis or []:
+    for item in shared_clean_list(emojis, coerce_lower=False):
         if item and item not in seen:
             result.append(item)
             seen.add(item)
-    for status in statuses or []:
+    for status in shared_clean_list(statuses, coerce_lower=True):
         if not status:
             continue
         emoji = STATUS_EMOJI.get(status, STATUS_EMOJI.get(status.lower()))
@@ -1121,77 +1109,7 @@ def _resolve_emojis(
 
 
 def _clean_list(items: Optional[List[str]]) -> List[str]:
-    """Clean list items with BaseTool parameter normalization integration.
-
-    Enhanced with standardized parameter normalization for consistent MCP framework
-    handling while preserving all existing cleaning logic.
-    """
-    if not items:
-        return []
-
-    # Handle case where items come as JSON string from MCP framework
-    if isinstance(items, str):
-        try:
-            # Try our standardized normalization first (handles MCP framework JSON serialization)
-            normalized_items = normalize_list_param(items, "list_param")
-            if isinstance(normalized_items, list):
-                items = normalized_items
-            else:
-                # Fall back to original string handling if normalization fails
-                pass
-        except ValueError:
-            # FALLBACK: Treat as single item string
-            items = [items]
-
-    # Ensure we have a list at this point
-    if not isinstance(items, list):
-        items = [str(items)]
-
-    return [item for item in (entry.strip() for entry in items) if item]
-
-
-def _normalise_meta_filters(
-    meta_filters: Optional[Dict[str, Any]],
-) -> Tuple[Dict[str, str], Optional[str]]:
-    """Normalize meta filters with BaseTool parameter normalization integration.
-
-    Enhanced with standardized parameter normalization for consistent MCP framework
-    handling while preserving all existing validation logic.
-    """
-    if not meta_filters:
-        return {}, None
-
-    # Use BaseTool parameter normalization for consistent MCP framework handling
-    if isinstance(meta_filters, str):
-        try:
-            # Try our standardized normalization first (handles MCP framework JSON serialization)
-            normalized_meta = normalize_dict_param(meta_filters, "meta_filters")
-            if isinstance(normalized_meta, dict):
-                meta_filters = normalized_meta
-            else:
-                # Fall back to original JSON parsing if normalization fails
-                pass
-        except ValueError:
-            # FALLBACK: Use original JSON parsing logic
-            try:
-                import json
-                meta_filters = json.loads(meta_filters)
-                if not isinstance(meta_filters, dict):
-                    return {}, "Meta filters must be a dictionary."
-            except (json.JSONDecodeError, TypeError):
-                return {}, "Invalid JSON in meta filters."
-
-    normalised: Dict[str, str] = {}
-    for key, value in meta_filters.items():
-        if key is None:
-            return {}, "Meta filter keys cannot be null."
-        key_str = str(key).strip()
-        if not key_str:
-            return {}, "Meta filter keys cannot be empty."
-        if not META_KEY_PATTERN.match(key_str):
-            return {}, f"Meta filter key '{key}' contains unsupported characters."
-        normalised[key_str] = str(value)
-    return normalised, None
+    return shared_clean_list(items, coerce_lower=False)
 
 
 def _normalise_boundary(value: Optional[str], *, end: bool) -> Tuple[Optional[datetime], Optional[str]]:

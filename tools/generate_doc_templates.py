@@ -8,12 +8,14 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Tuple
 
-from scribe_mcp import reminders, server as server_module
+from scribe_mcp import server as server_module
 from scribe_mcp.config.settings import settings
 from scribe_mcp.tools.project_utils import slugify_project_name
 from scribe_mcp.server import app
 from scribe_mcp.template_engine import Jinja2TemplateEngine, TemplateEngineError
 from scribe_mcp.templates import TEMPLATE_FILENAMES, load_templates, substitution_context
+from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
+from scribe_mcp.shared.logging_utils import ProjectResolutionError
 
 
 OUTPUT_FILENAMES: List[Tuple[str, str]] = [
@@ -27,6 +29,14 @@ OUTPUT_FILENAMES: List[Tuple[str, str]] = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+class _GenerateDocTemplatesHelper(LoggingToolMixin):
+    def __init__(self) -> None:
+        self.server_module = server_module
+
+
+_GENERATE_DOC_TEMPLATES_HELPER = _GenerateDocTemplatesHelper()
 
 
 @app.tool()
@@ -43,6 +53,23 @@ async def generate_doc_templates(
 ) -> Dict[str, Any]:
     """Render the standard documentation templates for a project."""
     state_snapshot = await server_module.state_manager.record_tool("generate_doc_templates")
+    try:
+        logging_context = await _GENERATE_DOC_TEMPLATES_HELPER.prepare_context(
+            tool_name="generate_doc_templates",
+            agent_id=None,
+            explicit_project=project_name,
+            require_project=False,
+            state_snapshot=state_snapshot,
+        )
+    except ProjectResolutionError as exc:
+        payload = _GENERATE_DOC_TEMPLATES_HELPER.translate_project_error(exc)
+        payload.setdefault(
+            "suggestion",
+            "Set project context or provide valid project configuration before generating templates.",
+        )
+        payload.setdefault("reminders", [])
+        return payload
+
     templates: Dict[str, str] = {}
     if legacy_fallback:
         templates = await load_templates()
@@ -55,16 +82,16 @@ async def generate_doc_templates(
                 # Merge with base context
                 base_context = substitution_context(project_name, author)
                 base_context.update(custom_context)
-                context = base_context
+                render_context = base_context
             else:
                 # Try to convert to dict if it's not already
-                context = substitution_context(project_name, author)
+                render_context = substitution_context(project_name, author)
                 print(f"Warning: custom_context should be a dict, got {type(custom_context).__name__}")
         else:
-            context = substitution_context(project_name, author)
+            render_context = substitution_context(project_name, author)
     except Exception as e:
         # Graceful fallback if context handling fails
-        context = substitution_context(project_name, author)
+        render_context = substitution_context(project_name, author)
         print(f"Warning: Error handling custom_context: {e}. Using base context.")
 
     engine_error: Exception | None = None
@@ -111,7 +138,7 @@ async def generate_doc_templates(
             continue
         template_name = f"documents/{TEMPLATE_FILENAMES[key]}"
         rendered = None
-        metadata_payload = _metadata_for(key, project_name, context)
+        metadata_payload = _metadata_for(key, project_name, render_context)
 
         if engine:
             validation_result = engine.validate_template(template_name)
@@ -120,12 +147,14 @@ async def generate_doc_templates(
                 if not validation_result.get("valid", False):
                     all_templates_valid = False
                     if not validate_only:
-                        return {
-                            "ok": False,
-                            "error": f"Template validation failed for {template_name}",
-                            "template": template_name,
-                            "validation": validation_result,
-                        }
+                        error_payload = _GENERATE_DOC_TEMPLATES_HELPER.error_response(
+                            f"Template validation failed for {template_name}",
+                            extra={
+                                "template": template_name,
+                                "validation": validation_result,
+                            },
+                        )
+                        return _GENERATE_DOC_TEMPLATES_HELPER.apply_context_payload(error_payload, logging_context)
         if include_template_metadata and engine:
             template_metadata[key] = {
                 "template": template_name,
@@ -141,24 +170,27 @@ async def generate_doc_templates(
             except TemplateEngineError as template_error:
                 logger.warning("Jinja2 rendering failed for %s: %s", template_name, template_error)
                 if not legacy_fallback:
-                    return {
-                        "ok": False,
-                        "error": f"Jinja2 rendering failed for {template_name}: {template_error}",
-                        "template": template_name,
-                    }
+                    error_payload = _GENERATE_DOC_TEMPLATES_HELPER.error_response(
+                        f"Jinja2 rendering failed for {template_name}: {template_error}",
+                        extra={"template": template_name},
+                    )
+                    return _GENERATE_DOC_TEMPLATES_HELPER.apply_context_payload(error_payload, logging_context)
 
         if rendered is None:
             if not legacy_fallback:
-                return {
-                    "ok": False,
-                    "error": f"No rendered output generated for {template_name}",
-                    "template": template_name,
-                }
+                error_payload = _GENERATE_DOC_TEMPLATES_HELPER.error_response(
+                    f"No rendered output generated for {template_name}",
+                    extra={"template": template_name},
+                )
+                return _GENERATE_DOC_TEMPLATES_HELPER.apply_context_payload(error_payload, logging_context)
             template_body = templates.get(key)
             if not template_body:
                 source_name = TEMPLATE_FILENAMES[key]
-                return {"ok": False, "error": f"Template missing: {source_name}"}
-            rendered = _render_template(template_body, context)
+                error_payload = _GENERATE_DOC_TEMPLATES_HELPER.error_response(
+                    f"Template missing: {source_name}",
+                )
+                return _GENERATE_DOC_TEMPLATES_HELPER.apply_context_payload(error_payload, logging_context)
+            rendered = _render_template(template_body, render_context)
         path = output_dir / filename
         if overwrite or not path.exists():
             await asyncio.to_thread(_write_template, path, rendered, overwrite)
@@ -178,32 +210,13 @@ async def generate_doc_templates(
                 "directories": template_directories_info,
                 "available_templates": available_templates,
             }
-        return response
+        return _GENERATE_DOC_TEMPLATES_HELPER.apply_context_payload(response, logging_context)
 
-    project_stub = {
-        "name": project_name,
-        "progress_log": str(output_dir / "PROGRESS_LOG.md"),
-        "docs": {
-            "architecture": str(output_dir / "ARCHITECTURE_GUIDE.md"),
-            "phase_plan": str(output_dir / "PHASE_PLAN.md"),
-            "checklist": str(output_dir / "CHECKLIST.md"),
-            "progress_log": str(output_dir / "PROGRESS_LOG.md"),
-            "doc_log": str(output_dir / "DOC_LOG.md"),
-            "security_log": str(output_dir / "SECURITY_LOG.md"),
-            "bug_log": str(output_dir / "BUG_LOG.md"),
-        },
-    }
-    reminders_payload = await reminders.get_reminders(
-        project_stub,
-        tool_name="generate_doc_templates",
-        state=state_snapshot,
-    )
     response: Dict[str, Any] = {
         "ok": True,
         "files": written,
         "skipped": skipped,
         "directory": str(output_dir),
-        "reminders": reminders_payload,
     }
     if validation_results:
         response["validation"] = validation_results
@@ -213,7 +226,7 @@ async def generate_doc_templates(
             "directories": template_directories_info,
             "available_templates": available_templates,
         }
-    return response
+    return _GENERATE_DOC_TEMPLATES_HELPER.apply_context_payload(response, logging_context)
 
 
 def _target_directory(project_name: str, base_dir: str | None) -> Path:

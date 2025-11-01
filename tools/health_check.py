@@ -6,6 +6,16 @@ from typing import Any, Dict, List, Optional
 
 from scribe_mcp import server as server_module
 from scribe_mcp.server import app
+from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
+from scribe_mcp.shared.logging_utils import LoggingContext, ProjectResolutionError
+
+
+class _HealthCheckHelper(LoggingToolMixin):
+    def __init__(self) -> None:
+        self.server_module = server_module
+
+
+_HEALTH_CHECK_HELPER = _HealthCheckHelper()
 
 
 @app.tool()
@@ -16,6 +26,24 @@ async def health_check() -> Dict[str, Any]:
     Returns:
         Health status including sync status, active sessions, and system metrics.
     """
+    state_snapshot = await server_module.state_manager.record_tool("health_check")
+    agent_identity = server_module.get_agent_identity()
+    agent_id = None
+    if agent_identity:
+        agent_id = await agent_identity.get_or_create_agent_id()
+
+    try:
+        context: LoggingContext = await _HEALTH_CHECK_HELPER.prepare_context(
+            tool_name="health_check",
+            agent_id=agent_id,
+            require_project=False,
+            state_snapshot=state_snapshot,
+        )
+    except ProjectResolutionError as exc:
+        payload = _HEALTH_CHECK_HELPER.translate_project_error(exc)
+        payload.setdefault("reminders", [])
+        return payload
+
     health_status = {
         "status": "healthy",
         "timestamp": None,
@@ -168,7 +196,7 @@ async def health_check() -> Dict[str, Any]:
         health_status["issues"].append(f"Health check system failure: {e}")
         health_status["summary"] = "Health check system error"
 
-    return health_status
+    return _HEALTH_CHECK_HELPER.apply_context_payload(health_status, context)
 
 
 async def _check_sync_status(agent_manager, storage, state_manager) -> Dict[str, Any]:

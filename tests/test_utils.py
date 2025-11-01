@@ -14,11 +14,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from scribe_mcp.state.manager import StateManager
 from scribe_mcp.tools import set_project
 from scribe_mcp.tools.append_entry import (
-    _clean_meta_value,
     _normalise_meta,
     _sanitize_identifier,
     _validate_message,
 )
+from scribe_mcp.shared.logging_utils import _clean_meta_value
 
 
 def test_sanitize_identifier_strips_brackets():

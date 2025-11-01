@@ -8,11 +8,22 @@ from typing import Any, Dict, List, Optional
 from scribe_mcp import server as server_module
 from scribe_mcp.server import app
 from scribe_mcp.tools.constants import STATUS_EMOJI
-from scribe_mcp.tools.project_utils import load_active_project
-from scribe_mcp import reminders
 from scribe_mcp.utils.files import read_tail
-from scribe_mcp.utils.response import default_formatter, create_pagination_info
+from scribe_mcp.utils.response import create_pagination_info
 from scribe_mcp.utils.tokens import token_estimator
+from scribe_mcp.shared.logging_utils import (
+    ProjectResolutionError,
+    resolve_logging_context,
+)
+from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
+
+
+class _ReadRecentHelper(LoggingToolMixin):
+    def __init__(self) -> None:
+        self.server_module = server_module
+
+
+_READ_RECENT_HELPER = _ReadRecentHelper()
 
 
 @app.tool()
@@ -40,16 +51,23 @@ async def read_recent(
         Paginated response with recent entries and metadata
     """
     state_snapshot = await server_module.state_manager.record_tool("read_recent")
-    project, _, recent = await load_active_project(server_module.state_manager)
-    reminders_payload: List[Dict[str, Any]] = []
-    if not project:
+    try:
+        context = await _READ_RECENT_HELPER.prepare_context(
+            tool_name="read_recent",
+            agent_id=None,
+            require_project=True,
+            state_snapshot=state_snapshot,
+        )
+    except ProjectResolutionError as exc:
         return {
             "ok": False,
             "error": "No project configured.",
             "suggestion": "Invoke set_project before reading logs",
-            "recent_projects": list(recent),
-            "reminders": reminders_payload,
+            "recent_projects": list(exc.recent_projects),
+            "reminders": [],
         }
+
+    project = context.project or {}
 
     # Handle n parameter for backward compatibility
     if page == 1 and page_size == 50 and n is not None:
@@ -94,23 +112,14 @@ async def read_recent(
                 )
                 pagination_info = create_pagination_info(page, page_size, total_count)
 
-            reminders_payload = await reminders.get_reminders(
-                project,
-                tool_name="read_recent",
-                state=state_snapshot,
-            )
-
-            # Format response using the response formatter
-            response = default_formatter.format_response(
+            response = _READ_RECENT_HELPER.success_with_entries(
                 entries=rows,
+                context=context,
                 compact=compact,
                 fields=fields,
                 include_metadata=include_metadata,
                 pagination=pagination_info,
-                extra_data={
-                    "recent_projects": list(recent),
-                    "reminders": reminders_payload,
-                }
+                extra_data={},
             )
 
             # Record token usage
@@ -147,12 +156,6 @@ async def read_recent(
 
     pagination_info = create_pagination_info(page, page_size, total_count)
 
-    reminders_payload = await reminders.get_reminders(
-        project,
-        tool_name="read_recent",
-        state=state_snapshot,
-    )
-
     # Convert lines to entry format for consistent response formatting
     from scribe_mcp.utils.logs import parse_log_line
     entries = []
@@ -164,17 +167,14 @@ async def read_recent(
             # If parsing fails, include as raw line
             entries.append({"raw_line": line, "message": line})
 
-    # Format response using the response formatter
-    response = default_formatter.format_response(
+    response = _READ_RECENT_HELPER.success_with_entries(
         entries=entries,
+        context=context,
         compact=compact,
         fields=fields,
         include_metadata=include_metadata,
         pagination=pagination_info,
-        extra_data={
-            "recent_projects": list(recent),
-            "reminders": reminders_payload,
-        }
+        extra_data={},
     )
 
     # Record token usage

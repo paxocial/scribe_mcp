@@ -161,7 +161,8 @@ def create_rotation_metadata(
     rotation_uuid: str,
     rotation_timestamp: str,
     sequence_number: int,
-    previous_hash: Optional[str] = None
+    previous_hash: Optional[str] = None,
+    log_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Create comprehensive rotation metadata for audit trail.
@@ -186,7 +187,6 @@ def create_rotation_metadata(
         except (UnicodeDecodeError, OSError):
             entry_count = -1  # Indicates error counting lines
 
-        # Build rotation metadata
         rotation_metadata = {
             "rotation_uuid": rotation_uuid,
             "rotation_timestamp_utc": rotation_timestamp,
@@ -200,9 +200,10 @@ def create_rotation_metadata(
             "modified_timestamp": file_metadata.get("modified_timestamp"),
         }
 
-        # Add hash chaining information if available
         if previous_hash:
             rotation_metadata["hash_chain_previous"] = previous_hash
+        if log_type:
+            rotation_metadata["log_type"] = log_type
 
         return rotation_metadata
 

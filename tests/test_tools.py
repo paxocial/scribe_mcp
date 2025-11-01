@@ -171,6 +171,8 @@ def test_rotate_log_creates_archive(isolated_state, project_root):
     archive_path = Path(result["archived_to"])
     assert archive_path.exists()
     assert archive_path.read_text(encoding="utf-8")
+    assert "estimated_entry_count" in result
+    assert "entry_count_method" in result
 
 
 def test_generate_doc_templates_renders_files(tmp_path, isolated_state):
@@ -352,6 +354,26 @@ class TestEnhancedRotationEngine:
         new_log_path = Path(active["project"]["progress_log"])
         assert new_log_path.exists()
         assert new_log_path != archive_path
+
+
+def test_rotate_log_dry_run_precision_controls(isolated_state, project_root):
+    root = project_root
+    run(set_project.set_project("rotate-precision-test", str(root)))
+    run(append_entry.append_entry(message="Precision dry-run entry"))
+
+    estimate_result = run(rotate_log.rotate_log(dry_run=True))
+    assert estimate_result["ok"]
+    assert estimate_result["dry_run"] is True
+    assert estimate_result["entry_count"] >= 1
+    assert "entry_count_method" in estimate_result
+    assert "entry_count_approximate" in estimate_result
+
+    precise_result = run(rotate_log.rotate_log(dry_run=True, dry_run_mode="precise"))
+    assert precise_result["ok"]
+    assert precise_result["dry_run"] is True
+    assert precise_result["entry_count_approximate"] is False
+    assert precise_result["entry_count_method"] == "full_count"
+    assert precise_result["entry_count"] >= 1
 
     def test_rotation_with_custom_metadata(isolated_state, project_root):
         """Test rotation with custom metadata."""

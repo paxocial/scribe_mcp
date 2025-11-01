@@ -7,10 +7,22 @@ from typing import Any, Dict, List, Optional
 from scribe_mcp import server as server_module
 from scribe_mcp.server import app
 from scribe_mcp.tools.project_utils import load_active_project
-from scribe_mcp import reminders
-from scribe_mcp.utils.response import default_formatter
 from scribe_mcp.utils.tokens import token_estimator
 from scribe_mcp.utils.context_safety import ContextManager
+from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
+from scribe_mcp.shared.logging_utils import LoggingContext, ProjectResolutionError
+
+
+MINIMAL_FIELDS = ("name", "root", "progress_log")
+COMPACT_FIELD_MAP = {"name": "n", "root": "r", "progress_log": "p", "docs": "d", "defaults": "df"}
+
+
+class _ListProjectsHelper(LoggingToolMixin):
+    def __init__(self) -> None:
+        self.server_module = server_module
+
+
+_LIST_PROJECTS_HELPER = _ListProjectsHelper()
 
 
 @app.tool()
@@ -38,6 +50,23 @@ async def list_projects(
         Projects list with intelligent filtering, pagination, and context safety
     """
     state_snapshot = await server_module.state_manager.record_tool("list_projects")
+    agent_identity = server_module.get_agent_identity()
+    agent_id = None
+    if agent_identity:
+        agent_id = await agent_identity.get_or_create_agent_id()
+
+    try:
+        context: LoggingContext = await _LIST_PROJECTS_HELPER.prepare_context(
+            tool_name="list_projects",
+            agent_id=agent_id,
+            require_project=False,
+            state_snapshot=state_snapshot,
+        )
+    except ProjectResolutionError as exc:
+        payload = _LIST_PROJECTS_HELPER.translate_project_error(exc)
+        payload.setdefault("reminders", [])
+        return payload
+
     state = await server_module.state_manager.load()
     projects_map: Dict[str, Dict[str, Any]] = {}
 
@@ -63,7 +92,7 @@ async def list_projects(
             existing["defaults"] = data["defaults"]
         projects_map[name] = existing
 
-    active_project, _, recent = await load_active_project(server_module.state_manager)
+    active_project, current_name, recent = await load_active_project(server_module.state_manager)
     if active_project and active_project["name"] not in projects_map:
         projects_map[active_project["name"]] = {
             "name": active_project["name"],
@@ -82,7 +111,7 @@ async def list_projects(
             if filter_lower in project.get("name", "").lower()
         ]
 
-    # Sort by name
+    # Sort by name for stable ordering
     projects_list.sort(key=lambda item: item["name"].lower())
 
     # Initialize context manager for intelligent filtering and pagination
@@ -101,7 +130,6 @@ async def list_projects(
 
     effective_page_size = page_size_int or limit_int or context_manager.paginator.default_page_size
 
-    # Prepare context-safe response
     context_response = context_manager.prepare_response(
         items=projects_list,
         response_type="projects",
@@ -111,43 +139,65 @@ async def list_projects(
         compact=compact
     )
 
-    # Get reminders
-    reminders_payload: List[Dict[str, Any]] = []
-    if active_project:
-        reminders_payload = await reminders.get_reminders(
-            active_project,
-            tool_name="list_projects",
-            state=state_snapshot,
-        )
+    selected_fields = fields or list(MINIMAL_FIELDS)
 
-    # Format project entries using existing formatter
-    formatted_projects = []
-    for project in context_response["items"]:
-        formatted_project = {
-            k: v for k, v in project.items()
-            if not fields or k in fields
-        }
-        formatted_projects.append(formatted_project)
+    def _format_project(project: Dict[str, Any]) -> Dict[str, Any]:
+        formatted: Dict[str, Any] = {}
+        for field in selected_fields:
+            if field not in project:
+                continue
+            key = COMPACT_FIELD_MAP.get(field, field) if compact else field
+            formatted[key] = project[field]
+        return formatted
 
-    # Build final response
+    formatted_projects = [_format_project(project) for project in context_response["items"]]
+
+    pagination_info = context_response["pagination"]
+    total_available = context_response["total_available"]
+    filtered_flag = context_response["filtered"]
+
+    token_check = context_manager.token_guard.check_limits(
+        {"projects": formatted_projects, "count": len(formatted_projects)}
+    )
+
+    context_safety = {
+        "estimated_tokens": token_check.get("estimated_tokens", 0),
+        "pagination_used": pagination_info["total_count"] > pagination_info["page_size"],
+        "filtered": filtered_flag,
+    }
+    if compact:
+        context_safety["compact_mode"] = True
+
     response = {
         "ok": True,
         "projects": formatted_projects,
         "count": len(formatted_projects),
-        "pagination": context_response["pagination"],
-        "total_available": context_response["total_available"],
-        "filtered": context_response["filtered"],
+        "pagination": pagination_info,
+        "total_available": total_available,
+        "filtered": filtered_flag,
         "recent_projects": list(recent),
-        "active_project": active_project.get("name") if active_project else None,
-        "reminders": reminders_payload,
-        "context_safety": context_response["context_safety"]
+        "active_project": (
+            current_name
+            if current_name
+            else (context.project.get("name") if context.project else None)
+        ),
+        "context_safety": context_safety,
     }
 
-    # Add token warnings if needed
-    if "token_warning" in context_response:
-        response["token_warning"] = context_response["token_warning"]
-    elif "token_critical" in context_response:
-        response["token_critical"] = context_response["token_critical"]
+    if token_check.get("warning"):
+        response["token_warning"] = {
+            "estimated_tokens": token_check["estimated_tokens"],
+            "warning_threshold": context_manager.token_guard.warning_threshold,
+            "message": token_check["message"],
+            "suggestion": token_check["suggestion"],
+        }
+    elif token_check.get("critical"):
+        response["token_critical"] = {
+            "estimated_tokens": token_check["estimated_tokens"],
+            "hard_limit": context_manager.token_guard.hard_limit,
+            "message": token_check["message"],
+            "suggestion": token_check["suggestion"],
+        }
 
     if compact:
         response["compact"] = True
@@ -163,11 +213,11 @@ async def list_projects(
                 "fields": fields,
                 "include_test": include_test,
                 "page": page,
-                "page_size": effective_page_size
-            },
-            response=response,
-            compact_mode=compact,
-            page_size=len(formatted_projects)
-        )
+            "page_size": effective_page_size
+        },
+        response=response,
+        compact_mode=compact,
+        page_size=len(formatted_projects)
+    )
 
-    return response
+    return _LIST_PROJECTS_HELPER.apply_context_payload(response, context)

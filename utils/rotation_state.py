@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Optional, Any, Tuple, List
 from datetime import datetime
 import threading
+import time
 
 
 class RotationStateManager:
@@ -108,8 +109,15 @@ class RotationStateManager:
                     with open(temp_file, 'w', encoding='utf-8') as f:
                         json.dump(self._state, f, indent=2, ensure_ascii=False)
 
-                    # Atomic rename
-                    temp_file.rename(self.state_file)
+                    # Atomic rename with retry (Windows safe)
+                    for attempt in range(5):
+                        try:
+                            temp_file.replace(self.state_file)
+                            break
+                        except PermissionError:
+                            if attempt == 4:
+                                raise
+                            time.sleep(0.1)
                     return True
 
                 except Exception as e:
@@ -144,6 +152,7 @@ class RotationStateManager:
                     "last_hash": None
                 },
                 "rotation_ids": [],
+                "log_stats": {},
                 "settings": {
                     "auto_cleanup": True,
                     "max_rotations": 100
@@ -196,6 +205,97 @@ class RotationStateManager:
         except Exception as e:
             print(f"Error updating project state for {project_name}: {e}")
             return False
+
+    def get_log_stats(self, project_name: str, log_type: str) -> Dict[str, Any]:
+        """
+        Return cached statistics for a specific project/log combination.
+
+        Args:
+            project_name: Project identifier
+            log_type: Log type identifier
+
+        Returns:
+            Dictionary of cached statistics (copy) or empty dict.
+        """
+        with self._lock:
+            project_state = self.get_project_state(project_name)
+            log_stats = project_state.setdefault("log_stats", {})
+            return dict(log_stats.get(log_type, {}))
+
+    def update_log_stats(
+        self,
+        project_name: str,
+        log_type: str,
+        *,
+        size_bytes: Optional[int] = None,
+        line_count: Optional[int] = None,
+        ema_bytes_per_line: Optional[float] = None,
+        mtime_ns: Optional[int] = None,
+        inode: Optional[int] = None,
+        source: Optional[str] = None,
+        initialized: Optional[bool] = None,
+    ) -> bool:
+        """
+        Update cached statistics for a project/log combination.
+
+        Args:
+            project_name: Project identifier
+            log_type: Log type identifier
+            size_bytes: Observed file size in bytes
+            line_count: Observed line count
+            ema_bytes_per_line: Updated EMA for bytes-per-line
+            mtime_ns: Observed modification time in nanoseconds
+            inode: Observed inode or file identifier
+            source: Optional label describing source of update
+
+        Returns:
+            True if state persisted successfully, False otherwise.
+        """
+        with self._lock:
+            project_state = self.get_project_state(project_name)
+            log_stats = project_state.setdefault("log_stats", {})
+            entry = dict(log_stats.get(log_type, {}))
+
+            if size_bytes is not None:
+                try:
+                    entry["size_bytes"] = int(size_bytes)
+                except (TypeError, ValueError):
+                    pass
+
+            if line_count is not None:
+                try:
+                    entry["line_count"] = int(line_count)
+                except (TypeError, ValueError):
+                    pass
+
+            if ema_bytes_per_line is not None:
+                try:
+                    entry["ema_bytes_per_line"] = float(ema_bytes_per_line)
+                except (TypeError, ValueError):
+                    pass
+
+            if mtime_ns is not None:
+                try:
+                    entry["mtime_ns"] = int(mtime_ns)
+                except (TypeError, ValueError):
+                    pass
+
+            if inode is not None:
+                try:
+                    candidate = int(inode)
+                    entry["inode"] = candidate if candidate != 0 else None
+                except (TypeError, ValueError):
+                    entry["inode"] = None
+
+            if initialized is not None:
+                entry["initialized"] = bool(initialized)
+
+            if source:
+                entry["source"] = source
+
+            entry["updated_at"] = datetime.utcnow().isoformat() + " UTC"
+            log_stats[log_type] = entry
+            return self._save_state()
 
     def generate_rotation_id(self, project_name: str) -> str:
         """
@@ -395,3 +495,34 @@ def get_next_sequence_number(project_name: str) -> int:
 def generate_rotation_id(project_name: str) -> str:
     """Generate unique rotation ID for project."""
     return get_state_manager().generate_rotation_id(project_name)
+
+
+def get_log_stats(project_name: str, log_type: str) -> Dict[str, Any]:
+    """Retrieve cached statistics for a project/log combination."""
+    return get_state_manager().get_log_stats(project_name, log_type)
+
+
+def update_log_stats(
+    project_name: str,
+    log_type: str,
+    *,
+    size_bytes: Optional[int] = None,
+    line_count: Optional[int] = None,
+    ema_bytes_per_line: Optional[float] = None,
+    mtime_ns: Optional[int] = None,
+    inode: Optional[int] = None,
+    source: Optional[str] = None,
+    initialized: Optional[bool] = None,
+) -> bool:
+    """Update cached statistics for a project/log combination."""
+    return get_state_manager().update_log_stats(
+        project_name,
+        log_type,
+        size_bytes=size_bytes,
+        line_count=line_count,
+        ema_bytes_per_line=ema_bytes_per_line,
+        mtime_ns=mtime_ns,
+        inode=inode,
+        source=source,
+        initialized=initialized,
+    )

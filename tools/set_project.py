@@ -9,16 +9,22 @@ from typing import Any, Dict, List, Optional
 from scribe_mcp import server as server_module
 from scribe_mcp.config.settings import settings
 from scribe_mcp.server import app
-from scribe_mcp.tools.agent_project_utils import (
-    ensure_agent_session,
-    validate_agent_session,
-)
+from scribe_mcp.tools.agent_project_utils import ensure_agent_session
 from scribe_mcp.tools.project_utils import (
     list_project_configs,
     slugify_project_name,
 )
-from scribe_mcp import reminders
 from scribe_mcp.tools.base.parameter_normalizer import normalize_dict_param, normalize_list_param
+from scribe_mcp.shared.logging_utils import LoggingContext, ProjectResolutionError
+from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
+
+
+class _SetProjectHelper(LoggingToolMixin):
+    def __init__(self) -> None:
+        self.server_module = server_module
+
+
+_SET_PROJECT_HELPER = _SetProjectHelper()
 
 
 @app.tool()
@@ -86,6 +92,13 @@ async def set_project(
     if project_agent:
         agent_id = project_agent
 
+    base_context: LoggingContext = await _SET_PROJECT_HELPER.prepare_context(
+        tool_name="set_project",
+        agent_id=agent_id,
+        require_project=False,
+        state_snapshot=state_snapshot,
+    )
+
     # Normalize tags parameter if provided
     if isinstance(tags, str):
         try:
@@ -101,13 +114,19 @@ async def set_project(
     try:
         resolved_root = _resolve_root(root)
     except ValueError as exc:
-        return {"ok": False, "error": str(exc), "reminders": []}
+        return _SET_PROJECT_HELPER.apply_context_payload(
+            _SET_PROJECT_HELPER.error_response(str(exc)),
+            base_context,
+        )
 
     docs_dir = _resolve_docs_dir(name, resolved_root)
     try:
         resolved_log = _resolve_log(progress_log, resolved_root, docs_dir)
     except ValueError as exc:
-        return {"ok": False, "error": str(exc), "reminders": []}
+        return _SET_PROJECT_HELPER.apply_context_payload(
+            _SET_PROJECT_HELPER.error_response(str(exc)),
+            base_context,
+        )
 
     validation = await _validate_project_paths(
         name=name,
@@ -116,14 +135,14 @@ async def set_project(
         progress_log=resolved_log,
     )
     if not validation.get("ok", False):
-        return {**validation, "reminders": []}
+        return _SET_PROJECT_HELPER.apply_context_payload(validation, base_context)
 
     resolved_root.mkdir(parents=True, exist_ok=True)
 
     # Bootstrap documentation scaffolds when missing
     doc_result = await _ensure_documents(name, author, overwrite_docs, resolved_root)
     if not doc_result.get("ok", False):
-        return doc_result
+        return _SET_PROJECT_HELPER.apply_context_payload(doc_result, base_context)
 
     docs = {
         "architecture": str(docs_dir / "ARCHITECTURE_GUIDE.md"),
@@ -181,33 +200,38 @@ async def set_project(
             # Fallback to legacy behavior if agent context fails
             print(f"⚠️  Agent context management failed: {e}")
             print("   💡 Falling back to legacy global state management")
-            state = await server_module.state_manager.set_current_project(name, project_data, agent_id=agent_id)
-    else:
-        # Fallback to legacy behavior
-        state = await server_module.state_manager.set_current_project(name, project_data, agent_id=agent_id)
+    # Always mirror active project to JSON state for persistence across restarts
 
-    reminders_payload = await reminders.get_reminders(
+    state = await server_module.state_manager.set_current_project(
+        name,
         project_data,
-        tool_name="set_project",
-        state=state_snapshot,
+        agent_id=agent_id,
     )
+    recent_projects = list(state.recent_projects)
 
-    # Get recent projects from state manager (always available for UI continuity)
     try:
-        current_state = await server_module.state_manager.load()
-        recent_projects = current_state.recent_projects
-    except Exception:
-        recent_projects = []
+        context_after = await _SET_PROJECT_HELPER.prepare_context(
+            tool_name="set_project",
+            agent_id=agent_id,
+            explicit_project=name,
+            require_project=False,
+            state_snapshot=state_snapshot,
+        )
+    except ProjectResolutionError:
+        context_after = base_context
 
-    return {
+    response: Dict[str, Any] = {
         "ok": True,
         "project": project_data,
         "recent_projects": recent_projects,
         "generated": doc_result.get("files", []),
         "skipped": doc_result.get("skipped", []),
-        "reminders": reminders_payload,
         **({"warnings": validation.get("warnings", [])} if validation.get("warnings") else {}),
     }
+    if context_after.reminders:
+        response["reminders"] = list(context_after.reminders)
+
+    return _SET_PROJECT_HELPER.apply_context_payload(response, context_after)
 
 
 def _resolve_root(root: Optional[str]) -> Path:

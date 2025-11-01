@@ -1,16 +1,16 @@
 {
-  "current_project": "jinja_manual_demo",
+  "current_project": "enhanced-rotation-test",
   "projects": {
     "enhanced-rotation-test": {
       "name": "enhanced-rotation-test",
-      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/25d6e9dc-a728-4e15-8a5d-bf5341847c81",
-      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/25d6e9dc-a728-4e15-8a5d-bf5341847c81/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md",
-      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/25d6e9dc-a728-4e15-8a5d-bf5341847c81/docs/dev_plans/enhanced_rotation_test",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/aed93bff-c3bf-4f54-a9fc-ccd2dc08d253",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/aed93bff-c3bf-4f54-a9fc-ccd2dc08d253/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/aed93bff-c3bf-4f54-a9fc-ccd2dc08d253/docs/dev_plans/enhanced_rotation_test",
       "docs": {
-        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/25d6e9dc-a728-4e15-8a5d-bf5341847c81/docs/dev_plans/enhanced_rotation_test/ARCHITECTURE_GUIDE.md",
-        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/25d6e9dc-a728-4e15-8a5d-bf5341847c81/docs/dev_plans/enhanced_rotation_test/PHASE_PLAN.md",
-        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/25d6e9dc-a728-4e15-8a5d-bf5341847c81/docs/dev_plans/enhanced_rotation_test/CHECKLIST.md",
-        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/25d6e9dc-a728-4e15-8a5d-bf5341847c81/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md"
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/aed93bff-c3bf-4f54-a9fc-ccd2dc08d253/docs/dev_plans/enhanced_rotation_test/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/aed93bff-c3bf-4f54-a9fc-ccd2dc08d253/docs/dev_plans/enhanced_rotation_test/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/aed93bff-c3bf-4f54-a9fc-ccd2dc08d253/docs/dev_plans/enhanced_rotation_test/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/aed93bff-c3bf-4f54-a9fc-ccd2dc08d253/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md"
       },
       "defaults": {
         "emoji": "\ud83e\uddea",
@@ -20,14 +20,14 @@
     },
     "metadata-test": {
       "name": "metadata-test",
-      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/484ece31-7ed8-4fe7-b03f-2d73259f1672",
-      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/484ece31-7ed8-4fe7-b03f-2d73259f1672/docs/dev_plans/metadata_test/PROGRESS_LOG.md",
-      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/484ece31-7ed8-4fe7-b03f-2d73259f1672/docs/dev_plans/metadata_test",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/5fcba91a-ebd7-4dd0-bdb2-439d0cfeb64a",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/5fcba91a-ebd7-4dd0-bdb2-439d0cfeb64a/docs/dev_plans/metadata_test/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/5fcba91a-ebd7-4dd0-bdb2-439d0cfeb64a/docs/dev_plans/metadata_test",
       "docs": {
-        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/484ece31-7ed8-4fe7-b03f-2d73259f1672/docs/dev_plans/metadata_test/ARCHITECTURE_GUIDE.md",
-        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/484ece31-7ed8-4fe7-b03f-2d73259f1672/docs/dev_plans/metadata_test/PHASE_PLAN.md",
-        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/484ece31-7ed8-4fe7-b03f-2d73259f1672/docs/dev_plans/metadata_test/CHECKLIST.md",
-        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/484ece31-7ed8-4fe7-b03f-2d73259f1672/docs/dev_plans/metadata_test/PROGRESS_LOG.md"
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/5fcba91a-ebd7-4dd0-bdb2-439d0cfeb64a/docs/dev_plans/metadata_test/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/5fcba91a-ebd7-4dd0-bdb2-439d0cfeb64a/docs/dev_plans/metadata_test/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/5fcba91a-ebd7-4dd0-bdb2-439d0cfeb64a/docs/dev_plans/metadata_test/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/5fcba91a-ebd7-4dd0-bdb2-439d0cfeb64a/docs/dev_plans/metadata_test/PROGRESS_LOG.md"
       },
       "defaults": {
         "agent": "Scribe"
@@ -36,14 +36,14 @@
     },
     "invalid-metadata-test": {
       "name": "invalid-metadata-test",
-      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2b669ba5-39bd-4e0e-8b81-437b42ca8244",
-      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2b669ba5-39bd-4e0e-8b81-437b42ca8244/docs/dev_plans/invalid_metadata_test/PROGRESS_LOG.md",
-      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2b669ba5-39bd-4e0e-8b81-437b42ca8244/docs/dev_plans/invalid_metadata_test",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e2c94aef-96aa-4980-a348-c32ac43e852d",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e2c94aef-96aa-4980-a348-c32ac43e852d/docs/dev_plans/invalid_metadata_test/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e2c94aef-96aa-4980-a348-c32ac43e852d/docs/dev_plans/invalid_metadata_test",
       "docs": {
-        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2b669ba5-39bd-4e0e-8b81-437b42ca8244/docs/dev_plans/invalid_metadata_test/ARCHITECTURE_GUIDE.md",
-        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2b669ba5-39bd-4e0e-8b81-437b42ca8244/docs/dev_plans/invalid_metadata_test/PHASE_PLAN.md",
-        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2b669ba5-39bd-4e0e-8b81-437b42ca8244/docs/dev_plans/invalid_metadata_test/CHECKLIST.md",
-        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2b669ba5-39bd-4e0e-8b81-437b42ca8244/docs/dev_plans/invalid_metadata_test/PROGRESS_LOG.md"
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e2c94aef-96aa-4980-a348-c32ac43e852d/docs/dev_plans/invalid_metadata_test/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e2c94aef-96aa-4980-a348-c32ac43e852d/docs/dev_plans/invalid_metadata_test/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e2c94aef-96aa-4980-a348-c32ac43e852d/docs/dev_plans/invalid_metadata_test/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e2c94aef-96aa-4980-a348-c32ac43e852d/docs/dev_plans/invalid_metadata_test/PROGRESS_LOG.md"
       },
       "defaults": {
         "agent": "Scribe"
@@ -52,14 +52,14 @@
     },
     "hash-chain-test": {
       "name": "hash-chain-test",
-      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/99c4af5e-8615-49d5-bd57-cdaf1c5f7d80",
-      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/99c4af5e-8615-49d5-bd57-cdaf1c5f7d80/docs/dev_plans/hash_chain_test/PROGRESS_LOG.md",
-      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/99c4af5e-8615-49d5-bd57-cdaf1c5f7d80/docs/dev_plans/hash_chain_test",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/a2910f09-a2af-4575-b47d-d1a3013de561",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/a2910f09-a2af-4575-b47d-d1a3013de561/docs/dev_plans/hash_chain_test/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/a2910f09-a2af-4575-b47d-d1a3013de561/docs/dev_plans/hash_chain_test",
       "docs": {
-        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/99c4af5e-8615-49d5-bd57-cdaf1c5f7d80/docs/dev_plans/hash_chain_test/ARCHITECTURE_GUIDE.md",
-        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/99c4af5e-8615-49d5-bd57-cdaf1c5f7d80/docs/dev_plans/hash_chain_test/PHASE_PLAN.md",
-        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/99c4af5e-8615-49d5-bd57-cdaf1c5f7d80/docs/dev_plans/hash_chain_test/CHECKLIST.md",
-        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/99c4af5e-8615-49d5-bd57-cdaf1c5f7d80/docs/dev_plans/hash_chain_test/PROGRESS_LOG.md"
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/a2910f09-a2af-4575-b47d-d1a3013de561/docs/dev_plans/hash_chain_test/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/a2910f09-a2af-4575-b47d-d1a3013de561/docs/dev_plans/hash_chain_test/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/a2910f09-a2af-4575-b47d-d1a3013de561/docs/dev_plans/hash_chain_test/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/a2910f09-a2af-4575-b47d-d1a3013de561/docs/dev_plans/hash_chain_test/PROGRESS_LOG.md"
       },
       "defaults": {
         "agent": "Scribe"
@@ -68,14 +68,14 @@
     },
     "integrity-test": {
       "name": "integrity-test",
-      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e85b3e88-c015-4b4f-9dba-ffca0575417e",
-      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e85b3e88-c015-4b4f-9dba-ffca0575417e/docs/dev_plans/integrity_test/PROGRESS_LOG.md",
-      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e85b3e88-c015-4b4f-9dba-ffca0575417e/docs/dev_plans/integrity_test",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/0bb1ed3f-2a25-4171-89ce-3095b0345c92",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/0bb1ed3f-2a25-4171-89ce-3095b0345c92/docs/dev_plans/integrity_test/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/0bb1ed3f-2a25-4171-89ce-3095b0345c92/docs/dev_plans/integrity_test",
       "docs": {
-        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e85b3e88-c015-4b4f-9dba-ffca0575417e/docs/dev_plans/integrity_test/ARCHITECTURE_GUIDE.md",
-        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e85b3e88-c015-4b4f-9dba-ffca0575417e/docs/dev_plans/integrity_test/PHASE_PLAN.md",
-        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e85b3e88-c015-4b4f-9dba-ffca0575417e/docs/dev_plans/integrity_test/CHECKLIST.md",
-        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/e85b3e88-c015-4b4f-9dba-ffca0575417e/docs/dev_plans/integrity_test/PROGRESS_LOG.md"
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/0bb1ed3f-2a25-4171-89ce-3095b0345c92/docs/dev_plans/integrity_test/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/0bb1ed3f-2a25-4171-89ce-3095b0345c92/docs/dev_plans/integrity_test/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/0bb1ed3f-2a25-4171-89ce-3095b0345c92/docs/dev_plans/integrity_test/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/0bb1ed3f-2a25-4171-89ce-3095b0345c92/docs/dev_plans/integrity_test/PROGRESS_LOG.md"
       },
       "defaults": {
         "agent": "Scribe"
@@ -100,14 +100,14 @@
     },
     "error-test": {
       "name": "error-test",
-      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/1d7fd4ac-e63d-4e11-b0cf-61f82850327e",
-      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/1d7fd4ac-e63d-4e11-b0cf-61f82850327e/docs/dev_plans/error_test/PROGRESS_LOG.md",
-      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/1d7fd4ac-e63d-4e11-b0cf-61f82850327e/docs/dev_plans/error_test",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/af36d282-b721-4b10-aad9-e6147ccfaaf4",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/af36d282-b721-4b10-aad9-e6147ccfaaf4/docs/dev_plans/error_test/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/af36d282-b721-4b10-aad9-e6147ccfaaf4/docs/dev_plans/error_test",
       "docs": {
-        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/1d7fd4ac-e63d-4e11-b0cf-61f82850327e/docs/dev_plans/error_test/ARCHITECTURE_GUIDE.md",
-        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/1d7fd4ac-e63d-4e11-b0cf-61f82850327e/docs/dev_plans/error_test/PHASE_PLAN.md",
-        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/1d7fd4ac-e63d-4e11-b0cf-61f82850327e/docs/dev_plans/error_test/CHECKLIST.md",
-        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/1d7fd4ac-e63d-4e11-b0cf-61f82850327e/docs/dev_plans/error_test/PROGRESS_LOG.md"
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/af36d282-b721-4b10-aad9-e6147ccfaaf4/docs/dev_plans/error_test/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/af36d282-b721-4b10-aad9-e6147ccfaaf4/docs/dev_plans/error_test/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/af36d282-b721-4b10-aad9-e6147ccfaaf4/docs/dev_plans/error_test/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/af36d282-b721-4b10-aad9-e6147ccfaaf4/docs/dev_plans/error_test/PROGRESS_LOG.md"
       },
       "defaults": {
         "agent": "Scribe"
@@ -116,14 +116,14 @@
     },
     "performance-test": {
       "name": "performance-test",
-      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/fde84aa8-38dc-42fa-86a0-bfd6140c3710",
-      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/fde84aa8-38dc-42fa-86a0-bfd6140c3710/docs/dev_plans/performance_test/PROGRESS_LOG.md",
-      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/fde84aa8-38dc-42fa-86a0-bfd6140c3710/docs/dev_plans/performance_test",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/eecc1ff0-20ff-4b83-93ff-5e1b460a40d7",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/eecc1ff0-20ff-4b83-93ff-5e1b460a40d7/docs/dev_plans/performance_test/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/eecc1ff0-20ff-4b83-93ff-5e1b460a40d7/docs/dev_plans/performance_test",
       "docs": {
-        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/fde84aa8-38dc-42fa-86a0-bfd6140c3710/docs/dev_plans/performance_test/ARCHITECTURE_GUIDE.md",
-        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/fde84aa8-38dc-42fa-86a0-bfd6140c3710/docs/dev_plans/performance_test/PHASE_PLAN.md",
-        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/fde84aa8-38dc-42fa-86a0-bfd6140c3710/docs/dev_plans/performance_test/CHECKLIST.md",
-        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/fde84aa8-38dc-42fa-86a0-bfd6140c3710/docs/dev_plans/performance_test/PROGRESS_LOG.md"
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/eecc1ff0-20ff-4b83-93ff-5e1b460a40d7/docs/dev_plans/performance_test/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/eecc1ff0-20ff-4b83-93ff-5e1b460a40d7/docs/dev_plans/performance_test/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/eecc1ff0-20ff-4b83-93ff-5e1b460a40d7/docs/dev_plans/performance_test/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/eecc1ff0-20ff-4b83-93ff-5e1b460a40d7/docs/dev_plans/performance_test/PROGRESS_LOG.md"
       },
       "defaults": {
         "agent": "Scribe"
@@ -146,60 +146,156 @@
         "agent": "Scribe"
       },
       "author": "Scribe"
+    },
+    "history-test-79bb4714": {
+      "name": "history-test-79bb4714",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2c8f8a72-5f89-4bd9-8282-0f8b745f4e23",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2c8f8a72-5f89-4bd9-8282-0f8b745f4e23/docs/dev_plans/history_test_79bb4714/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2c8f8a72-5f89-4bd9-8282-0f8b745f4e23/docs/dev_plans/history_test_79bb4714",
+      "docs": {
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2c8f8a72-5f89-4bd9-8282-0f8b745f4e23/docs/dev_plans/history_test_79bb4714/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2c8f8a72-5f89-4bd9-8282-0f8b745f4e23/docs/dev_plans/history_test_79bb4714/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2c8f8a72-5f89-4bd9-8282-0f8b745f4e23/docs/dev_plans/history_test_79bb4714/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/2c8f8a72-5f89-4bd9-8282-0f8b745f4e23/docs/dev_plans/history_test_79bb4714/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "agent": "Scribe"
+      },
+      "author": "Scribe"
+    },
+    "history-test-55256226": {
+      "name": "history-test-55256226",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4d4ab08a-8ac9-4a8b-a605-4d0a415e8f4a",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4d4ab08a-8ac9-4a8b-a605-4d0a415e8f4a/docs/dev_plans/history_test_55256226/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4d4ab08a-8ac9-4a8b-a605-4d0a415e8f4a/docs/dev_plans/history_test_55256226",
+      "docs": {
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4d4ab08a-8ac9-4a8b-a605-4d0a415e8f4a/docs/dev_plans/history_test_55256226/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4d4ab08a-8ac9-4a8b-a605-4d0a415e8f4a/docs/dev_plans/history_test_55256226/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4d4ab08a-8ac9-4a8b-a605-4d0a415e8f4a/docs/dev_plans/history_test_55256226/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4d4ab08a-8ac9-4a8b-a605-4d0a415e8f4a/docs/dev_plans/history_test_55256226/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "agent": "Scribe"
+      },
+      "author": "Scribe"
+    },
+    "history-test-e43e58a9": {
+      "name": "history-test-e43e58a9",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/84427a92-89f0-434e-b182-9263ca1d20e9",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/84427a92-89f0-434e-b182-9263ca1d20e9/docs/dev_plans/history_test_e43e58a9/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/84427a92-89f0-434e-b182-9263ca1d20e9/docs/dev_plans/history_test_e43e58a9",
+      "docs": {
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/84427a92-89f0-434e-b182-9263ca1d20e9/docs/dev_plans/history_test_e43e58a9/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/84427a92-89f0-434e-b182-9263ca1d20e9/docs/dev_plans/history_test_e43e58a9/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/84427a92-89f0-434e-b182-9263ca1d20e9/docs/dev_plans/history_test_e43e58a9/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/84427a92-89f0-434e-b182-9263ca1d20e9/docs/dev_plans/history_test_e43e58a9/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "agent": "Scribe"
+      },
+      "author": "Scribe"
+    },
+    "history-test-94e8d7ca": {
+      "name": "history-test-94e8d7ca",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/8aba3696-d5b5-458e-8b70-cbe1aa4c26e8",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/8aba3696-d5b5-458e-8b70-cbe1aa4c26e8/docs/dev_plans/history_test_94e8d7ca/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/8aba3696-d5b5-458e-8b70-cbe1aa4c26e8/docs/dev_plans/history_test_94e8d7ca",
+      "docs": {
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/8aba3696-d5b5-458e-8b70-cbe1aa4c26e8/docs/dev_plans/history_test_94e8d7ca/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/8aba3696-d5b5-458e-8b70-cbe1aa4c26e8/docs/dev_plans/history_test_94e8d7ca/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/8aba3696-d5b5-458e-8b70-cbe1aa4c26e8/docs/dev_plans/history_test_94e8d7ca/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/8aba3696-d5b5-458e-8b70-cbe1aa4c26e8/docs/dev_plans/history_test_94e8d7ca/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "agent": "Scribe"
+      },
+      "author": "Scribe"
+    },
+    "history-test-85997718": {
+      "name": "history-test-85997718",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/9b0cf275-94c2-4744-80bb-de0a71e08dd6",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/9b0cf275-94c2-4744-80bb-de0a71e08dd6/docs/dev_plans/history_test_85997718/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/9b0cf275-94c2-4744-80bb-de0a71e08dd6/docs/dev_plans/history_test_85997718",
+      "docs": {
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/9b0cf275-94c2-4744-80bb-de0a71e08dd6/docs/dev_plans/history_test_85997718/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/9b0cf275-94c2-4744-80bb-de0a71e08dd6/docs/dev_plans/history_test_85997718/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/9b0cf275-94c2-4744-80bb-de0a71e08dd6/docs/dev_plans/history_test_85997718/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/9b0cf275-94c2-4744-80bb-de0a71e08dd6/docs/dev_plans/history_test_85997718/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "agent": "Scribe"
+      },
+      "author": "Scribe"
+    },
+    "history-test-166dbd4a": {
+      "name": "history-test-166dbd4a",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/22027920-7276-496d-af7a-34038f8db33f",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/22027920-7276-496d-af7a-34038f8db33f/docs/dev_plans/history_test_166dbd4a/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/22027920-7276-496d-af7a-34038f8db33f/docs/dev_plans/history_test_166dbd4a",
+      "docs": {
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/22027920-7276-496d-af7a-34038f8db33f/docs/dev_plans/history_test_166dbd4a/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/22027920-7276-496d-af7a-34038f8db33f/docs/dev_plans/history_test_166dbd4a/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/22027920-7276-496d-af7a-34038f8db33f/docs/dev_plans/history_test_166dbd4a/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/22027920-7276-496d-af7a-34038f8db33f/docs/dev_plans/history_test_166dbd4a/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "agent": "Scribe"
+      },
+      "author": "Scribe"
     }
   },
   "recent_projects": [
-    "jinja_manual_demo",
+    "enhanced-rotation-test",
     "performance-test",
     "error-test",
-    "history-test-78b8f15c",
+    "history-test-166dbd4a",
     "integrity-test"
   ],
   "recent_tools": [
     {
-      "name": "append_entry",
-      "ts": "2025-10-31 14:15:41 UTC"
-    },
-    {
-      "name": "manage_docs",
-      "ts": "2025-10-31 14:15:35 UTC"
-    },
-    {
-      "name": "generate_doc_templates",
-      "ts": "2025-10-31 14:15:35 UTC"
-    },
-    {
-      "name": "set_project",
-      "ts": "2025-10-31 14:15:35 UTC"
-    },
-    {
-      "name": "vector_index_status",
-      "ts": "2025-10-31 14:14:03 UTC"
-    },
-    {
-      "name": "retrieve_by_uuid",
-      "ts": "2025-10-31 14:14:03 UTC"
-    },
-    {
-      "name": "vector_search",
-      "ts": "2025-10-31 14:14:03 UTC"
+      "name": "get_project",
+      "ts": "2025-11-01 16:05:30 UTC"
     },
     {
       "name": "rotate_log",
-      "ts": "2025-10-31 14:13:16 UTC"
+      "ts": "2025-11-01 16:05:30 UTC"
     },
     {
-      "name": "get_project",
-      "ts": "2025-10-31 14:13:15 UTC"
+      "name": "append_entry",
+      "ts": "2025-11-01 16:05:30 UTC"
+    },
+    {
+      "name": "generate_doc_templates",
+      "ts": "2025-11-01 16:05:30 UTC"
+    },
+    {
+      "name": "set_project",
+      "ts": "2025-11-01 16:05:30 UTC"
+    },
+    {
+      "name": "vector_index_status",
+      "ts": "2025-10-31 23:39:21 UTC"
+    },
+    {
+      "name": "retrieve_by_uuid",
+      "ts": "2025-10-31 23:39:21 UTC"
+    },
+    {
+      "name": "vector_search",
+      "ts": "2025-10-31 23:39:21 UTC"
     },
     {
       "name": "get_rotation_history",
-      "ts": "2025-10-31 14:13:15 UTC"
+      "ts": "2025-10-31 23:38:34 UTC"
+    },
+    {
+      "name": "verify_rotation_integrity",
+      "ts": "2025-10-31 23:38:34 UTC"
     }
   ],
-  "last_activity_at": "2025-10-31 14:15:41 UTC",
-  "session_started_at": "2025-10-31 14:12:40 UTC",
-  "version": 10,
+  "last_activity_at": "2025-11-01 16:05:30 UTC",
+  "session_started_at": "2025-11-01 15:45:08 UTC",
+  "version": 63,
   "last_updated_by": "Scribe",
-  "operation_timestamp": "2025-10-31 14:15:35 UTC"
+  "operation_timestamp": "2025-11-01 16:05:30 UTC"
 }

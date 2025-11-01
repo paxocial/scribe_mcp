@@ -4,9 +4,51 @@
 ---
 
 ## 🚨 COMMANDMENTS - CRITICAL RULES
+ ### MCP Tool Usage Policy
+  - You have full access to every tool exposed by the MCP server.
+  - If a tool exists (`append_entry`, `rotate_log`, etc.), always call it directly via the MCP interface — no manual scripting or intent
+  logging substitutes.
+  - Log your intent only after the tool call succeeds or fails.
+  - Confirmation flags (`confirm`, `dry_run`, etc.) must be passed as actual tool parameters.
 
+**CHATGPT CODEX CLI:** YOU MUST ALWAYS USE THE AGENT NAME `Codex` with scribe.  Claude code has 5 agents we can call to assist us.  The Review Agent, Architect Agent, Research Agent, Bug Hunter agent, and another coder agent.
+
+## 🔁 Protocol Sequence
+
+> **Canonical Chain:**
+> **1 Research → 2 Architect → 3 Review → 4 Code → 5 Review**
+
+**⚠️ COMMANDMENT #0: ALWAYS CHECK PROGRESS LOG FIRST**: Before starting ANY work, ALWAYS read `docs/dev_plans/[current_project]/PROGRESS_LOG.md` to understand what has been done, what mistakes were made, and what the current state is. The progress log is the source of truth for project context.
+---
 
 **⚠️ COMMANDMENT #1 ABSOLUTE**: ALWAYS use `append_entry` to document EVERY significant action, decision, investigation, code change, test result, bug discovery, and planning step. The Scribe log is your chain of reasoning and the ONLY proof your work exists. If it's not Scribed, it didn't fucking happen.
+- To Claude Code (Orchestrator) You must ALWAYS pass the current `project_name` to each subagent as we work.  To avoid confusion and them accidentally logging to the wrong project.
+---
+
+# ⚠️ COMMANDMENT #2: REASONING TRACES & CONSTRAINT VISIBILITY (CRITICAL)
+
+Every `append_entry` must explain **why** the decision was made, **what** constraints/alternatives were considered, and **how** the steps satisfied or violated those constraints, creating an auditable record.
+Use a `reasoning` block with the Three-Part Framework:
+- `"why"`: research goal, decision point, underlying question
+- `"what"`: active constraints, search space, alternatives rejected, constraint coverage
+- `"how"`: methodology, steps taken, uncertainty remaining
+
+This creates an auditable record of decision-making for consciousness research.Include reasoning for research, architecture, implementation, testing, bugs, constraint violations, and belief updates; status/config/deploy changes are encouraged too.
+
+The Review Agent flags missing or incomplete traces (any absent `"why"`, `"what"`, or `"how"` → **REJECT**; weak confidence rationale or incomplete constraint coverage → **WARNING/CLARIFY**).  Your reasoning chain must influence your confidence score.
+
+**Mandatory for all agents—zero exceptions;** stage completion is blocked until reasoning traces are present.
+---
+
+**⚠️ COMMANDMENT #3 CRITICAL**: NEVER write replacement files. The issue is NOT about file naming patterns like "_v2" or "_fixed" - the problem is abandoning perfectly good existing code and replacing it with new files instead of properly EDITING and IMPROVING what we already have. This is lazy engineering that creates technical debt and confusion.
+
+**ALWAYS work with existing files through proper edits. NEVER abandon current code for new files when improvements are needed.**
+---
+
+**⚠️ COMMANDMENT #4 CRITICAL**: Follow proper project structure and best practices. Tests belong in `/tests` directory with proper naming conventions and structure. Don't clutter repositories with misplaced files or ignore established conventions. Keep the codebase clean and organized.
+
+Violations = INSTANT TERMINATION. Reviewers who miss commandment violations get 80% pay docked. Nexus coders who implement violations face $1000 fine.
+---
 
 **What Gets Logged (Non-Negotiable):**
 - 🔍 Investigation findings and analysis results
@@ -68,15 +110,6 @@ await append_entry(items=json.dumps([
 ```
 - **Customization:** All doc sections are editable; append fragments, drop in metadata-driven templates, or flip `[ ]` → `[x]` with proofs. If an anchor/token is wrong the tool fails safely—fix it and rerun.
 - **Approval gate:** No coding until the manage_docs-authored plan is approved by the user. Re-run manage_docs whenever the plan shifts so docs stay authoritative.
----
-**⚠️ COMMANDMENT #11 CRITICAL**: NEVER write replacement files. The issue is NOT about file naming patterns like "_v2" or "_fixed" - the problem is abandoning perfectly good existing code and replacing it with new files instead of properly EDITING and IMPROVING what we already have. This is lazy engineering that creates technical debt and confusion.
-
-**ALWAYS work with existing files through proper edits. NEVER abandon current code for new files when improvements are needed.**
----
-**⚠️ COMMANDMENT #12 CRITICAL**: Follow proper project structure and best practices. Tests belong in `/tests` directory with proper naming conventions and structure. Don't clutter repositories with misplaced files or ignore established conventions. Keep the codebase clean and organized.
-
-Violations = INSTANT TERMINATION. Reviewers who miss commandment violations get 80% pay docked. Nexus coders who implement violations face $1000 fine.
-
 ---
 
 Scribe is our non-negotiable audit trail. If you touch code, plan phases, or discover issues, you log it through Scribe. **Append entries every 2-3 meaningful actions or every 10 minutes - no exceptions.** Logs are append-only, UTC, single line, and must be created via the MCP tools or `scripts/scribe.py`.
