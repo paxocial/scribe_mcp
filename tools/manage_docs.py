@@ -13,10 +13,10 @@ from scribe_mcp import server as server_module
 from scribe_mcp.server import app
 from scribe_mcp.doc_management.manager import apply_doc_change, DocumentOperationError, SECTION_MARKER
 from scribe_mcp.tools.append_entry import append_entry
-from ..shared.logging_utils import (
+from scribe_mcp.shared.logging_utils import (
     LoggingContext,
-    ProjectResolutionError,
-    coerce_metadata_mapping,
+   ProjectResolutionError,
+   coerce_metadata_mapping,
 )
 from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
 

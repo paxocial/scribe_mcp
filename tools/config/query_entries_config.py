@@ -11,9 +11,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from ...utils.parameter_validator import ToolValidator
-from ...utils.config_manager import ConfigManager
-from ...utils.error_handler import ErrorHandler
+from scribe_mcp.utils.parameter_validator import ToolValidator
+from scribe_mcp.utils.config_manager import ConfigManager
+from scribe_mcp.utils.error_handler import ErrorHandler
 
 
 # Valid enumerated values for query parameters
@@ -103,8 +103,9 @@ class QueryEntriesConfig:
                 self.page_size = self.limit
             self._is_pagination_mode = False
         else:
-            # Pagination mode - preserve all values as provided
+            # Pagination mode - preserve pagination parameters but disable legacy limit
             self._is_pagination_mode = True
+            self.limit = None
 
     def _normalize_list_parameters(self) -> None:
         """Normalize list parameters using utility functions."""

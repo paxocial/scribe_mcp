@@ -13,10 +13,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
-from ...utils.parameter_validator import ToolValidator
-from ...utils.config_manager import ConfigManager, resolve_fallback_chain
-from ...utils.error_handler import ErrorHandler
-from ...shared.logging_utils import coerce_metadata_mapping
+from scribe_mcp.utils.parameter_validator import ToolValidator
+from scribe_mcp.utils.config_manager import ConfigManager, resolve_fallback_chain
+from scribe_mcp.utils.error_handler import ErrorHandler
+from scribe_mcp.shared.logging_utils import coerce_metadata_mapping
 
 
 def _normalize_boolean(value: Any) -> bool:
