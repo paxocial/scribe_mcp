@@ -6,6 +6,7 @@ import hashlib
 import json
 import uuid
 from collections import defaultdict, deque
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List, Union
@@ -17,6 +18,8 @@ import asyncio
 from scribe_mcp import server as server_module
 from scribe_mcp.config.settings import settings
 from scribe_mcp.server import app
+from scribe_mcp.utils.bulk_processor import BulkProcessor
+from scribe_mcp.utils.estimator import BulkProcessingCalculator
 from scribe_mcp.tools.agent_project_utils import (
     ensure_agent_session,
     validate_agent_session,
@@ -33,10 +36,20 @@ from scribe_mcp.shared.logging_utils import (
     resolve_log_definition as shared_resolve_log_definition,
     resolve_logging_context,
 )
+from scribe_mcp.utils.parameter_validator import ToolValidator
+from scribe_mcp.utils.config_manager import ConfigManager, resolve_fallback_chain
+from scribe_mcp.utils.error_handler import ErrorHandler
+from scribe_mcp.tools.config.append_entry_config import AppendEntryConfig
 
 _RATE_TRACKER: Dict[str, deque[float]] = defaultdict(deque)
 _RATE_LOCKS: Dict[str, asyncio.Lock] = {}
 _RATE_MAP_LOCK = asyncio.Lock()
+
+# Global configuration manager for parameter handling
+_CONFIG_MANAGER = ConfigManager("append_entry")
+
+# Global bulk processing calculator
+_BULK_CALCULATOR = BulkProcessingCalculator()
 
 
 def _sanitize_message(message: str) -> str:
@@ -113,59 +126,13 @@ def _generate_deterministic_entry_id(
 
 
 def _should_use_bulk_mode(message: str, items: Optional[str] = None, items_list: Optional[List[Dict[str, Any]]] = None) -> bool:
-    """Detect if content should be processed as bulk entries."""
-    if items is not None or items_list is not None:
-        return True
-
-    # Check for multiline content
-    newline_count = message.count('\n')
-    pipe_count = message.count('|')
-
-    # Use bulk mode if: many lines, contains pipes (potential delimiter issues), or very long
-    return (
-        newline_count > 0 or  # Any newlines
-        pipe_count > 0 or      # Pipe characters that might cause issues
-        len(message) > 500     # Long messages
-    )
+    """Detect if content should be processed as bulk entries using BulkProcessor utility."""
+    return BulkProcessor.detect_bulk_mode(message, items, items_list, length_threshold=500)
 
 
 def _split_multiline_message(message: str, delimiter: str = "\n") -> List[Dict[str, Any]]:
-    """Split multiline message into individual entries with smart content detection."""
-    if not message:
-        return []
-
-    # Split by delimiter
-    lines = message.split(delimiter)
-    entries = []
-
-    for line in lines:
-        line = line.strip()
-        if not line:  # Skip empty lines
-            continue
-
-        # Detect if this line might be structured (contains status indicators, emojis, etc.)
-        entry = {"message": line}
-
-        # Auto-detect status from common patterns
-        if any(indicator in line.lower() for indicator in ["error:", "fail", "exception", "traceback"]):
-            entry["status"] = "error"
-        elif any(indicator in line.lower() for indicator in ["warning:", "warn", "caution"]):
-            entry["status"] = "warn"
-        elif any(indicator in line.lower() for indicator in ["success:", "complete", "done", "finished"]):
-            entry["status"] = "success"
-        elif any(indicator in line.lower() for indicator in ["fix:", "fixed", "resolved", "patched"]):
-            entry["status"] = "success"
-
-        # Auto-detect emoji from line
-        words = line.split()
-        for word in words:
-            if word.strip() and len(word.strip()) == 1 and ord(word.strip()[0]) > 127:  # Likely emoji
-                entry["emoji"] = word.strip()
-                break
-
-        entries.append(entry)
-
-    return entries
+    """Split multiline message into individual entries using BulkProcessor utility."""
+    return BulkProcessor.split_multiline_content(message, delimiter, auto_detect_status=True, auto_detect_emoji=True)
 
 
 def _prepare_bulk_items_with_timestamps(
@@ -173,25 +140,8 @@ def _prepare_bulk_items_with_timestamps(
     base_timestamp: Optional[str] = None,
     stagger_seconds: int = 1
 ) -> List[Dict[str, Any]]:
-    """Add individual timestamps to bulk items."""
-    if not items:
-        return items
-
-    # Parse base timestamp or use current time
-    base_dt = None
-    if base_timestamp:
-        base_dt = _parse_timestamp(base_timestamp)
-
-    if not base_dt:
-        base_dt = utcnow()
-
-    # Add staggered timestamps to each item
-    for i, item in enumerate(items):
-        if "timestamp_utc" not in item:
-            item_dt = base_dt + timedelta(seconds=i * stagger_seconds)
-            item["timestamp_utc"] = item_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
-
-    return items
+    """Add individual timestamps to bulk items using BulkProcessor utility."""
+    return BulkProcessor.apply_timestamp_staggering(items, base_timestamp, stagger_seconds, "timestamp_utc")
 
 
 def _apply_inherited_metadata(
@@ -201,31 +151,8 @@ def _apply_inherited_metadata(
     inherited_emoji: Optional[str] = None,
     inherited_agent: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """Apply inherited metadata and values to all items in bulk."""
-    if not items:
-        return items
-
-    for item in items:
-        # Apply inherited status if item doesn't have one
-        if inherited_status and "status" not in item:
-            item["status"] = inherited_status
-
-        # Apply inherited emoji if item doesn't have one
-        if inherited_emoji and "emoji" not in item:
-            item["emoji"] = inherited_emoji
-
-        # Apply inherited agent if item doesn't have one
-        if inherited_agent and "agent" not in item:
-            item["agent"] = inherited_agent
-
-        # Merge inherited metadata with item metadata
-        if inherited_meta:
-            item_meta = item.get("meta", {})
-            # Create a new dict merging both
-            merged_meta = {**inherited_meta, **item_meta}
-            item["meta"] = merged_meta
-
-    return items
+    """Apply inherited metadata and values to all items in bulk using BulkProcessor utility."""
+    return BulkProcessor.apply_inherited_metadata(items, inherited_meta, inherited_status, inherited_emoji, inherited_agent, "meta")
 
 
 async def _process_large_bulk_chunked(
@@ -243,7 +170,10 @@ async def _process_large_bulk_chunked(
 
     all_written_lines = []
     all_failed_items = []
-    total_chunks = (len(items) + chunk_size - 1) // chunk_size
+
+    # Calculate chunking parameters using BulkProcessingCalculator
+    chunk_calc = _BULK_CALCULATOR.calculate_chunks(len(items), chunk_size)
+    total_chunks = chunk_calc.total_chunks
 
     print(f"📊 Processing {len(items)} items in {total_chunks} chunks of {chunk_size}")
 
@@ -295,7 +225,7 @@ async def append_entry(
     status: Optional[str] = None,
     emoji: Optional[str] = None,
     agent: Optional[str] = None,
-    meta: Optional[Dict[str, Any]] = None,
+    meta: Optional[Any] = None,  # Changed to Any to handle MCP interface mangling
     timestamp_utc: Optional[str] = None,
     items: Optional[str] = None,
     items_list: Optional[List[Dict[str, Any]]] = None,
@@ -304,6 +234,7 @@ async def append_entry(
     stagger_seconds: int = 1,
     agent_id: Optional[str] = None,  # Agent identification (auto-detected if not provided)
     log_type: Optional[str] = "progress",
+    config: Optional[AppendEntryConfig] = None,  # Configuration object for enhanced parameter handling
 ) -> Dict[str, Any]:
     """
     Enhanced append_entry with robust multiline handling and bulk mode support.
@@ -321,6 +252,7 @@ async def append_entry(
         split_delimiter: Delimiter for splitting multiline messages (default: newline)
         stagger_seconds: Seconds to stagger timestamps for bulk/split entries (default: 1)
         log_type: Target log identifier (progress/doc_updates/etc.) defined in config/log_config.json
+        config: Optional AppendEntryConfig object for enhanced parameter handling
 
     ENHANCED FEATURES:
     - Automatic multiline detection and splitting
@@ -328,11 +260,82 @@ async def append_entry(
     - Individual timestamps for each entry in bulk/split mode
     - Robust error handling with automatic fallbacks
     - Performance optimized for large content
+    - Dual parameter support: Use either legacy parameters OR AppendEntryConfig object
+    - Legacy parameter precedence: When both legacy params and config provided, legacy params override
 
     Single Entry Mode: Auto-detects and handles multiline content
     Bulk Mode: Support both items (JSON string) and items_list (direct list)
+    Configuration Mode: Use AppendEntryConfig for structured parameter management
     """
     state_snapshot = await server_module.state_manager.record_tool("append_entry")
+
+    # === DUAL PARAMETER HANDLING ===
+    # Support both legacy parameters and AppendEntryConfig object
+    # Legacy parameters take precedence over config object when both provided
+
+    if config is not None:
+        # Create configuration object from legacy parameters to ensure precedence
+        # This allows legacy parameters to override config values
+        legacy_config = AppendEntryConfig.from_legacy_params(
+            message=message,
+            status=status,
+            emoji=emoji,
+            agent=agent,
+            meta=meta,
+            timestamp_utc=timestamp_utc,
+            items=items,
+            items_list=items_list,
+            auto_split=auto_split,
+            split_delimiter=split_delimiter,
+            stagger_seconds=stagger_seconds,
+            agent_id=agent_id,
+            log_type=log_type
+        )
+
+        # Create merged configuration: config as base, legacy_config as override
+        # Legacy parameters have precedence over config object
+        config_dict = config.to_dict()
+        legacy_dict = legacy_config.to_dict()
+
+        # Apply legacy overrides for non-None values
+        for key, value in legacy_dict.items():
+            if value is not None or key in ['message', 'auto_split']:  # Include defaults that should override
+                config_dict[key] = value
+
+        # Create final configuration
+        final_config = AppendEntryConfig(**config_dict)
+    else:
+        # No config object provided, use legacy parameters only
+        final_config = AppendEntryConfig.from_legacy_params(
+            message=message,
+            status=status,
+            emoji=emoji,
+            agent=agent,
+            meta=meta,
+            timestamp_utc=timestamp_utc,
+            items=items,
+            items_list=items_list,
+            auto_split=auto_split,
+            split_delimiter=split_delimiter,
+            stagger_seconds=stagger_seconds,
+            agent_id=agent_id,
+            log_type=log_type
+        )
+
+    # Extract normalized parameters from final configuration
+    message = final_config.message
+    status = final_config.status
+    emoji = final_config.emoji
+    agent = final_config.agent
+    meta = final_config.meta
+    timestamp_utc = final_config.timestamp_utc
+    items = final_config.items
+    items_list = final_config.items_list
+    auto_split = final_config.auto_split
+    split_delimiter = final_config.split_delimiter
+    stagger_seconds = final_config.stagger_seconds
+    agent_id = final_config.agent_id
+    log_type = final_config.log_type
 
     # Normalize metadata early for consistent handling throughout the function
     meta_pairs = _normalise_meta(meta)
@@ -362,12 +365,11 @@ async def append_entry(
             state_snapshot=state_snapshot,
         )
     except ProjectResolutionError as exc:
-        return {
-            "ok": False,
-            "error": str(exc),
-            "suggestion": f"Invoke set_project with agent_id='{agent_id}' before appending entries",
-            "recent_projects": list(exc.recent_projects),
-        }
+        return ErrorHandler.create_project_resolution_error(
+            error=exc,
+            tool_name="append_entry",
+            suggestion=f"Invoke set_project with agent_id='{agent_id}' before appending entries"
+        )
 
     project = context.project or {}
     recent = list(context.recent_projects)
@@ -512,7 +514,7 @@ async def append_entry(
 
     resolved_emoji = _resolve_emoji(emoji, status, project)
     defaults = project.get("defaults") or {}
-    resolved_agent = _sanitize_identifier(agent or defaults.get("agent") or "Scribe")
+    resolved_agent = _sanitize_identifier(resolve_fallback_chain(agent, defaults.get("agent"), "Scribe"))
     timestamp_dt, timestamp, timestamp_warning = _resolve_timestamp(timestamp_utc)
 
     # Metadata already normalized at function start (meta_pairs defined at line 273)
@@ -582,11 +584,12 @@ async def append_entry(
                     sha256=sha_value,
                 )
         except Exception as exc:  # pragma: no cover - defensive
-            return {
-                "ok": False,
-                "error": f"Failed to persist log entry: {exc}",
-                "recent_projects": list(recent),
-            }
+            error_response = ErrorHandler.create_storage_error(
+                operation="persist log entry",
+                error=exc
+            )
+            error_response["recent_projects"] = list(recent)
+            return error_response
 
     if project:
         reminders_payload = await reminders.get_reminders(
@@ -614,9 +617,49 @@ def _resolve_emoji(
     return default_status_emoji(explicit=explicit, status=status, project=project)
 
 
-def _normalise_meta(meta: Optional[Dict[str, Any]]) -> tuple[tuple[str, str], ...]:
-    """Delegate metadata normalization to the shared logging utility."""
-    return normalize_metadata(meta)
+def _prepare_meta_payload(meta: Optional[Any]) -> Optional[Any]:
+    """Coerce metadata into a shape the shared normalizer can consume."""
+    if meta is None or meta == {}:
+        return None if meta is None else {}
+
+    if isinstance(meta, dict):
+        return dict(meta)
+
+    if isinstance(meta, Mapping):
+        return dict(meta.items())
+
+    if hasattr(meta, "items"):
+        try:
+            return dict(meta.items())  # type: ignore[arg-type]
+        except Exception:
+            pass
+
+    if hasattr(meta, "__dict__"):
+        try:
+            return {k: v for k, v in vars(meta).items() if not k.startswith("_")}
+        except Exception:
+            pass
+
+    if isinstance(meta, Sequence) and not isinstance(meta, (str, bytes)):
+        try:
+            pairs = list(meta)  # type: ignore[arg-type]
+            if all(isinstance(item, Sequence) and len(item) == 2 for item in pairs):
+                return {str(item[0]): item[1] for item in pairs}  # type: ignore[index]
+        except Exception:
+            pass
+
+    return meta
+
+
+def _normalise_meta(meta: Optional[Any]) -> tuple[tuple[str, str], ...]:
+    """Delegate metadata normalization to the shared logging utility with robust error handling."""
+    prepared = _prepare_meta_payload(meta)
+
+    try:
+        return normalize_metadata(prepared)
+    except Exception as exc:
+        error_str = str(exc)
+        return (("meta_error", f"Metadata normalization failed: {error_str[:50]}"),)
 
 
 def _compose_line(
@@ -641,35 +684,18 @@ def _compose_line(
 
 
 def _resolve_timestamp(timestamp_utc: Optional[str]) -> Tuple[Optional[datetime], str, Optional[str]]:
-    if not timestamp_utc:
-        current = format_utc()
-        return None, current, None
-    parsed = _parse_timestamp(timestamp_utc)
-    if parsed is None:
-        fallback = format_utc()
-        warning = "timestamp format invalid; using current time"
-        return None, fallback, warning
-    return parsed, timestamp_utc, None
-
-
-def _parse_timestamp(value: str) -> Optional[datetime]:
-    try:
-        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S UTC").replace(tzinfo=timezone.utc)
-    except ValueError:
-        return None
+    """Delegate timestamp validation to ToolValidator."""
+    return ToolValidator.validate_timestamp(timestamp_utc)
 
 
 def _sanitize_identifier(value: str) -> str:
-    sanitized = value.replace("[", "").replace("]", "").replace("|", "").strip()
-    return sanitized or "Scribe"
+    """Delegate identifier sanitization to ToolValidator."""
+    return ToolValidator.sanitize_identifier(value)
 
 
 def _validate_message(message: str) -> Optional[str]:
-    if any(ch in message for ch in ("\n", "\r")):
-        return "Message cannot contain newline characters."
-    if "|" in message:
-        return "Message cannot contain pipe characters."  # avoids delimiter collisions
-    return None
+    """Delegate message validation to ToolValidator."""
+    return ToolValidator.validate_message(message)
 
 
 async def _enforce_rate_limit(project_name: str) -> Optional[Dict[str, Any]]:
@@ -689,11 +715,10 @@ async def _enforce_rate_limit(project_name: str) -> Optional[Dict[str, Any]]:
 
         if len(bucket) >= count:
             retry_after = int(window - (now - bucket[0]))
-            return {
-                "ok": False,
-                "error": "Rate limit exceeded for project log.",
-                "retry_after_seconds": max(retry_after, 1),
-            }
+            return ErrorHandler.create_rate_limit_error(
+                retry_after_seconds=max(retry_after, 1),
+                window_description="project log rate limit"
+            )
 
         bucket.append(now)
         return None
@@ -708,7 +733,8 @@ def _resolve_log_target(
 
 
 def _validate_log_requirements(definition: Dict[str, Any], meta_payload: Dict[str, Any]) -> Optional[str]:
-    return ensure_metadata_requirements(definition, meta_payload)
+    """Delegate log requirements validation to ToolValidator."""
+    return ToolValidator.validate_metadata_requirements(definition, meta_payload)
 
 
 async def _append_bulk_entries(
@@ -800,7 +826,7 @@ async def _append_bulk_entries(
             # Resolve values similar to single entry
             resolved_emoji = _resolve_emoji(item_emoji, item_status, project)
             defaults = project.get("defaults") or {}
-            resolved_agent = _sanitize_identifier(item_agent or defaults.get("agent") or "Scribe")
+            resolved_agent = _sanitize_identifier(resolve_fallback_chain(item_agent, defaults.get("agent"), "Scribe"))
             timestamp_dt, timestamp, timestamp_warning = _resolve_timestamp(item_timestamp)
             meta_pairs = _normalise_meta(item_meta)
             meta_payload = {key: value for key, value in meta_pairs}

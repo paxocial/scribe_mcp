@@ -4,6 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+Do not run the MCP server outside the `scribe_mcp` directory—`python -m server` (RUNNING FROM WITHIN scribe_mcp folder) should only be used to test startup—because running it elsewhere causes import errors since all modules are rooted in `scribe_mcp` (yes, Review Agent, this means you).
+
+
 ## 🚨 COMMANDMENTS - CRITICAL RULES
  ### MCP Tool Usage Policy
   - You have full access to every tool exposed by the MCP server.

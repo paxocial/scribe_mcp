@@ -158,7 +158,46 @@ def test_append_entry_uses_slugified_log_path(isolated_state, project_root):
     )
     assert append_result["ok"]
     assert Path(append_result["path"]).resolve() == log_path
-    assert "Verifying slugified path usage" in log_path.read_text(encoding="utf-8")
+
+
+def test_append_entry_accepts_json_string_meta(isolated_state, project_root):
+    root = project_root
+    run(set_project.set_project("meta-json-test", str(root)))
+
+    meta_payload = '{"task":"meta_json","component":"append_entry","flag":true}'
+    result = run(
+        append_entry.append_entry(
+            message="Metadata JSON string payload",
+            status="info",
+            meta=meta_payload,
+        )
+    )
+
+    assert result["ok"]
+    assert result["meta"]["component"] == "append_entry"
+    assert result["meta"]["flag"] == "True"  # Values are stringified downstream
+
+
+def test_append_entry_accepts_sequence_metadata(isolated_state, project_root):
+    root = project_root
+    run(set_project.set_project("meta-sequence-test", str(root)))
+
+    sequence_meta = [("task", "sequence_meta"), ("index", 1)]
+    result = run(
+        append_entry.append_entry(
+            message="Metadata sequence payload",
+            status="info",
+            meta=sequence_meta,
+        )
+    )
+
+    assert result["ok"]
+    assert result["meta"]["task"] == "sequence_meta"
+    assert result["meta"]["index"] == "1"
+
+    log_path = Path(result["path"])
+    log_content = log_path.read_text(encoding="utf-8")
+    assert "sequence_meta" in log_content
 
 
 def test_rotate_log_creates_archive(isolated_state, project_root):

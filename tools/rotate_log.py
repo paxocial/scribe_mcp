@@ -12,6 +12,8 @@ from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 from scribe_mcp import server as server_module
 from scribe_mcp.server import app
 from scribe_mcp.config.log_config import load_log_config
+from scribe_mcp.utils.config_manager import ConfigManager, apply_response_defaults, build_response_payload
+from scribe_mcp.utils.bulk_processor import BulkProcessor
 from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
 from scribe_mcp.shared.logging_utils import (
     LoggingContext,
@@ -27,6 +29,13 @@ from scribe_mcp.templates import (
     substitution_context,
 )
 from scribe_mcp.tools.base.parameter_normalizer import normalize_dict_param
+from scribe_mcp.utils.parameter_validator import ToolValidator
+from scribe_mcp.utils.estimator import (
+    EntryCountEstimate,
+    FileSizeEstimator,
+    ThresholdEstimator
+)
+from scribe_mcp.tools.config.rotate_log_config import RotateLogConfig
 from scribe_mcp.utils.audit import get_audit_manager, store_rotation_metadata
 from scribe_mcp.utils.files import rotate_file, verify_file_integrity, file_lock
 from scribe_mcp.utils.integrity import (
@@ -60,6 +69,9 @@ class _RotateLogHelper(LoggingToolMixin):
 
 _ROTATE_HELPER = _RotateLogHelper()
 
+# Global configuration manager for parameter handling
+_CONFIG_MANAGER = ConfigManager("rotate_log")
+
 
 class RotationTarget(NamedTuple):
     log_type: str
@@ -67,11 +79,14 @@ class RotationTarget(NamedTuple):
     definition: Dict[str, Any]
 
 
-class EntryCountEstimate(NamedTuple):
-    count: int
-    approximate: bool
-    method: str
-    details: Dict[str, Any]
+# Global estimator instances
+_FILE_SIZE_ESTIMATOR = FileSizeEstimator(
+    default_bytes_per_line=DEFAULT_BYTES_PER_LINE,
+    min_bytes_per_line=MIN_BYTES_PER_LINE,
+    max_bytes_per_line=MAX_BYTES_PER_LINE,
+    tail_sample_bytes=TAIL_SAMPLE_BYTES
+)
+_THRESHOLD_ESTIMATOR = ThresholdEstimator()
 
 
 async def _write_rotated_log_header(path: Path, content: str) -> None:
@@ -90,14 +105,15 @@ async def _write_rotated_log_header(path: Path, content: str) -> None:
 async def rotate_log(
     suffix: Optional[str] = None,
     custom_metadata: Optional[str] = None,
-    confirm: Optional[bool] = False,
+    confirm: Optional[bool] = None,
     dry_run: Optional[bool] = None,
     dry_run_mode: Optional[str] = None,
     log_type: Optional[str] = None,
     log_types: Optional[List[str]] = None,
-    rotate_all: bool = False,
-    auto_threshold: bool = False,
+    rotate_all: Optional[bool] = None,
+    auto_threshold: Optional[bool] = None,
     threshold_entries: Optional[int] = None,
+    config: Optional[RotateLogConfig] = None,  # Configuration object for enhanced parameter handling
 ) -> Dict[str, Any]:
     """
     Rotate one or more project log files with integrity guarantees.
@@ -113,6 +129,16 @@ async def rotate_log(
         rotate_all: When True, rotate every configured log type for the project.
         auto_threshold: When True, only rotate logs whose entry count exceeds a threshold.
         threshold_entries: Optional override for entry threshold (defaults to definition or 500).
+        config: Optional RotateLogConfig object for enhanced parameter handling.
+
+    ENHANCED FEATURES:
+    - Dual parameter support: Use either legacy parameters OR RotateLogConfig object
+    - Configuration Mode: Use RotateLogConfig for structured parameter management
+    - Legacy Mode: Pass individual parameters as before (fully backward compatible)
+    - Legacy parameters take precedence over config object when both provided
+
+    Configuration Mode: Use RotateLogConfig for structured parameter management
+    Legacy Mode: Pass individual parameters as before (maintains backward compatibility)
     """
     state_snapshot = await server_module.state_manager.record_tool("rotate_log")
 
@@ -125,11 +151,78 @@ async def rotate_log(
         )
     except ProjectResolutionError as exc:
         payload = _ROTATE_HELPER.translate_project_error(exc)
-        payload.setdefault("suggestion", "Invoke set_project before rotating logs")
-        payload.setdefault("reminders", [])
+        payload = apply_response_defaults(payload, {
+            "suggestion": "Invoke set_project before rotating logs"
+        })
         return payload
 
     project = context.project or {}
+
+    # Dual Parameter Support: Handle both legacy parameters and configuration object
+    # Legacy parameters take precedence over config object when both provided
+    if config is not None:
+        # Configuration object provided - use it as base
+        effective_config = config
+
+        # Legacy parameters override config object when provided
+        if suffix is not None:
+            effective_config = effective_config.copy_with(suffix=suffix)
+        if custom_metadata is not None:
+            effective_config = effective_config.copy_with(custom_metadata=custom_metadata)
+        if confirm is not None:
+            effective_config = effective_config.copy_with(confirm=confirm)
+        if dry_run is not None:
+            effective_config = effective_config.copy_with(dry_run=dry_run)
+        if dry_run_mode is not None:
+            effective_config = effective_config.copy_with(dry_run_mode=dry_run_mode)
+        if log_type is not None:
+            effective_config = effective_config.copy_with(log_type=log_type)
+        if log_types is not None:
+            effective_config = effective_config.copy_with(log_types=log_types)
+        if rotate_all is not None:  # Handle boolean override
+            effective_config = effective_config.copy_with(rotate_all=rotate_all)
+        if auto_threshold is not None:  # Handle boolean override
+            effective_config = effective_config.copy_with(auto_threshold=auto_threshold)
+        if threshold_entries is not None:
+            effective_config = effective_config.copy_with(threshold_entries=threshold_entries)
+    else:
+        # No config object provided - construct from legacy parameters
+        # Provide defaults for None values to maintain backward compatibility
+        effective_config = RotateLogConfig.from_legacy_params(
+            suffix=suffix,
+            custom_metadata=custom_metadata,
+            confirm=confirm if confirm is not None else False,
+            dry_run=dry_run,
+            dry_run_mode=dry_run_mode,
+            log_type=log_type,
+            log_types=log_types,
+            rotate_all=rotate_all if rotate_all is not None else False,
+            auto_threshold=auto_threshold if auto_threshold is not None else False,
+            threshold_entries=threshold_entries
+        )
+
+    # Validate the effective configuration
+    try:
+        effective_config.validate()
+    except ValueError as exc:
+        payload = _ROTATE_HELPER.error_response(
+            message=f"Configuration validation failed: {str(exc)}",
+            details={"config_class": "RotateLogConfig", "validation_error": str(exc)},
+            suggestion="Check parameter values and try again"
+        )
+        return _ROTATE_HELPER.apply_context_payload(payload, context)
+
+    # Extract validated parameters from configuration for use in existing logic
+    suffix = effective_config.suffix
+    custom_metadata = effective_config.custom_metadata
+    confirm = effective_config.confirm
+    dry_run = effective_config.dry_run
+    dry_run_mode = effective_config.dry_run_mode
+    log_type = effective_config.log_type
+    log_types = effective_config.log_types
+    rotate_all = effective_config.rotate_all
+    auto_threshold = effective_config.auto_threshold
+    threshold_entries = effective_config.threshold_entries
 
     parsed_metadata, metadata_error = _parse_custom_metadata(custom_metadata)
     if metadata_error:
@@ -220,7 +313,9 @@ async def verify_rotation_integrity(rotation_id: str) -> Dict[str, Any]:
         )
     except ProjectResolutionError as exc:
         payload = _ROTATE_HELPER.translate_project_error(exc)
-        payload.setdefault("suggestion", "Invoke set_project before verifying rotations")
+        payload = apply_response_defaults(payload, {
+            "suggestion": "Invoke set_project before verifying rotations"
+        })
         return payload
 
     project = context.project or {}
@@ -266,7 +361,9 @@ async def get_rotation_history(limit: int = 10) -> Dict[str, Any]:
         )
     except ProjectResolutionError as exc:
         payload = _ROTATE_HELPER.translate_project_error(exc)
-        payload.setdefault("suggestion", "Invoke set_project before querying rotation history")
+        payload = apply_response_defaults(payload, {
+            "suggestion": "Invoke set_project before querying rotation history"
+        })
         return payload
 
     project = context.project or {}
@@ -293,39 +390,13 @@ async def get_rotation_history(limit: int = 10) -> Dict[str, Any]:
 
 
 def _parse_custom_metadata(custom_metadata: Optional[str]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    if not custom_metadata:
-        return None, None
-
-    try:
-        normalized = normalize_dict_param(custom_metadata, "custom_metadata")
-        if isinstance(normalized, dict):
-            return normalized, None
-    except ValueError:
-        pass
-
-    try:
-        parsed = json.loads(custom_metadata)
-        if isinstance(parsed, dict):
-            return parsed, None
-    except json.JSONDecodeError:
-        pass
-
-    return None, "Invalid JSON in custom_metadata parameter"
+    """Delegate custom metadata parsing to ToolValidator."""
+    return ToolValidator.validate_json_metadata(custom_metadata, "custom_metadata")
 
 
 def _normalize_log_type_param(value: Optional[Sequence[str] | str]) -> List[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        candidates = value.split(",")
-    else:
-        candidates = value
-    result: List[str] = []
-    for candidate in candidates:
-        text = str(candidate).strip().lower()
-        if text:
-            result.append(text)
-    return result
+    """Delegate log type parameter normalization to ToolValidator."""
+    return ToolValidator.validate_list_parameter(value, ",")
 
 
 def _determine_rotation_targets(
@@ -821,12 +892,8 @@ async def _rotate_single_log(
 
 
 def _merge_single_rotation_response(summary: Dict[str, Any], rotation_result: Dict[str, Any]) -> Dict[str, Any]:
-    merged = dict(summary)
-    for key, value in rotation_result.items():
-        if key == "ok":
-            merged["ok"] = merged["ok"] and bool(value)
-        else:
-            merged[key] = value
+    """Merge rotation result into summary using ConfigManager utilities."""
+    merged = build_response_payload(summary, **rotation_result)
     merged.setdefault("rotations", summary.get("rotations", [rotation_result]))
     return merged
 
@@ -844,118 +911,64 @@ def _snapshot_file_state(path: Path) -> Dict[str, Any]:
     }
 
 
-def _clamp_bytes_per_line(value: float) -> float:
-    return max(MIN_BYTES_PER_LINE, min(MAX_BYTES_PER_LINE, value))
-
-
 def _estimate_entry_count(snapshot: Dict[str, Any], cached_stats: Optional[Dict[str, Any]]) -> EntryCountEstimate:
+    """Estimate entry count using FileSizeEstimator."""
     size_bytes = snapshot.get("size_bytes", 0) or 0
-    details: Dict[str, Any] = {"size_bytes": size_bytes}
+    mtime_ns = snapshot.get("mtime_ns")
 
-    if cached_stats:
-        cached_size = cached_stats.get("size_bytes")
-        cached_mtime = cached_stats.get("mtime_ns")
-        cached_line_count = cached_stats.get("line_count")
-        details["cached_initialized"] = cached_stats.get("initialized")
-        if (
-            cached_size is not None
-            and cached_mtime is not None
-            and cached_line_count is not None
-            and cached_size == size_bytes
-            and cached_mtime == snapshot.get("mtime_ns")
-        ):
-            details.update({
-                "source": cached_stats.get("source", "cache"),
-                "cache_hit": True,
-                "ema_bytes_per_line": cached_stats.get("ema_bytes_per_line"),
-            })
-            return EntryCountEstimate(int(cached_line_count), False, "cache", details)
+    # Add cached_initialized to details if available
+    if cached_stats and cached_stats.get("initialized"):
+        # We'll modify the details after estimation
+        pass
 
-        ema = cached_stats.get("ema_bytes_per_line")
-        if ema:
-            ema = _clamp_bytes_per_line(float(ema))
-        else:
-            ema = None
-    else:
-        ema = None
+    estimate = _FILE_SIZE_ESTIMATOR.estimate_entry_count_with_cache(
+        size_bytes, cached_stats, mtime_ns
+    )
 
-    if ema is None:
-        ema = DEFAULT_BYTES_PER_LINE
-        details["source"] = "initial_estimate"
+    # Add cached_initialized flag if it was in the original cached stats
+    if cached_stats and cached_stats.get("initialized") and "cached_initialized" not in estimate.details:
+        estimate.details["cached_initialized"] = cached_stats.get("initialized")
 
-    details["ema_bytes_per_line"] = ema
-
-    if size_bytes <= 0:
-        return EntryCountEstimate(0, False, "empty", details)
-
-    estimated = max(1, int(round(size_bytes / ema)))
-    details["approximation"] = "ema"
-    return EntryCountEstimate(estimated, True, "ema", details)
+    return estimate
 
 
 def _refine_entry_estimate(log_path: Path, snapshot: Dict[str, Any], estimate: EntryCountEstimate) -> Optional[EntryCountEstimate]:
-    if not estimate.approximate:
-        return estimate
-
+    """Refine entry count estimate using FileSizeEstimator."""
     size_bytes = snapshot.get("size_bytes", 0)
-    if not size_bytes:
-        return None
-
-    sample_size = min(size_bytes, TAIL_SAMPLE_BYTES)
-    if sample_size <= 0:
-        return None
-
-    try:
-        with open(log_path, "rb") as handle:
-            if size_bytes > sample_size:
-                handle.seek(size_bytes - sample_size)
-            data = handle.read(sample_size)
-    except OSError:
-        return None
-
-    newline_count = data.count(b"\n")
-    if newline_count <= 0:
-        return None
-
-    bytes_per_line = sample_size / newline_count
-    bytes_per_line = _clamp_bytes_per_line(bytes_per_line)
-    refined = max(1, int(round(size_bytes / bytes_per_line)))
-
-    details = dict(estimate.details)
-    details.update({
-        "tail_sample_bytes": sample_size,
-        "tail_newlines": newline_count,
-        "refined_bytes_per_line": bytes_per_line,
-    })
-
-    approximate = sample_size != size_bytes
-    if not approximate:
-        method = "full_tail"
-    else:
-        method = "tail" if estimate.method == "empty" else f"{estimate.method}+tail"
-
-    return EntryCountEstimate(refined, approximate, method, details)
+    return _FILE_SIZE_ESTIMATOR.refine_estimate_with_sampling(log_path, size_bytes, estimate)
 
 
 def _compute_estimation_band(threshold: Optional[int]) -> Optional[int]:
-    if not threshold:
-        return None
-    return max(int(threshold * ESTIMATION_BAND_RATIO), ESTIMATION_BAND_MIN)
+    """Compute estimation band using ThresholdEstimator."""
+    return _THRESHOLD_ESTIMATOR.compute_estimation_band(threshold)
 
 
 def _classify_estimate(value: int, threshold: int, band: Optional[int]) -> str:
-    margin = band or 0
-    if value < threshold - margin:
-        return "below"
-    if value > threshold + margin:
-        return "above"
-    return "undecided"
+    """Classify estimate using ThresholdEstimator with compatible return values."""
+    classification = _THRESHOLD_ESTIMATOR.classify_estimate(value, threshold, band)
+
+    # Map to original return values for backward compatibility
+    mapping = {
+        "well_below_threshold": "below",
+        "well_above_threshold": "above",
+        "near_threshold": "undecided",
+        "below_threshold": "below",
+        "above_threshold": "above"
+    }
+
+    return mapping.get(classification, "undecided")
 
 
 def _compute_bytes_per_line(size_bytes: Optional[int], line_count: Optional[int]) -> Optional[float]:
-    if not size_bytes or not line_count or line_count <= 0:
-        return None
-    return _clamp_bytes_per_line(float(size_bytes) / float(line_count))
+    """Compute bytes per line using FileSizeEstimator."""
+    return _FILE_SIZE_ESTIMATOR.compute_bytes_per_line(size_bytes, line_count)
+
+
+def _clamp_bytes_per_line(value: float) -> float:
+    """Clamp bytes-per-line value within reasonable bounds."""
+    from scribe_mcp.utils.estimator import FileSizeEstimator
+    estimator = FileSizeEstimator()
+    return estimator.clamp_bytes_per_line(value)
 
 
 def _blend_ema(current: Optional[float], observed: Optional[float], smoothing: float) -> Optional[float]:

@@ -11,11 +11,16 @@ from scribe_mcp import server as server_module
 from scribe_mcp.server import app
 from scribe_mcp.tools.constants import STATUS_EMOJI
 from scribe_mcp.tools.project_utils import load_project_config
+from scribe_mcp.utils.config_manager import ConfigManager, validate_enum_value, validate_range
 from scribe_mcp.utils.logs import parse_log_line, read_all_lines
 from scribe_mcp.utils.search import message_matches
 from scribe_mcp.utils.time import coerce_range_boundary
 from scribe_mcp.utils.response import create_pagination_info
 from scribe_mcp.utils.tokens import token_estimator
+from scribe_mcp.utils.estimator import PaginationCalculator
+from scribe_mcp.utils.bulk_processor import BulkProcessor
+from scribe_mcp.utils.error_handler import ErrorHandler
+from scribe_mcp.tools.config.query_entries_config import QueryEntriesConfig
 from scribe_mcp.shared.logging_utils import (
     LoggingContext,
     ProjectResolutionError,
@@ -28,6 +33,12 @@ from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
 VALID_MESSAGE_MODES = {"substring", "regex", "exact"}
 VALID_SEARCH_SCOPES = {"project", "global", "all_projects", "research", "bugs", "all"}
 VALID_DOCUMENT_TYPES = {"progress", "research", "architecture", "bugs", "global"}
+
+# Global configuration manager for parameter handling
+_CONFIG_MANAGER = ConfigManager("query_entries")
+
+# Global pagination calculator
+_PAGINATION_CALCULATOR = PaginationCalculator()
 
 
 class _QueryEntriesHelper(LoggingToolMixin):
@@ -64,6 +75,7 @@ async def query_entries(
     time_range: Optional[str] = None,  # "last_30d", "last_7d", "today", etc.
     relevance_threshold: float = 0.0,  # 0.0-1.0 relevance scoring threshold
     max_results: Optional[int] = None,  # Override for limit (deprecated but kept for compatibility)
+    config: Optional[QueryEntriesConfig] = None,  # Configuration object for dual parameter support
 ) -> Dict[str, Any]:
     """Search the project log with flexible filters and pagination.
 
@@ -92,11 +104,122 @@ async def query_entries(
         time_range: Time range filter - "last_30d", "last_7d", "today", etc.
         relevance_threshold: Minimum relevance score (0.0-1.0) for results
         max_results: Override maximum results (deprecated, use limit/page_size instead)
+        config: Configuration object for dual parameter support. If provided, legacy parameters
+               take precedence when both are specified.
 
     Returns:
         Paginated response with entries and metadata
     """
     state_snapshot = await server_module.state_manager.record_tool("query_entries")
+
+    # === DUAL PARAMETER SUPPORT ===
+    # Create configuration from legacy parameters first
+    legacy_config = QueryEntriesConfig.from_legacy_params(
+        project=project,
+        start=start,
+        end=end,
+        message=message,
+        message_mode=message_mode,
+        case_sensitive=case_sensitive,
+        emoji=emoji,
+        status=status,
+        agents=agents,
+        meta_filters=meta_filters,
+        limit=limit,
+        page=page,
+        page_size=page_size,
+        compact=compact,
+        fields=fields,
+        include_metadata=include_metadata,
+        search_scope=search_scope,
+        document_types=document_types,
+        include_outdated=include_outdated,
+        verify_code_references=verify_code_references,
+        time_range=time_range,
+        relevance_threshold=relevance_threshold,
+        max_results=max_results
+    )
+
+    # Merge with provided config if available, with legacy parameters taking precedence
+    if config is not None:
+        # Create final config by merging config values with legacy parameter overrides
+        # Start with config values, then override with non-default legacy parameters
+        merge_params = {}
+
+        # Helper function to determine if a legacy parameter should override the config
+        def should_override(legacy_value, default_value):
+            if legacy_value is None:
+                return False
+            if isinstance(legacy_value, bool):
+                return legacy_value != default_value
+            if isinstance(legacy_value, (int, float)):
+                return legacy_value != default_value
+            if isinstance(legacy_value, str):
+                return legacy_value != default_value
+            return True  # For lists/dicts, any non-None value should override
+
+        # Apply legacy parameter precedence
+        merge_params['project'] = legacy_config.project if should_override(project, None) else config.project
+        merge_params['start'] = legacy_config.start if should_override(start, None) else config.start
+        merge_params['end'] = legacy_config.end if should_override(end, None) else config.end
+        merge_params['message'] = legacy_config.message if should_override(message, None) else config.message
+        merge_params['message_mode'] = legacy_config.message_mode if should_override(message_mode, "substring") else config.message_mode
+        merge_params['case_sensitive'] = legacy_config.case_sensitive if should_override(case_sensitive, False) else config.case_sensitive
+        merge_params['emoji'] = legacy_config.emoji if should_override(emoji, None) else config.emoji
+        merge_params['status'] = legacy_config.status if should_override(status, None) else config.status
+        merge_params['agents'] = legacy_config.agents if should_override(agents, None) else config.agents
+        merge_params['meta_filters'] = legacy_config.meta_filters if should_override(meta_filters, None) else config.meta_filters
+        merge_params['limit'] = legacy_config.limit if should_override(limit, 50) else config.limit
+        merge_params['page'] = legacy_config.page if should_override(page, 1) else config.page
+        merge_params['page_size'] = legacy_config.page_size if should_override(page_size, 50) else config.page_size
+        merge_params['compact'] = legacy_config.compact if should_override(compact, False) else config.compact
+        merge_params['fields'] = legacy_config.fields if should_override(fields, None) else config.fields
+        merge_params['include_metadata'] = legacy_config.include_metadata if should_override(include_metadata, True) else config.include_metadata
+        merge_params['search_scope'] = legacy_config.search_scope if should_override(search_scope, "project") else config.search_scope
+        merge_params['document_types'] = legacy_config.document_types if should_override(document_types, None) else config.document_types
+        merge_params['include_outdated'] = legacy_config.include_outdated if should_override(include_outdated, True) else config.include_outdated
+        merge_params['verify_code_references'] = legacy_config.verify_code_references if should_override(verify_code_references, False) else config.verify_code_references
+        merge_params['time_range'] = legacy_config.time_range if should_override(time_range, None) else config.time_range
+        merge_params['relevance_threshold'] = legacy_config.relevance_threshold if should_override(relevance_threshold, 0.0) else config.relevance_threshold
+        merge_params['max_results'] = legacy_config.max_results if should_override(max_results, None) else config.max_results
+
+        final_config = QueryEntriesConfig(**merge_params)
+    else:
+        final_config = legacy_config
+
+    # Validate the final configuration
+    is_valid, error_response = final_config.validate()
+    if not is_valid:
+        # Ensure error response has correct MCP interface structure
+        if "ok" not in error_response:
+            error_response["ok"] = False
+        return error_response
+
+    # Extract validated parameters from final config
+    project = final_config.project
+    start = final_config.start
+    end = final_config.end
+    message = final_config.message
+    message_mode = final_config.message_mode
+    case_sensitive = final_config.case_sensitive
+    emoji = final_config.emoji
+    status = final_config.status
+    agents = final_config.agents
+    meta_filters = final_config.meta_filters
+    limit = final_config.limit
+    page = final_config.page
+    page_size = final_config.page_size
+    compact = final_config.compact
+    fields = final_config.fields
+    include_metadata = final_config.include_metadata
+    search_scope = final_config.search_scope
+    document_types = final_config.document_types
+    include_outdated = final_config.include_outdated
+    verify_code_references = final_config.verify_code_references
+    time_range = final_config.time_range
+    relevance_threshold = final_config.relevance_threshold
+    max_results = final_config.max_results
+    # === END DUAL PARAMETER SUPPORT ===
 
     # Handle pagination vs legacy limit
     # Ensure page and page_size are integers
@@ -111,38 +234,18 @@ async def query_entries(
         # Use legacy mode for backward compatibility
         limit = max(1, min(limit or 50, 500))
         page_size = limit
-    message_mode = (message_mode or "substring").lower()
-    if message_mode not in VALID_MESSAGE_MODES:
-        return {"ok": False, "error": f"Unsupported message_mode '{message_mode}'."}
 
-    if message and message_mode == "regex":
-        try:
-            re.compile(message)
-        except re.error as exc:
-            return {"ok": False, "error": f"Invalid regex for message filter: {exc}"}
+    # Apply normalizations that were previously done in validation
+    # These are now handled by QueryEntriesConfig validation
 
+    # Resolve emojis and normalize meta filters (still needed for function logic)
     normalised_emoji = _resolve_emojis(emoji, status)
     meta_normalised, meta_error = normalize_meta_filters(meta_filters)
     if meta_error:
-        return {"ok": False, "error": meta_error}
-
-    # Phase 4 Enhanced Search Parameter Validation
-    search_scope = (search_scope or "project").lower()
-    if search_scope not in VALID_SEARCH_SCOPES:
-        return {"ok": False, "error": f"Invalid search_scope '{search_scope}'. Must be one of: {', '.join(sorted(VALID_SEARCH_SCOPES))}"}
-
-    # Validate document types
-    if document_types:
-        document_types = _clean_list(document_types)
-        invalid_types = [dt for dt in document_types if dt.lower() not in VALID_DOCUMENT_TYPES]
-        if invalid_types:
-            return {"ok": False, "error": f"Invalid document_types: {', '.join(invalid_types)}. Must be one of: {', '.join(sorted(VALID_DOCUMENT_TYPES))}"}
-        document_types = [dt.lower() for dt in document_types]
-
-    # Validate relevance threshold
-    relevance_threshold = float(relevance_threshold) if isinstance(relevance_threshold, str) else relevance_threshold
-    if not 0.0 <= relevance_threshold <= 1.0:
-        return {"ok": False, "error": f"relevance_threshold must be between 0.0 and 1.0, got {relevance_threshold}"}
+        return ErrorHandler.create_validation_error(
+            error_message=meta_error,
+            context={"parameter": "meta_filters"}
+        )
 
     # Handle max_results override for backward compatibility
     if max_results is not None:
@@ -205,13 +308,12 @@ async def query_entries(
             state_snapshot=state_snapshot,
         )
     except ProjectResolutionError as exc:
-        target = project or "current project"
-        return {
-            "ok": False,
-            "error": f"Project '{target}' is not configured.",
-            "recent_projects": list(exc.recent_projects),
-            "reminders": [],
-        }
+        error_response = ErrorHandler.create_project_resolution_error(
+            error=exc,
+            tool_name="query_entries"
+        )
+        error_response["reminders"] = []
+        return error_response
 
     project_data = context.project or {}
 
@@ -319,8 +421,7 @@ async def query_entries(
 
     # Apply pagination to file-based results
     total_count = len(all_entries)
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
+    start_idx, end_idx = _PAGINATION_CALCULATOR.calculate_pagination_indices(page, page_size, total_count)
     paginated_entries = all_entries[start_idx:end_idx]
 
     pagination_info = create_pagination_info(page, page_size, total_count)
@@ -594,8 +695,7 @@ async def _handle_cross_project_search(
 
     # Apply pagination
     total_count = len(all_results)
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
+    start_idx, end_idx = _PAGINATION_CALCULATOR.calculate_pagination_indices(page, page_size, total_count)
     paginated_results = all_results[start_idx:end_idx]
 
     # Create pagination info
@@ -1072,17 +1172,8 @@ def _calculate_basic_relevance(results: List[Dict[str, Any]], query_message: Opt
 
 
 def _apply_relevance_scoring(results: List[Dict[str, Any]], query_message: Optional[str], threshold: float) -> List[Dict[str, Any]]:
-    """Apply relevance threshold filtering."""
-    if threshold <= 0.0:
-        return results
-
-    # Filter results by relevance threshold
-    filtered_results = [
-        result for result in results
-        if result.get("relevance_score", 0.0) >= threshold
-    ]
-
-    return filtered_results
+    """Apply relevance threshold filtering using BulkProcessor utility."""
+    return BulkProcessor.filter_by_relevance_threshold(results, threshold, "relevance_score")
 
 
 def _resolve_emojis(

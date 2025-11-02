@@ -19,23 +19,10 @@ except ImportError:
     # Fallback if tokens module not available
     token_estimator = None
 
-@dataclass
-class PaginationInfo:
-    """Pagination metadata for responses."""
-    page: int
-    page_size: int
-    total_count: int
-    has_next: bool
-    has_prev: bool
+# Import estimation utilities
+from .estimator import PaginationInfo, PaginationCalculator, TokenEstimator
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "page": self.page,
-            "page_size": self.page_size,
-            "total_count": self.total_count,
-            "has_next": self.has_next,
-            "has_prev": self.has_prev
-        }
+# PaginationInfo is now imported from estimator utilities
 
 
 class ResponseFormatter:
@@ -59,21 +46,13 @@ class ResponseFormatter:
 
     def __init__(self, token_warning_threshold: int = 4000):
         self.token_warning_threshold = token_warning_threshold
+        self._token_estimator = TokenEstimator()
 
     def estimate_tokens(self, data: Union[Dict, List, str]) -> int:
         """
-        Estimate token count for response data using tiktoken if available.
+        Estimate token count for response data using TokenEstimator.
         """
-        if token_estimator is not None:
-            return token_estimator.estimate_tokens(data)
-        else:
-            # Fallback to basic estimation
-            if isinstance(data, str):
-                return len(data) // 4
-            elif isinstance(data, (dict, list)):
-                return len(json.dumps(data)) // 4
-            else:
-                return len(str(data)) // 4
+        return self._token_estimator.estimate_tokens(data)
 
     def format_entry(self, entry: Dict[str, Any], compact: bool = False,
                     fields: Optional[List[str]] = None,
@@ -251,18 +230,12 @@ class ResponseFormatter:
         return response
 
 
-def create_pagination_info(page: int, page_size: int, total_count: int) -> PaginationInfo:
-    """Create pagination metadata."""
-    has_next = (page * page_size) < total_count
-    has_prev = page > 1
+# Global pagination calculator instance
+_PAGINATION_CALCULATOR = PaginationCalculator()
 
-    return PaginationInfo(
-        page=page,
-        page_size=page_size,
-        total_count=total_count,
-        has_next=has_next,
-        has_prev=has_prev
-    )
+def create_pagination_info(page: int, page_size: int, total_count: int) -> PaginationInfo:
+    """Create pagination metadata using PaginationCalculator."""
+    return _PAGINATION_CALCULATOR.create_pagination_info(page, page_size, total_count)
 
 
 # Default formatter instance
