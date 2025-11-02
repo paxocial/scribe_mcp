@@ -7,15 +7,16 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Callable, Awaitable
+from typing import Any, Dict, Optional, Callable, Awaitable, List
 
 from scribe_mcp import server as server_module
 from scribe_mcp.server import app
-from scribe_mcp.doc_management.manager import apply_doc_change, DocumentOperationError
+from scribe_mcp.doc_management.manager import apply_doc_change, DocumentOperationError, SECTION_MARKER
 from scribe_mcp.tools.append_entry import append_entry
-from scribe_mcp.shared.logging_utils import (
+from ..shared.logging_utils import (
     LoggingContext,
     ProjectResolutionError,
+    coerce_metadata_mapping,
 )
 from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
 
@@ -29,24 +30,11 @@ _MANAGE_DOCS_HELPER = _ManageDocsHelper()
 
 
 def _normalize_metadata(metadata: Optional[Dict[str, Any] | str]) -> Dict[str, Any]:
-    """Normalize metadata parameter to handle both dict and JSON string inputs from MCP framework."""
-    if metadata is None:
-        return {}
-    elif isinstance(metadata, str):
-        try:
-            import json
-            return json.loads(metadata)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            return {}
-    elif isinstance(metadata, dict):
-        return metadata.copy() if metadata else {}
-    else:
-        # Handle any other unexpected types
-        try:
-            import json
-            return json.loads(str(metadata))
-        except (json.JSONDecodeError, TypeError, ValueError):
-            return {}
+    """Normalize metadata parameter using shared coercion helper."""
+    mapping, error = coerce_metadata_mapping(metadata)
+    if error:
+        mapping.setdefault("meta_error", error)
+    return mapping
 
 
 def _hash_text(content: str) -> str:
@@ -332,6 +320,22 @@ async def manage_docs(
             context=context,
         )
 
+    if action == "list_sections":
+        return await _handle_list_sections(
+            project,
+            doc=doc,
+            helper=_MANAGE_DOCS_HELPER,
+            context=context,
+        )
+
+    if action == "batch":
+        return await _handle_batch_operations(
+            project,
+            metadata=metadata,
+            helper=_MANAGE_DOCS_HELPER,
+            context=context,
+        )
+
     try:
         change = await apply_doc_change(
             project,
@@ -545,6 +549,99 @@ Examples:
     # Run the operation
     return asyncio.run(_run_manage_docs(args))
 
+
+async def _handle_list_sections(
+    project: Dict[str, Any],
+    doc: str,
+    helper: LoggingToolMixin,
+    context: LoggingContext,
+) -> Dict[str, Any]:
+    """Return the list of section anchors for a document."""
+    docs_mapping = project.get("docs") or {}
+    path_str = docs_mapping.get(doc)
+    if not path_str:
+        return helper.apply_context_payload(
+            helper.error_response(f"Document '{doc}' is not registered for project '{project.get('name')}'."),
+            context,
+        )
+
+    path = Path(path_str)
+    if not path.exists():
+        return helper.apply_context_payload(
+            helper.error_response(f"Document path '{path}' does not exist."),
+            context,
+        )
+
+    text = await asyncio.to_thread(path.read_text, encoding="utf-8")
+    sections: List[Dict[str, Any]] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if stripped.startswith("<!-- ID:") and stripped.endswith("-->"):
+            section_id = stripped[len("<!-- ID:"): -len("-->")].strip()
+            sections.append({"id": section_id, "line": line_no})
+
+    return helper.apply_context_payload(
+        {
+            "ok": True,
+            "doc": doc,
+            "path": str(path),
+            "sections": sections,
+        },
+        context,
+    )
+
+
+async def _handle_batch_operations(
+    project: Dict[str, Any],
+    metadata: Optional[Dict[str, Any]],
+    helper: LoggingToolMixin,
+    context: LoggingContext,
+) -> Dict[str, Any]:
+    """Execute a batch of manage_docs operations sequentially."""
+    if not metadata or not isinstance(metadata, dict):
+        return helper.apply_context_payload(
+            helper.error_response("Batch action requires metadata with an 'operations' list."),
+            context,
+        )
+
+    operations = metadata.get("operations")
+    if not isinstance(operations, list):
+        return helper.apply_context_payload(
+            helper.error_response("Batch metadata must include an 'operations' list."),
+            context,
+        )
+
+    results: List[Dict[str, Any]] = []
+    for index, operation in enumerate(operations):
+        if not isinstance(operation, dict):
+            return helper.apply_context_payload(
+                helper.error_response(f"Batch operation at index {index} is not a valid object."),
+                context,
+            )
+        if operation.get("action") == "batch":
+            return helper.apply_context_payload(
+                helper.error_response("Nested batch operations are not supported."),
+                context,
+            )
+        batch_result = await manage_docs(**operation)
+        results.append({"index": index, "result": batch_result})
+        if not batch_result.get("ok"):
+            return helper.apply_context_payload(
+                {
+                    "ok": False,
+                    "error": f"Batch operation {index} failed",
+                    "results": results,
+                },
+                context,
+            )
+
+    return helper.apply_context_payload(
+        {
+            "ok": True,
+            "results": results,
+        },
+        context,
+    )
 
 
 async def _handle_special_document_creation(

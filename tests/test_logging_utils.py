@@ -43,7 +43,22 @@ def test_normalize_metadata_with_cli_string_pairs() -> None:
 
 def test_normalize_metadata_invalid_input() -> None:
     normalised = normalize_metadata(12345)
-    assert normalised == (("parse_error", "Expected dict or JSON string, got int"),)
+    assert ("meta_error", "Unsupported metadata payload type: int") in normalised
+    assert ("raw_meta", "12345") in normalised
+
+
+def test_normalize_metadata_handles_json_array_string() -> None:
+    meta = '[["phase","gamma"],["owner","codex"]]'
+    normalised = normalize_metadata(meta)
+    assert ("phase", "gamma") in normalised
+    assert ("owner", "codex") in normalised
+
+
+def test_normalize_metadata_handles_sequence_pairs() -> None:
+    meta = [("phase", "delta"), ("count", 3)]
+    normalised = normalize_metadata(meta)
+    assert ("phase", "delta") in normalised
+    assert ("count", "3") in normalised
 
 
 def test_normalize_meta_filters_success() -> None:

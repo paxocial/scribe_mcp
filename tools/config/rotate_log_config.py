@@ -19,9 +19,9 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
-from utils.parameter_validator import ToolValidator
-from utils.config_manager import ConfigManager
-from utils.error_handler import ErrorHandler
+from ...utils.parameter_validator import ToolValidator
+from ...utils.config_manager import ConfigManager
+from ...utils.error_handler import ErrorHandler
 
 
 @dataclass
@@ -271,7 +271,7 @@ class RotateLogConfig:
         Returns:
             Response with defaults applied
         """
-        from utils.config_manager import apply_response_defaults
+        from ...utils.config_manager import apply_response_defaults
         if defaults:
             return apply_response_defaults(response, defaults)
         return response

@@ -10,7 +10,12 @@ from uuid import uuid4
 
 import pytest
 
-from scribe_mcp.doc_management.manager import apply_doc_change
+from scribe_mcp.doc_management.manager import (
+    apply_doc_change,
+    SECTION_MARKER,
+    _replace_section,
+    _toggle_checklist_status,
+)
 from scribe_mcp import server as server_module
 from scribe_mcp.state import StateManager
 from scribe_mcp.storage.sqlite import SQLiteStorage
@@ -233,7 +238,8 @@ async def test_manage_docs_renders_jinja_content_and_custom_templates(tmp_path: 
 async def test_special_document_templates_and_agent_card_storage(tmp_path: Path) -> None:
     """Ensure special document creation uses Jinja templates and stores agent metrics."""
     project_name = "TestProject"
-    project_root = tmp_path / "project"
+    repo_root = Path(__file__).resolve().parents[1]
+    project_root = repo_root / "tmp_tests" / f"manage_docs_special_{uuid4().hex}"
     docs_dir = project_root / "docs" / "dev_plans" / project_name
     docs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -291,6 +297,67 @@ async def test_special_document_templates_and_agent_card_storage(tmp_path: Path)
         assert "## Bug Overview" in bug_result["content"]
         assert "## Resolution Plan" in bug_result["content"]
 
+        # Metadata JSON arrays should normalize without failing
+        array_meta_result = await manage_docs(
+            action="append",
+            doc="phase_plan",
+            content="Iteration planning update",
+            metadata="[]",
+            dry_run=True,
+        )
+        assert array_meta_result["ok"]
+
+        append_inside_result = await manage_docs(
+            action="append",
+            doc="architecture",
+            section="problem_statement",
+            content="Inserted via inside append",
+            metadata={"position": "inside"},
+            dry_run=False,
+        )
+        assert append_inside_result["ok"]
+
+        architecture_path = Path(project_config["docs"]["architecture"])
+        architecture_text = architecture_path.read_text(encoding="utf-8")
+        assert "Inserted via inside append" in architecture_text
+
+        batch_result = await manage_docs(
+            action="batch",
+            doc="architecture",
+            metadata={
+                "operations": [
+                    {
+                        "action": "append",
+                        "doc": "architecture",
+                        "section": "requirements_constraints",
+                        "content": "Batch item one",
+                        "metadata": {"position": "after"},
+                        "dry_run": False,
+                    },
+                    {
+                        "action": "append",
+                        "doc": "architecture",
+                        "section": "architecture_overview",
+                        "content": "Batch item two",
+                        "metadata": {"position": "inside"},
+                        "dry_run": False,
+                    },
+                ]
+            },
+        )
+        assert batch_result["ok"]
+
+        architecture_text = architecture_path.read_text(encoding="utf-8")
+        assert "Batch item one" in architecture_text
+        assert "Batch item two" in architecture_text
+
+        sections_result = await manage_docs(
+            action="list_sections",
+            doc="architecture",
+        )
+        assert sections_result["ok"]
+        assert any(section["id"] == "problem_statement" for section in sections_result["sections"])
+
         # Create an agent report card and ensure storage captures metrics
         agent_metadata = {
             "agent_name": "Ai-Dev",
@@ -341,3 +408,31 @@ async def test_special_document_templates_and_agent_card_storage(tmp_path: Path)
         await storage.close()
         server_module.state_manager = original_state_manager
         server_module.storage_backend = original_storage_backend
+        shutil.rmtree(project_root, ignore_errors=True)
+
+
+def test_replace_section_auto_inserts_anchor() -> None:
+    original = "# Document\n"
+    result = _replace_section(original, "auto_section", "Healed content block")
+    marker = SECTION_MARKER.format(section="auto_section")
+    assert marker in result
+    assert "Healed content block" in result
+
+
+def test_toggle_checklist_status_metadata_only_updates_proof() -> None:
+    marker = SECTION_MARKER.format(section="phase_0")
+    original = f"{marker}\n- [ ] Ship feature\n"
+    updated = _toggle_checklist_status(original, "phase_0", {"proof": "commit123"})
+    assert "- [ ] Ship feature | proof=commit123" in updated
+
+
+def test_toggle_checklist_status_creates_section_when_missing() -> None:
+    original = "# Checklist\n"
+    updated = _toggle_checklist_status(
+        original,
+        "phase_1",
+        {"status": "done", "proof": "log#1", "label": "Ship UI"},
+    )
+    marker = SECTION_MARKER.format(section="phase_1")
+    assert marker in updated
+    assert "- [x] Ship UI | proof=log#1" in updated

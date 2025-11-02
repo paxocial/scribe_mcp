@@ -12,11 +12,11 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
-from collections.abc import Mapping
 
-from utils.parameter_validator import ToolValidator
-from utils.config_manager import ConfigManager, resolve_fallback_chain
-from utils.error_handler import ErrorHandler
+from ...utils.parameter_validator import ToolValidator
+from ...utils.config_manager import ConfigManager, resolve_fallback_chain
+from ...utils.error_handler import ErrorHandler
+from ...shared.logging_utils import coerce_metadata_mapping
 
 
 def _normalize_boolean(value: Any) -> bool:
@@ -308,28 +308,10 @@ class AppendEntryConfig:
 
         # Normalize metadata using ConfigManager
         if self.meta:
-            # Preserve original metadata payload while normalising common mapping-like types.
-            if isinstance(self.meta, dict):
-                self.meta = dict(self.meta)
-            elif isinstance(self.meta, Mapping):
-                self.meta = dict(self.meta.items())
-            elif hasattr(self.meta, "items"):
-                try:
-                    self.meta = dict(self.meta.items())  # type: ignore[arg-type]
-                except Exception:
-                    pass
-            elif isinstance(self.meta, (list, tuple)):
-                try:
-                    pairs = [
-                        (str(key), value)
-                        for key, value in self.meta  # type: ignore[misc]
-                        if isinstance(key, str) or isinstance(key, (int, float))
-                    ]
-                    if pairs:
-                        self.meta = {k: v for k, v in pairs}
-                except Exception:
-                    # Leave self.meta unchanged; downstream normalisation will handle it.
-                    pass
+            coerced_meta, error = coerce_metadata_mapping(self.meta)
+            if error:
+                coerced_meta.setdefault("meta_error", error)
+            self.meta = coerced_meta
 
     @classmethod
     def from_legacy_params(

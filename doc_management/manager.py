@@ -118,7 +118,7 @@ async def apply_doc_change(
 
     try:
         # Validate inputs
-        _validate_inputs(doc, action, section, content, template)
+        _validate_inputs(doc, action, section, content, template, metadata)
 
         # Resolve and validate document path
         doc_path = _resolve_doc_path(project, doc)
@@ -136,18 +136,29 @@ async def apply_doc_change(
 
         before_hash = _hash_text(original_text)
 
-        # Render content
-        try:
-            rendered_content = await _render_content(project, content, template, metadata)
-        except Exception as e:
-            raise DocumentOperationError(f"Failed to render content: {e}")
+        # Render content when required
+        rendered_content: Optional[str] = None
+        if action in {"replace_section", "append"}:
+            try:
+                rendered_content = await _render_content(project, content, template, metadata)
+            except Exception as e:
+                raise DocumentOperationError(f"Failed to render content: {e}")
 
         # Apply the change based on action
         try:
             if action == "replace_section":
+                assert rendered_content is not None
                 updated_text = _replace_section(original_text, section, rendered_content)
             elif action == "append":
-                updated_text = _append_block(original_text, rendered_content)
+                assert rendered_content is not None
+                meta_payload = metadata if isinstance(metadata, dict) else {}
+                position_value = meta_payload.get("position", "after")
+                updated_text = _append_block(
+                    original_text,
+                    rendered_content,
+                    section=section,
+                    position=str(position_value),
+                )
             elif action == "status_update":
                 updated_text = _toggle_checklist_status(original_text, section, metadata or {})
             else:
@@ -485,7 +496,15 @@ def _replace_section(text: str, section: Optional[str], content: str) -> str:
     marker = SECTION_MARKER.format(section=section)
     idx = text.find(marker)
     if idx == -1:
-        raise ValueError(f"Section '{section}' anchor not found (expected '{marker}').")
+        doc_logger.warning(
+            "Section anchor missing; auto-appending '%s' to document.",
+            section,
+            extra={"section": section, "action": "replace_section"},
+        )
+        prefix = text.rstrip()
+        if prefix:
+            prefix = prefix + "\n\n"
+        return prefix + marker + "\n" + content.strip() + "\n"
     start = idx + len(marker)
     # Skip newline right after marker
     if start < len(text) and text[start] == "\r":
@@ -500,36 +519,151 @@ def _replace_section(text: str, section: Optional[str], content: str) -> str:
     return replacement
 
 
-def _append_block(text: str, content: str) -> str:
-    if not text.endswith("\n"):
-        text += "\n"
-    return text + content.strip() + "\n"
+def _append_block(text: str, content: str, section: Optional[str] = None, position: str = "after") -> str:
+    normalized = content.strip()
+    if not normalized:
+        return text
+
+    if not section:
+        if not text.endswith("\n"):
+            text += "\n"
+        if normalized:
+            return text + normalized + "\n"
+        return text
+
+    marker = SECTION_MARKER.format(section=section)
+    idx = text.find(marker)
+    if idx == -1:
+        doc_logger.warning(
+            "Append anchor '%s' missing; creating new block.",
+            section,
+            extra={"section": section, "action": "append"},
+        )
+        prefix = text.rstrip()
+        if prefix:
+            prefix = prefix + "\n\n"
+        return prefix + marker + "\n" + normalized + "\n"
+
+    after_marker = idx + len(marker)
+    while after_marker < len(text) and text[after_marker] in "\r\n":
+        after_marker += 1
+    next_marker = text.find("<!-- ID:", after_marker)
+    if next_marker == -1:
+        next_marker = len(text)
+
+    position = position.lower()
+    if position == "before":
+        insertion_point = idx
+    elif position in {"inside", "within", "start"}:
+        insertion_point = after_marker
+    else:
+        insertion_point = next_marker
+
+    prefix = text[:insertion_point]
+    suffix = text[insertion_point:]
+
+    insertion = normalized
+    if insertion and not insertion.endswith("\n"):
+        insertion += "\n"
+
+    if prefix and not prefix.endswith("\n"):
+        insertion = "\n" + insertion
+    if suffix and not suffix.startswith("\n"):
+        insertion = insertion + "\n"
+
+    return prefix + insertion + suffix
 
 
 def _toggle_checklist_status(text: str, section: Optional[str], metadata: Dict[str, Any]) -> str:
-    desired = metadata.get("status", "").lower()
+    desired_raw = metadata.get("status")
+    desired = desired_raw.lower().strip() if isinstance(desired_raw, str) else None
     proof = metadata.get("proof")
-    replacement = None
+    label = metadata.get("label") or metadata.get("item") or metadata.get("text") or metadata.get("title")
+
+    done_states = {"done", "completed", "complete", "true", "yes", "checked", "finished"}
+    pending_states = {"pending", "todo", "not done", "open", "incomplete", "undone"}
+
+    def resolve_token(existing_line: Optional[str]) -> str:
+        if desired in done_states:
+            return "[x]"
+        if desired in pending_states:
+            return "[ ]"
+        if existing_line:
+            return "[x]" if "- [x]" in existing_line else "[ ]"
+        return "[x]"
 
     lines = text.splitlines()
-    for idx, line in enumerate(lines):
-        if section and section not in line:
-            continue
-        if "- [ ]" in line or "- [x]" in line:
-            if desired in {"done", "completed", "complete"}:
-                new_line = line.replace("- [ ]", "- [x]", 1)
-            elif desired in {"pending", "todo"}:
-                new_line = line.replace("- [x]", "- [ ]", 1)
-            else:
-                new_line = line
+    section_marker = SECTION_MARKER.format(section=section) if section else None
+    section_start_idx: Optional[int] = None
+    section_end_idx: int = len(lines)
+
+    if section_marker:
+        for idx, line in enumerate(lines):
+            if line.strip() == section_marker:
+                section_start_idx = idx
+                break
+        if section_start_idx is not None:
+            for idx in range(section_start_idx + 1, len(lines)):
+                stripped = lines[idx].strip()
+                if stripped.startswith("<!-- ID:") and stripped != section_marker:
+                    section_end_idx = idx
+                    break
+        else:
+            # Auto-heal missing anchor: append new section with checklist entry.
+            doc_logger.warning(
+                "Checklist section anchor '%s' missing; creating new block.",
+                section,
+                extra={"section": section, "action": "status_update"},
+            )
+            token = resolve_token(None)
+            entry_label = label or (section.replace("_", " ").title() if section else "Checklist item")
+            new_line = f"- {token} {entry_label}"
             if proof:
-                new_line = new_line.split(" | ")[0] + f" | proof={proof}"
-            lines[idx] = new_line
-            replacement = True
-            break
+                new_line += f" | proof={proof}"
+            prefix = text.rstrip()
+            if prefix:
+                prefix = prefix + "\n\n"
+            return prefix + section_marker + "\n" + new_line + "\n"
+
+    replacement = False
+    search_start = (section_start_idx + 1) if section_start_idx is not None else 0
+    search_end = section_end_idx
+
+    for idx in range(search_start, search_end):
+        line = lines[idx]
+        if "- [ ]" not in line and "- [x]" not in line:
+            continue
+
+        token = resolve_token(line)
+        if "- [x]" in line:
+            new_line = line.replace("- [x]", f"- {token}", 1)
+        else:
+            new_line = line.replace("- [ ]", f"- {token}", 1)
+
+        parts = new_line.split(" | ")
+        prefix = parts[0].rstrip()
+        other_tokens = [part for part in parts[1:] if not part.startswith("proof=")]
+        if proof:
+            other_tokens.append(f"proof={proof}")
+        new_line = " | ".join([prefix] + other_tokens) if other_tokens else prefix
+        lines[idx] = new_line
+        replacement = True
+        break
+
     if not replacement:
-        raise ValueError(f"Could not find checklist line containing '{section}'.")
-    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+        token = resolve_token(None)
+        entry_label = label or (section.replace("_", " ").title() if section else "Checklist item")
+        new_line = f"- {token} {entry_label}"
+        if proof:
+            new_line += f" | proof={proof}"
+        insertion_index = search_end
+        lines.insert(insertion_index, new_line)
+        replacement = True
+
+    updated_text = "\n".join(lines)
+    if text.endswith("\n"):
+        return updated_text + "\n"
+    return updated_text
 
 
 def _validate_inputs(
@@ -537,7 +671,8 @@ def _validate_inputs(
     action: str,
     section: Optional[str],
     content: Optional[str],
-    template: Optional[str]
+    template: Optional[str],
+    metadata: Optional[Dict[str, Any]],
 ) -> None:
     """Validate input parameters for document operations."""
     if not doc or not isinstance(doc, str):
@@ -546,15 +681,33 @@ def _validate_inputs(
     if not action or not isinstance(action, str):
         raise DocumentValidationError("Action must be a non-empty string")
 
-    valid_actions = {"replace_section", "append", "status_update"}
+    valid_actions = {"replace_section", "append", "status_update", "list_sections", "batch"}
     if action not in valid_actions:
         raise DocumentValidationError(f"Invalid action '{action}'. Must be one of: {valid_actions}")
+
+    if action == "list_sections":
+        return
+
+    if action == "batch":
+        if metadata is None or not isinstance(metadata, dict):
+            raise DocumentValidationError("Batch action requires metadata with an 'operations' list")
+        if not metadata.get("operations"):
+            raise DocumentValidationError("Batch metadata must include non-empty 'operations' list")
+        if not isinstance(metadata.get("operations"), list):
+            raise DocumentValidationError("'operations' must be a list of manage_docs payloads")
+        return
 
     if action in {"replace_section", "status_update"} and (not section or not isinstance(section, str)):
         raise DocumentValidationError(f"Section parameter is required for {action} action")
 
-    if not content and not template:
-        raise DocumentValidationError("Either content or template must be provided")
+    if action == "status_update":
+        if metadata is not None and not isinstance(metadata, dict):
+            raise DocumentValidationError("Metadata for status_update must be a dictionary")
+        if not metadata:
+            raise DocumentValidationError("Metadata with at least status or proof is required for status_update")
+    else:
+        if not content and not template:
+            raise DocumentValidationError("Either content or template must be provided")
 
     # Validate section ID format
     if section and not section.replace("_", "").replace("-", "").isalnum():

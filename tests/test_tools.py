@@ -200,6 +200,27 @@ def test_append_entry_accepts_sequence_metadata(isolated_state, project_root):
     assert "sequence_meta" in log_content
 
 
+def test_append_entry_items_list_string_meta(isolated_state, project_root):
+    root = project_root
+    run(set_project.set_project("meta-items-list", str(root)))
+
+    items_list = [{"message": "Child entry", "meta": "scope=child"}]
+    result = run(
+        append_entry.append_entry(
+            message="",
+            status="info",
+            meta={"parent": "value"},
+            items_list=items_list,
+        )
+    )
+
+    assert result["ok"]
+    assert result["failed_count"] == 0
+    written_line = result["written_lines"][0]
+    assert "scope=child" in written_line
+    assert "parent=value" in written_line
+
+
 def test_rotate_log_creates_archive(isolated_state, project_root):
     root = project_root
     run(set_project.set_project("rotate-test", str(root)))

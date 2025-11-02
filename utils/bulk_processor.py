@@ -13,6 +13,8 @@ from typing import List, Dict, Any, Optional, Union, Tuple
 import re
 import json
 
+from ..shared.logging_utils import coerce_metadata_mapping
+
 # Import time utilities from existing modules
 try:
     from scribe_mcp.utils.time import utcnow
@@ -215,11 +217,19 @@ class BulkProcessor:
                 item["agent"] = inherited_agent
 
             # Merge inherited metadata with item metadata
-            if inherited_meta:
-                item_meta = item.get(meta_field, {})
-                # Create a new dict merging both (inherited takes precedence)
-                merged_meta = {**item_meta, **inherited_meta}
-                item[meta_field] = merged_meta
+            if inherited_meta or meta_field in item:
+                item_meta_raw = item.get(meta_field)
+                coerced_meta, error = coerce_metadata_mapping(item_meta_raw)
+                if error:
+                    coerced_meta.setdefault("meta_error", error)
+                if inherited_meta:
+                    merged_meta = {**coerced_meta, **inherited_meta}
+                else:
+                    merged_meta = coerced_meta
+                if merged_meta:
+                    item[meta_field] = merged_meta
+                elif meta_field in item:
+                    item[meta_field] = {}
 
         return items
 

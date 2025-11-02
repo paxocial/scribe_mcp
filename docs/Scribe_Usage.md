@@ -346,8 +346,8 @@ await query_entries(
 **Purpose**: Structured documentation system for projects.
 
 **Required Parameters:**
-- `action` (string): Action type - "replace_section", "append", "status_update", "create_research_doc", "create_bug_report"
-- `doc` (string): Document type - "architecture", "phase_plan", "checklist", "implementation"
+- `action` (string): Action type - `replace_section`, `append`, `status_update`, `list_sections`, `batch`, `create_research_doc`, `create_bug_report`, `create_review_report`, `create_agent_report_card`
+- `doc` (string): Document key (e.g., `architecture`, `phase_plan`, `checklist`, `implementation`)
 
 **Action-Specific Parameters:**
 
@@ -357,10 +357,18 @@ await query_entries(
 
 #### `append`
 - `content` (string, required): Content to append
+- `section` (string, optional): Section anchor to append near. When omitted the content is appended to the end of the file.
+- `metadata.position` (string, optional): Insert placement relative to the section. Supported values: `before`, `inside` (immediately after the anchor), and `after` (default).
 
 #### `status_update`
 - `section` (string, required): Checklist item ID
-- `metadata` (dict, required): Status info - {"status": "done", "proof": "evidence"}
+- `metadata` (dict, optional): Status info such as `{"status": "done", "proof": "evidence"}`. When omitted the existing status is preserved and proofs can still be updated.
+
+#### `list_sections`
+- Returns the discovered section anchors for the requested document, including line numbers.
+
+#### `batch`
+- `metadata.operations` (list, required): Sequence of manage_docs payloads executed in order. Nested batches are rejected for safety.
 
 #### `create_research_doc`
 - `doc_name` (string, required): Document name
@@ -372,6 +380,7 @@ await query_entries(
 **Optional Parameters:**
 - `metadata` (dict): Additional metadata for the operation
 - `dry_run` (bool): Preview changes without applying
+- Metadata payloads are auto-normalized; dicts, JSON strings, and legacy key/value sequences are all accepted.
 
 **Example Usage:**
 ```python
@@ -383,11 +392,13 @@ await manage_docs(
     content="## Problem Statement\n**Context:** ..."
 )
 
-# Append to implementation report
+# Append within a section
 await manage_docs(
     action="append",
-    doc="implementation",
-    content="## Implementation Report\n**Files Modified:** ..."
+    doc="architecture",
+    section="problem_statement",
+    content="Updated scope paragraph",
+    metadata={"position": "inside"}
 )
 
 # Update checklist status
@@ -403,6 +414,29 @@ await manage_docs(
     action="create_research_doc",
     doc_name="RESEARCH_AUTH_SYSTEM_20251102",
     metadata={"research_goal": "Analyze authentication flow"}
+)
+
+# Batch multiple updates (executed sequentially)
+await manage_docs(
+    action="batch",
+    doc="architecture",
+    metadata={
+        "operations": [
+            {
+                "action": "append",
+                "doc": "architecture",
+                "section": "requirements_constraints",
+                "content": "Documented latency targets",
+                "metadata": {"position": "after"}
+            },
+            {
+                "action": "status_update",
+                "doc": "checklist",
+                "section": "documentation_hygiene",
+                "metadata": {"status": "done", "proof": "PROGRESS_LOG#2025-11-02"}
+            }
+        ]
+    }
 )
 ```
 

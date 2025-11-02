@@ -6,7 +6,6 @@ import hashlib
 import json
 import uuid
 from collections import defaultdict, deque
-from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List, Union
@@ -617,46 +616,10 @@ def _resolve_emoji(
     return default_status_emoji(explicit=explicit, status=status, project=project)
 
 
-def _prepare_meta_payload(meta: Optional[Any]) -> Optional[Any]:
-    """Coerce metadata into a shape the shared normalizer can consume."""
-    if meta is None or meta == {}:
-        return None if meta is None else {}
-
-    if isinstance(meta, dict):
-        return dict(meta)
-
-    if isinstance(meta, Mapping):
-        return dict(meta.items())
-
-    if hasattr(meta, "items"):
-        try:
-            return dict(meta.items())  # type: ignore[arg-type]
-        except Exception:
-            pass
-
-    if hasattr(meta, "__dict__"):
-        try:
-            return {k: v for k, v in vars(meta).items() if not k.startswith("_")}
-        except Exception:
-            pass
-
-    if isinstance(meta, Sequence) and not isinstance(meta, (str, bytes)):
-        try:
-            pairs = list(meta)  # type: ignore[arg-type]
-            if all(isinstance(item, Sequence) and len(item) == 2 for item in pairs):
-                return {str(item[0]): item[1] for item in pairs}  # type: ignore[index]
-        except Exception:
-            pass
-
-    return meta
-
-
 def _normalise_meta(meta: Optional[Any]) -> tuple[tuple[str, str], ...]:
     """Delegate metadata normalization to the shared logging utility with robust error handling."""
-    prepared = _prepare_meta_payload(meta)
-
     try:
-        return normalize_metadata(prepared)
+        return normalize_metadata(meta)
     except Exception as exc:
         error_str = str(exc)
         return (("meta_error", f"Metadata normalization failed: {error_str[:50]}"),)

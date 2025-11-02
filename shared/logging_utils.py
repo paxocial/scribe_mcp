@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, MutableMapping, Optional, Sequence, Tuple
+from collections.abc import Mapping
 
 from scribe_mcp import reminders
 
@@ -123,6 +124,78 @@ async def resolve_logging_context(
     )
 
 
+def coerce_metadata_mapping(
+    meta: Any,
+    *,
+    allow_pair_strings: bool = True,
+) -> Tuple[Dict[str, Any], Optional[str]]:
+    """Coerce arbitrary metadata payloads into a dictionary."""
+    if meta is None or meta == {}:
+        return {}, None
+
+    if isinstance(meta, dict):
+        return dict(meta), None
+
+    if isinstance(meta, MutableMapping) or isinstance(meta, Mapping):
+        return dict(meta.items()), None
+
+    if hasattr(meta, "items"):
+        try:
+            return dict(meta.items()), None  # type: ignore[arg-type]
+        except Exception:
+            pass
+
+    if isinstance(meta, str):
+        parsed = _try_parse_json_like(meta)
+        if isinstance(parsed, dict):
+            return dict(parsed), None
+        if isinstance(parsed, list):
+            try:
+                pairs: List[Tuple[Any, Any]] = []
+                for entry in parsed:
+                    if isinstance(entry, Sequence) and not isinstance(entry, (str, bytes)) and len(entry) == 2:
+                        key, value = entry
+                        pairs.append((key, value))
+                    else:
+                        raise ValueError("Metadata JSON array items must be key/value pairs")
+                return {str(key): value for key, value in pairs}, None
+            except Exception:
+                raw_preview = meta if len(meta) < 120 else f"{meta[:117]}..."
+                return {"raw_meta": raw_preview}, "Expected dict when decoding JSON metadata list"
+        if allow_pair_strings:
+            pairs = _legacy_metadata_pairs(meta, allow_pair_strings=True)
+            return {key: value for key, value in pairs}, None
+        raw_preview = meta if len(meta) < 120 else f"{meta[:117]}..."
+        return {"raw_meta": raw_preview}, "Metadata string must be a JSON object"
+
+    if isinstance(meta, Sequence) and not isinstance(meta, (str, bytes)):
+        try:
+            pairs_seq: List[Tuple[Any, Any]] = []
+            for entry in meta:
+                if isinstance(entry, Sequence) and not isinstance(entry, (str, bytes)) and len(entry) == 2:
+                    key, value = entry
+                    pairs_seq.append((key, value))
+                else:
+                    raise ValueError("Metadata sequences must contain key/value pairs")
+            return {str(key): value for key, value in pairs_seq}, None
+        except Exception as exc:
+            raw_preview = str(meta)
+            if len(raw_preview) > 120:
+                raw_preview = f"{raw_preview[:117]}..."
+            return {"raw_meta": raw_preview}, str(exc)
+
+    if hasattr(meta, "__dict__"):
+        try:
+            return {key: value for key, value in vars(meta).items() if not key.startswith("_")}, None
+        except Exception:
+            pass
+
+    raw_preview = str(meta)
+    if len(raw_preview) > 120:
+        raw_preview = f"{raw_preview[:117]}..."
+    return {"raw_meta": raw_preview}, f"Unsupported metadata payload type: {type(meta).__name__}"
+
+
 def normalize_metadata(
     meta: Any,
     *,
@@ -152,12 +225,18 @@ def normalize_metadata(
         except Exception:
             return (("meta_error", "Invalid metadata tuple"),)
 
-    if not isinstance(meta, dict):
-        return (("parse_error", f"Expected dict or JSON string, got {type(meta).__name__}"),)
+    mapping, error = coerce_metadata_mapping(meta, allow_pair_strings=allow_pair_strings)
+    if error and not mapping:
+        return (("parse_error", error),)
+    if error:
+        mapping.setdefault("meta_error", error)
+
+    if not mapping:
+        return ()
 
     try:
         normalised = []
-        for key, value in sorted(meta.items()):
+        for key, value in sorted(mapping.items()):
             normalised.append((_sanitize_meta_key(str(key)), _stringify(value)))
         return tuple(normalised)
     except Exception as exc:  # pragma: no cover - defensive catch for unknown edge cases

@@ -203,6 +203,7 @@ class EnhancedAppendEntryTest:
             {"message": "Task 2", "status": "success"},
             {"message": "Task 3", "meta": {"component": "auth"}},
             {"message": "Task 4", "status": "error", "meta": {"component": "db", "retry": 3}},
+            {"message": "Task 5", "meta": "scope=child"},
         ]
 
         inherited_meta = {"project": "my-app", "version": "2.0"}
@@ -232,6 +233,10 @@ class EnhancedAppendEntryTest:
         assert result[3]["meta"]["component"] == "db"  # Explicit preserved
         assert result[3]["meta"]["retry"] == 3          # Explicit preserved
         assert result[3]["meta"]["project"] == "my-app" # Inherited merged
+
+        # String metadata should be normalized and merged
+        assert result[4]["meta"]["scope"] == "child"
+        assert result[4]["meta"]["project"] == "my-app"
 
         print("   ✅ Metadata inheritance and merging")
 
