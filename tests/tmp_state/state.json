@@ -3,14 +3,14 @@
   "projects": {
     "enhanced-rotation-test": {
       "name": "enhanced-rotation-test",
-      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4768488c-cc59-4923-aa4c-1157387f20ca",
-      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4768488c-cc59-4923-aa4c-1157387f20ca/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md",
-      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4768488c-cc59-4923-aa4c-1157387f20ca/docs/dev_plans/enhanced_rotation_test",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4e12e680-e61b-4aeb-b815-52bd083414c0",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4e12e680-e61b-4aeb-b815-52bd083414c0/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4e12e680-e61b-4aeb-b815-52bd083414c0/docs/dev_plans/enhanced_rotation_test",
       "docs": {
-        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4768488c-cc59-4923-aa4c-1157387f20ca/docs/dev_plans/enhanced_rotation_test/ARCHITECTURE_GUIDE.md",
-        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4768488c-cc59-4923-aa4c-1157387f20ca/docs/dev_plans/enhanced_rotation_test/PHASE_PLAN.md",
-        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4768488c-cc59-4923-aa4c-1157387f20ca/docs/dev_plans/enhanced_rotation_test/CHECKLIST.md",
-        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4768488c-cc59-4923-aa4c-1157387f20ca/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md"
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4e12e680-e61b-4aeb-b815-52bd083414c0/docs/dev_plans/enhanced_rotation_test/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4e12e680-e61b-4aeb-b815-52bd083414c0/docs/dev_plans/enhanced_rotation_test/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4e12e680-e61b-4aeb-b815-52bd083414c0/docs/dev_plans/enhanced_rotation_test/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/4e12e680-e61b-4aeb-b815-52bd083414c0/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md"
       },
       "defaults": {
         "emoji": "\ud83e\uddea",
@@ -253,36 +253,36 @@
   ],
   "recent_tools": [
     {
-      "name": "set_project",
-      "ts": "2025-11-02 09:04:35 UTC"
-    },
-    {
-      "name": "get_project",
-      "ts": "2025-11-02 09:04:34 UTC"
-    },
-    {
-      "name": "rotate_log",
-      "ts": "2025-11-02 09:04:34 UTC"
-    },
-    {
-      "name": "append_entry",
-      "ts": "2025-11-02 09:04:34 UTC"
-    },
-    {
-      "name": "generate_doc_templates",
-      "ts": "2025-11-02 09:04:34 UTC"
-    },
-    {
       "name": "vector_index_status",
-      "ts": "2025-10-31 23:39:21 UTC"
+      "ts": "2025-11-02 12:59:55 UTC"
     },
     {
       "name": "retrieve_by_uuid",
-      "ts": "2025-10-31 23:39:21 UTC"
+      "ts": "2025-11-02 12:59:55 UTC"
     },
     {
       "name": "vector_search",
-      "ts": "2025-10-31 23:39:21 UTC"
+      "ts": "2025-11-02 12:59:55 UTC"
+    },
+    {
+      "name": "set_project",
+      "ts": "2025-11-02 12:59:08 UTC"
+    },
+    {
+      "name": "get_project",
+      "ts": "2025-11-02 12:59:08 UTC"
+    },
+    {
+      "name": "rotate_log",
+      "ts": "2025-11-02 12:59:08 UTC"
+    },
+    {
+      "name": "append_entry",
+      "ts": "2025-11-02 12:59:07 UTC"
+    },
+    {
+      "name": "generate_doc_templates",
+      "ts": "2025-11-02 12:59:07 UTC"
     },
     {
       "name": "get_rotation_history",
@@ -293,9 +293,9 @@
       "ts": "2025-10-31 23:38:34 UTC"
     }
   ],
-  "last_activity_at": "2025-11-02 09:04:35 UTC",
-  "session_started_at": "2025-11-02 09:03:56 UTC",
-  "version": 66,
+  "last_activity_at": "2025-11-02 12:59:55 UTC",
+  "session_started_at": "2025-11-02 12:59:07 UTC",
+  "version": 67,
   "last_updated_by": "Scribe",
-  "operation_timestamp": "2025-11-02 09:04:34 UTC"
+  "operation_timestamp": "2025-11-02 12:59:07 UTC"
 }

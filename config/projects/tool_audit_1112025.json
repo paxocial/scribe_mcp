@@ -1,0 +1,13 @@
+{
+  "name": "TOOL_AUDIT_1112025",
+  "root": "/home/austin/projects/MCP_SPINE/scribe_mcp",
+  "progress_log": "docs/dev_plans/tool_audit_1112025/PROGRESS_LOG.md",
+  "defaults": {
+    "emoji": "🔍",
+    "agent": "Review Agent",
+    "reminder": {
+      "log_warning_minutes": 15,
+      "tone": "friendly"
+    }
+  }
+}
