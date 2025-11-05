@@ -616,10 +616,35 @@ def _resolve_emoji(
     return default_status_emoji(explicit=explicit, status=status, project=project)
 
 
+def _validate_comparison_symbols_in_meta(meta: Any) -> Any:
+    """Validate and escape comparison symbols in metadata values."""
+    if meta is None:
+        return None
+
+    if isinstance(meta, dict):
+        validated_meta = {}
+        for key, value in meta.items():
+            if isinstance(value, str):
+                # Check for comparison operators that might cause type errors
+                if any(op in value for op in ['>', '<', '>=', '<=']):
+                    # Escape the comparison operators to prevent type errors
+                    escaped_value = value.replace('>', '\\>').replace('<', '\\<')
+                    validated_meta[key] = escaped_value
+                else:
+                    validated_meta[key] = value
+            else:
+                validated_meta[key] = value
+        return validated_meta
+
+    return meta
+
+
 def _normalise_meta(meta: Optional[Any]) -> tuple[tuple[str, str], ...]:
     """Delegate metadata normalization to the shared logging utility with robust error handling."""
     try:
-        return normalize_metadata(meta)
+        # Validate comparison symbols before normalization
+        validated_meta = _validate_comparison_symbols_in_meta(meta)
+        return normalize_metadata(validated_meta)
     except Exception as exc:
         error_str = str(exc)
         return (("meta_error", f"Metadata normalization failed: {error_str[:50]}"),)

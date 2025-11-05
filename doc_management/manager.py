@@ -16,6 +16,11 @@ from typing import Any, Dict, Optional, Tuple
 from scribe_mcp.utils.files import async_atomic_write, ensure_parent
 from scribe_mcp.utils.time import utcnow
 from scribe_mcp.templates import template_root
+from scribe_mcp.utils.enhanced_parameter_validator import (
+    ParameterValidationError,
+    DocumentValidationError,
+    create_manage_docs_validator,
+)
 import re
 
 # Setup logging for doc management operations
@@ -88,11 +93,6 @@ class DocChangeResult:
 
 class DocumentOperationError(Exception):
     """Raised when a document operation fails."""
-    pass
-
-
-class DocumentValidationError(Exception):
-    """Raised when document validation fails."""
     pass
 
 
@@ -666,6 +666,31 @@ def _toggle_checklist_status(text: str, section: Optional[str], metadata: Dict[s
     return updated_text
 
 
+def _validate_comparison_symbols(value: Any) -> bool:
+    """Validate that comparison symbols in strings are properly handled."""
+    if not isinstance(value, str):
+        return True
+
+    # Check for patterns that look like they're meant to be numeric comparisons
+    # These are the cases that typically cause "not supported between str and float" errors
+    import re
+
+    # Pattern: numeric value followed by comparison operator followed by numeric value
+    # e.g., "5 > 3", "10.5 <= 20", etc.
+    numeric_comparison_pattern = r'^\s*\d+\.?\d*\s*[><=]+\s*\d+\.?\d*\s*$'
+
+    if re.match(numeric_comparison_pattern, value.strip()):
+        # This looks like a numeric comparison that should be handled elsewhere
+        return False
+
+    # Also check for problematic metadata values that might be compared as numbers
+    if value.strip().isdigit() or (value.replace('.', '', 1).isdigit() and '.' in value):
+        # Pure numeric values might cause issues in string vs numeric comparisons
+        return True  # Allow these, but be cautious
+
+    return True
+
+
 def _validate_inputs(
     doc: str,
     action: str,
@@ -674,44 +699,67 @@ def _validate_inputs(
     template: Optional[str],
     metadata: Optional[Dict[str, Any]],
 ) -> None:
-    """Validate input parameters for document operations."""
-    if not doc or not isinstance(doc, str):
-        raise DocumentValidationError("Document name must be a non-empty string")
+    """Validate input parameters for document operations using enhanced validation framework."""
+    validator = create_manage_docs_validator()
 
-    if not action or not isinstance(action, str):
-        raise DocumentValidationError("Action must be a non-empty string")
+    # Validate basic string parameters
+    validator.validate_string_param(doc, "doc", required=True, min_length=1)
+    validator.validate_string_param(action, "action", required=True, min_length=1)
 
-    valid_actions = {"replace_section", "append", "status_update", "list_sections", "batch"}
-    if action not in valid_actions:
-        raise DocumentValidationError(f"Invalid action '{action}'. Must be one of: {valid_actions}")
+    # Validate action enum
+    valid_actions = {
+        "replace_section", "append", "status_update", "list_sections", "batch",
+        "create_research_doc", "create_bug_report", "create_review_report", "create_agent_report_card"
+    }
+    validator.validate_enum_param(action, "action", list(valid_actions), required=True)
 
     if action == "list_sections":
         return
 
     if action == "batch":
-        if metadata is None or not isinstance(metadata, dict):
+        if metadata is None:
             raise DocumentValidationError("Batch action requires metadata with an 'operations' list")
-        if not metadata.get("operations"):
+
+        # Validate metadata structure for batch operations
+        validated_metadata = validator.validate_metadata(metadata, "metadata")
+        if not validated_metadata.get("operations"):
             raise DocumentValidationError("Batch metadata must include non-empty 'operations' list")
-        if not isinstance(metadata.get("operations"), list):
+        if not isinstance(validated_metadata.get("operations"), list):
             raise DocumentValidationError("'operations' must be a list of manage_docs payloads")
         return
 
-    if action in {"replace_section", "status_update"} and (not section or not isinstance(section, str)):
-        raise DocumentValidationError(f"Section parameter is required for {action} action")
+    # Validate section parameter for actions that need it
+    if action in {"replace_section", "status_update"}:
+        validator.validate_string_param(section, "section", required=True, min_length=1)
 
+        # Validate section ID format
+        if section and not section.replace("_", "").replace("-", "").isalnum():
+            raise DocumentValidationError(f"Invalid section ID '{section}'. Must contain only alphanumeric characters, hyphens, and underscores")
+
+    # Validate content and template parameters
     if action == "status_update":
-        if metadata is not None and not isinstance(metadata, dict):
-            raise DocumentValidationError("Metadata for status_update must be a dictionary")
-        if not metadata:
-            raise DocumentValidationError("Metadata with at least status or proof is required for status_update")
+        if metadata is not None:
+            validated_metadata = validator.validate_metadata(metadata, "metadata")
+            if not validated_metadata:
+                raise DocumentValidationError("Metadata with at least status or proof is required for status_update")
+        else:
+            raise DocumentValidationError("Metadata is required for status_update action")
     else:
         if not content and not template:
             raise DocumentValidationError("Either content or template must be provided")
 
-    # Validate section ID format
-    if section and not section.replace("_", "").replace("-", "").isalnum():
-        raise DocumentValidationError(f"Invalid section ID '{section}'. Must contain only alphanumeric characters, hyphens, and underscores")
+    # Validate content for comparison symbols
+    if content:
+        validated_content = validator.validate_comparison_operators(content, "content")
+        if validated_content != content:
+            raise DocumentValidationError(
+                "Content contains comparison operators that require escaping. "
+                "Use proper escaping or remove comparison operators like >, <, >=, <="
+            )
+
+    # Validate metadata with enhanced validation
+    if metadata:
+        validated_metadata = validator.validate_metadata(metadata, "metadata")
 
 
 async def _verify_file_write(file_path: Path, expected_content: str, expected_hash: str) -> bool:

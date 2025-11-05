@@ -297,9 +297,39 @@
       "hash_chain_previous": "25058f4503ace9159f67fd0d168933b268aadd114228654e5e7f3c246a49faca",
       "log_type": "progress",
       "stored_timestamp": "2025-11-02T09:03:53.669079 UTC"
+    },
+    {
+      "rotation_uuid": "7f7ae8f7-bc34-4352-8158-d71f27b9a1c1",
+      "rotation_timestamp_utc": "2025-11-05 07:10:11 UTC",
+      "sequence_number": 24,
+      "archived_file_path": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/1777665a-e4ec-48ee-ba9d-a3170570d61a/docs/dev_plans/rotate_test/PROGRESS_LOG.md.test_7f7ae8f7.md",
+      "archived_file_name": "PROGRESS_LOG.md.test_7f7ae8f7.md",
+      "entry_count": 33,
+      "file_hash": "8718e09b7a5cfbd2a4850b0a571fbf1f033203398a52dff217249119d58a6727",
+      "file_size": 1039,
+      "created_timestamp": "2025-11-05T02:10:11.827374",
+      "modified_timestamp": "2025-11-05T02:10:11.782596",
+      "hash_chain_previous": "b906d99bfb6f6776b53d2ac69163bfef226fabd216adb90faa0b8580aa696f75",
+      "log_type": "progress",
+      "stored_timestamp": "2025-11-05T07:10:11.856834 UTC"
+    },
+    {
+      "rotation_uuid": "47f1e49e-352e-4045-9667-b86d00996aae",
+      "rotation_timestamp_utc": "2025-11-05 07:17:47 UTC",
+      "sequence_number": 25,
+      "archived_file_path": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/5ed97a63-db26-41cd-ab9f-f996915ca0d1/docs/dev_plans/rotate_test/PROGRESS_LOG.md.test_47f1e49e.md",
+      "archived_file_name": "PROGRESS_LOG.md.test_47f1e49e.md",
+      "entry_count": 33,
+      "file_hash": "4272ccc9980f597df11f3a76e5baf1a05f3885f65d1e1f70311328659a838bd8",
+      "file_size": 1039,
+      "created_timestamp": "2025-11-05T02:17:47.070966",
+      "modified_timestamp": "2025-11-05T02:17:47.018619",
+      "hash_chain_previous": "8718e09b7a5cfbd2a4850b0a571fbf1f033203398a52dff217249119d58a6727",
+      "log_type": "progress",
+      "stored_timestamp": "2025-11-05T07:17:47.097760 UTC"
     }
   ],
-  "total_rotations": 20,
-  "last_updated": "2025-11-02T09:03:53.669079 UTC",
+  "total_rotations": 22,
+  "last_updated": "2025-11-05T07:17:47.097760 UTC",
   "version": "1.0"
 }
