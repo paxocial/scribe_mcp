@@ -16,6 +16,8 @@ Do not run the MCP server outside the `scribe_mcp` directory—`python -m server
   - Confirmation flags (`confirm`, `dry_run`, etc.) must be passed as actual tool parameters.
 
   **⚠️ COMMANDMENT #0: ALWAYS CHECK PROGRESS LOG FIRST**: Before starting ANY work, ALWAYS read `docs/dev_plans/[current_project]/PROGRESS_LOG.md` to understand what has been done, what mistakes were made, and what the current state is. The progress log is the source of truth for project context.
+
+**⚠️ COMMANDMENT #0.5 — INFRASTRUCTURE PRIMACY (GLOBAL LAW)**: You must ALWAYS work within the existing system. NEVER create parallel or replacement files (e.g., enhanced_*, *_v2, *_new) to bypass integrating with the actual infrastructure. You must modify, extend, or refactor the existing component directly. Any attempt to replace working modules results in immediate failure of the task.
 ---
 
 **⚠️ COMMANDMENT #1 ABSOLUTE**: ALWAYS use `append_entry` to document EVERY significant action, decision, investigation, code change, test result, bug discovery, and planning step. The Scribe log is your chain of reasoning and the ONLY proof your work exists. If it's not Scribed, it didn't fucking happen.

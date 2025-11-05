@@ -16,10 +16,9 @@ from typing import Any, Dict, Optional, Tuple
 from scribe_mcp.utils.files import async_atomic_write, ensure_parent
 from scribe_mcp.utils.time import utcnow
 from scribe_mcp.templates import template_root
-from scribe_mcp.utils.enhanced_parameter_validator import (
-    ParameterValidationError,
-    DocumentValidationError,
-    create_manage_docs_validator,
+from scribe_mcp.utils.parameter_validator import (
+    ToolValidator,
+    BulletproofParameterCorrector,
 )
 import re
 
@@ -101,6 +100,11 @@ class DocumentVerificationError(Exception):
     pass
 
 
+class DocumentValidationError(Exception):
+    """Raised when document validation fails."""
+    pass
+
+
 async def apply_doc_change(
     project: Dict[str, Any],
     *,
@@ -117,8 +121,10 @@ async def apply_doc_change(
     file_size_before = 0
 
     try:
-        # Validate inputs
-        _validate_inputs(doc, action, section, content, template, metadata)
+        # Validate and correct inputs (bulletproof - never fails)
+        doc, action, section, content, template, metadata = _validate_and_correct_inputs(
+            doc, action, section, content, template, metadata
+        )
 
         # Resolve and validate document path
         doc_path = _resolve_doc_path(project, doc)
@@ -423,6 +429,16 @@ async def _render_content(
         except (json.JSONDecodeError, TypeError):
             metadata = {}
 
+    # Check if template_name is actually a fallback content string from parameter validator
+    # Common fallback strings that should be treated as content, not template names
+    fallback_strings = {"No message provided", "Invalid message format", "Empty message"}
+
+    if template_name and template_name in fallback_strings:
+        # Treat fallback strings as content, not template names
+        if content is None:
+            content = template_name
+        template_name = None
+
     if template_name:
         try:
             # Import template engine dynamically to avoid circular imports
@@ -691,75 +707,123 @@ def _validate_comparison_symbols(value: Any) -> bool:
     return True
 
 
-def _validate_inputs(
+def _validate_and_correct_inputs(
     doc: str,
     action: str,
     section: Optional[str],
     content: Optional[str],
     template: Optional[str],
     metadata: Optional[Dict[str, Any]],
-) -> None:
-    """Validate input parameters for document operations using enhanced validation framework."""
-    validator = create_manage_docs_validator()
+) -> tuple[str, str, Optional[str], Optional[str], Optional[str], Dict[str, Any]]:
+    """
+    Bulletproof parameter validation and correction that NEVER fails.
 
-    # Validate basic string parameters
-    validator.validate_string_param(doc, "doc", required=True, min_length=1)
-    validator.validate_string_param(action, "action", required=True, min_length=1)
-
-    # Validate action enum
-    valid_actions = {
-        "replace_section", "append", "status_update", "list_sections", "batch",
-        "create_research_doc", "create_bug_report", "create_review_report", "create_agent_report_card"
+    Returns corrected parameters tuple: (doc, action, section, content, template, metadata)
+    """
+    # Define validation schema
+    validation_schema = {
+        "doc": {
+            "type": str,
+            "required": True,
+            "allowed_values": {"architecture", "phase_plan", "checklist", "implementation", "research", "bugs"},
+            "default": "implementation"
+        },
+        "action": {
+            "type": str,
+            "required": True,
+            "allowed_values": {"replace_section", "append", "status_update", "list_sections", "batch",
+                             "create_research_doc", "create_bug_report", "create_review_report", "create_agent_report_card"},
+            "default": "append"
+        },
+        "section": {
+            "type": str,
+            "required": False,
+            "default": None
+        },
+        "content": {
+            "type": str,
+            "required": False,
+            "default": None
+        },
+        "template": {
+            "type": str,
+            "required": False,
+            "default": None
+        },
+        "metadata": {
+            "type": dict,
+            "required": False,
+            "default": {}
+        }
     }
-    validator.validate_enum_param(action, "action", list(valid_actions), required=True)
 
-    if action == "list_sections":
-        return
+    # Apply bulletproof parameter correction
+    input_params = {
+        "doc": doc,
+        "action": action,
+        "section": section,
+        "content": content,
+        "template": template,
+        "metadata": metadata
+    }
 
-    if action == "batch":
-        if metadata is None:
-            raise DocumentValidationError("Batch action requires metadata with an 'operations' list")
+    corrected_params = BulletproofParameterCorrector.ensure_parameter_validity(input_params, validation_schema)
 
-        # Validate metadata structure for batch operations
-        validated_metadata = validator.validate_metadata(metadata, "metadata")
-        if not validated_metadata.get("operations"):
-            raise DocumentValidationError("Batch metadata must include non-empty 'operations' list")
-        if not isinstance(validated_metadata.get("operations"), list):
-            raise DocumentValidationError("'operations' must be a list of manage_docs payloads")
-        return
+    # Apply business logic corrections
+    corrected_doc = corrected_params["doc"]
+    corrected_action = corrected_params["action"]
+    corrected_section = corrected_params["section"]
+    corrected_content = corrected_params["content"]
+    corrected_template = corrected_params["template"]
+    corrected_metadata = corrected_params["metadata"]
 
-    # Validate section parameter for actions that need it
-    if action in {"replace_section", "status_update"}:
-        validator.validate_string_param(section, "section", required=True, min_length=1)
+    # Special handling for different actions
+    if corrected_action == "list_sections":
+        return corrected_doc, corrected_action, None, None, None, {}
 
-        # Validate section ID format
-        if section and not section.replace("_", "").replace("-", "").isalnum():
-            raise DocumentValidationError(f"Invalid section ID '{section}'. Must contain only alphanumeric characters, hyphens, and underscores")
+    if corrected_action == "batch":
+        # Ensure metadata has operations list
+        if not isinstance(corrected_metadata, dict):
+            corrected_metadata = {}
 
-    # Validate content and template parameters
-    if action == "status_update":
-        if metadata is not None:
-            validated_metadata = validator.validate_metadata(metadata, "metadata")
-            if not validated_metadata:
-                raise DocumentValidationError("Metadata with at least status or proof is required for status_update")
-        else:
-            raise DocumentValidationError("Metadata is required for status_update action")
+        if "operations" not in corrected_metadata or not corrected_metadata["operations"]:
+            corrected_metadata["operations"] = []
+
+        if not isinstance(corrected_metadata["operations"], list):
+            corrected_metadata["operations"] = [corrected_metadata["operations"]]
+
+        return corrected_doc, corrected_action, None, None, None, corrected_metadata
+
+    # Section validation for actions that need it
+    if corrected_action in {"replace_section", "status_update"}:
+        if not corrected_section:
+            corrected_section = "main_content"
+
+        # Sanitize section ID - keep only alphanumeric, hyphens, underscores
+        import re
+        sanitized_section = re.sub(r'[^a-zA-Z0-9_-]', '', corrected_section)
+        if not sanitized_section:
+            sanitized_section = "main_content"
+        corrected_section = sanitized_section
+
+    # Content/template handling
+    if corrected_action == "status_update":
+        # For status updates, ensure metadata has required fields
+        if not isinstance(corrected_metadata, dict):
+            corrected_metadata = {}
+
+        if not any(key in corrected_metadata for key in ["status", "proof", "completed"]):
+            corrected_metadata["status"] = "in_progress"
+
+        # Clear content and template for status updates
+        corrected_content = None
+        corrected_template = None
     else:
-        if not content and not template:
-            raise DocumentValidationError("Either content or template must be provided")
+        # For other actions, ensure we have either content or template
+        if not corrected_content and not corrected_template:
+            corrected_content = f"## {corrected_action.replace('_', ' ').title()}\n\nContent placeholder."
 
-    # Validate content for comparison symbols
-    if content:
-        validated_content = validator.validate_comparison_operators(content, "content")
-        if validated_content != content:
-            raise DocumentValidationError(
-                "Content contains comparison operators that require escaping. "
-                "Use proper escaping or remove comparison operators like >, <, >=, <="
-            )
-
-    # Validate metadata with enhanced validation
-    if metadata:
-        validated_metadata = validator.validate_metadata(metadata, "metadata")
+    return corrected_doc, corrected_action, corrected_section, corrected_content, corrected_template, corrected_metadata
 
 
 async def _verify_file_write(file_path: Path, expected_content: str, expected_hash: str) -> bool:

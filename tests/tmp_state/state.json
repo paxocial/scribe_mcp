@@ -3,14 +3,14 @@
   "projects": {
     "enhanced-rotation-test": {
       "name": "enhanced-rotation-test",
-      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea44ded-794f-486f-bb12-700c10cac8ff",
-      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea44ded-794f-486f-bb12-700c10cac8ff/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md",
-      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea44ded-794f-486f-bb12-700c10cac8ff/docs/dev_plans/enhanced_rotation_test",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea14744-e145-4cc4-a2bd-d990b296e1d2",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea14744-e145-4cc4-a2bd-d990b296e1d2/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea14744-e145-4cc4-a2bd-d990b296e1d2/docs/dev_plans/enhanced_rotation_test",
       "docs": {
-        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea44ded-794f-486f-bb12-700c10cac8ff/docs/dev_plans/enhanced_rotation_test/ARCHITECTURE_GUIDE.md",
-        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea44ded-794f-486f-bb12-700c10cac8ff/docs/dev_plans/enhanced_rotation_test/PHASE_PLAN.md",
-        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea44ded-794f-486f-bb12-700c10cac8ff/docs/dev_plans/enhanced_rotation_test/CHECKLIST.md",
-        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea44ded-794f-486f-bb12-700c10cac8ff/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md"
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea14744-e145-4cc4-a2bd-d990b296e1d2/docs/dev_plans/enhanced_rotation_test/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea14744-e145-4cc4-a2bd-d990b296e1d2/docs/dev_plans/enhanced_rotation_test/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea14744-e145-4cc4-a2bd-d990b296e1d2/docs/dev_plans/enhanced_rotation_test/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/bea14744-e145-4cc4-a2bd-d990b296e1d2/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md"
       },
       "defaults": {
         "emoji": "\ud83e\uddea",
@@ -254,23 +254,23 @@
   "recent_tools": [
     {
       "name": "get_project",
-      "ts": "2025-11-05 07:17:49 UTC"
+      "ts": "2025-11-05 19:29:24 UTC"
     },
     {
       "name": "rotate_log",
-      "ts": "2025-11-05 07:17:49 UTC"
+      "ts": "2025-11-05 19:29:24 UTC"
     },
     {
       "name": "append_entry",
-      "ts": "2025-11-05 07:17:49 UTC"
+      "ts": "2025-11-05 19:29:24 UTC"
     },
     {
       "name": "generate_doc_templates",
-      "ts": "2025-11-05 07:17:49 UTC"
+      "ts": "2025-11-05 19:29:24 UTC"
     },
     {
       "name": "set_project",
-      "ts": "2025-11-05 07:17:49 UTC"
+      "ts": "2025-11-05 19:29:24 UTC"
     },
     {
       "name": "vector_index_status",
@@ -293,9 +293,9 @@
       "ts": "2025-10-31 23:38:34 UTC"
     }
   ],
-  "last_activity_at": "2025-11-05 07:17:49 UTC",
-  "session_started_at": "2025-11-05 07:10:14 UTC",
-  "version": 70,
+  "last_activity_at": "2025-11-05 19:29:24 UTC",
+  "session_started_at": "2025-11-05 19:29:24 UTC",
+  "version": 71,
   "last_updated_by": "Scribe",
-  "operation_timestamp": "2025-11-05 07:17:49 UTC"
+  "operation_timestamp": "2025-11-05 19:29:24 UTC"
 }

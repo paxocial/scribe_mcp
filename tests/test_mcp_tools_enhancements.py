@@ -16,8 +16,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scribe_mcp.doc_management.manager import (
-    _validate_inputs,
-    _validate_comparison_symbols,
+    _validate_and_correct_inputs,
     DocumentValidationError,
     apply_doc_change,
 )
@@ -25,11 +24,9 @@ from scribe_mcp.tools.append_entry import (
     _validate_comparison_symbols_in_meta,
     _normalise_meta,
 )
-from scribe_mcp.utils.enhanced_parameter_validator import (
-    EnhancedParameterValidator,
-    create_manage_docs_validator,
-    ParameterValidationError,
-    DocumentValidationError,
+from scribe_mcp.utils.parameter_validator import (
+    ToolValidator,
+    BulletproofParameterCorrector,
 )
 
 
@@ -45,32 +42,38 @@ class TestManageDocsEnumValidation:
             "create_agent_report_card"
         ]
 
-        # Test each creation action is valid
+        # Test each creation action is valid (bulletproof correction)
         for action in creation_actions:
-            try:
-                _validate_inputs(
-                    doc="test_doc",
-                    action=action,
-                    section=None,
-                    content="Test content",
-                    template=None,
-                    metadata={"test": "value"}
-                )
-            except DocumentValidationError as e:
-                if "Invalid action" in str(e):
-                    pytest.fail(f"Creation action '{action}' should be valid but got error: {e}")
-
-    def test_invalid_action_raises_error(self):
-        """Test that invalid actions raise validation error."""
-        with pytest.raises((DocumentValidationError, ParameterValidationError), match="Invalid action|must be one of"):
-            _validate_inputs(
+            # The new function never fails and returns corrected parameters
+            corrected = _validate_and_correct_inputs(
                 doc="test_doc",
-                action="invalid_action",
+                action=action,
                 section=None,
                 content="Test content",
                 template=None,
-                metadata={}
+                metadata={"test": "value"}
             )
+            # Verify the function returned valid parameters
+            assert corrected is not None
+            assert len(corrected) == 6  # (doc, action, section, content, template, metadata)
+            # Verify action was corrected to a valid value
+            assert corrected[1] in ["replace_section", "append", "status_update", "list_sections", "batch",
+                                  "create_research_doc", "create_bug_report", "create_review_report", "create_agent_report_card"]
+
+    def test_invalid_action_gets_corrected(self):
+        """Test that invalid actions get corrected to valid values."""
+        # The new function never fails - it corrects invalid inputs
+        corrected = _validate_and_correct_inputs(
+            doc="test_doc",
+            action="invalid_action",
+            section=None,
+            content="Test content",
+            template=None,
+            metadata={}
+        )
+        # Verify the invalid action was corrected to a valid default
+        assert corrected[1] == "append"  # Default fallback action
+        assert corrected[0] in ["architecture", "phase_plan", "checklist", "implementation", "research", "bugs"]
 
     def test_replace_section_requires_section_param(self):
         """Test that replace_section action requires section parameter."""

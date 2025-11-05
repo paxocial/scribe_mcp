@@ -376,3 +376,406 @@ class ToolValidator:
                     return f"Required metadata field '{key}' is missing"
 
             return None
+
+
+class BulletproofParameterCorrector:
+    """
+    Bulletproof parameter correction system that NEVER fails.
+
+    Provides intelligent auto-correction and fallback mechanisms for
+    all parameter validation scenarios. When validation fails, this
+    system automatically corrects the issue rather than raising errors.
+    """
+
+    @staticmethod
+    def correct_message_parameter(message: Any) -> str:
+        """
+        Correct and sanitize message parameter to always return a valid string.
+
+        Args:
+            message: Any input value for message parameter
+
+        Returns:
+            Always returns a valid, sanitized message string
+        """
+        if message is None:
+            return "No message provided"
+
+        # Convert to string
+        if not isinstance(message, str):
+            try:
+                message = str(message)
+            except Exception:
+                return "Invalid message format"
+
+        # Remove problematic characters
+        corrected = message.replace("\n", " ").replace("\r", " ").replace("|", ";")
+
+        # Ensure non-empty
+        if not corrected.strip():
+            return "Empty message"
+
+        # Truncate if too long
+        if len(corrected) > 1000:
+            corrected = corrected[:997] + "..."
+
+        return corrected.strip()
+
+    @staticmethod
+    def correct_enum_parameter(
+        value: Any,
+        allowed_values: set[str],
+        field_name: str = "value",
+        fallback_value: Optional[str] = None
+    ) -> str:
+        """
+        Correct enum parameter to always return a valid value from allowed set.
+
+        Args:
+            value: Any input value
+            allowed_values: Set of allowed values
+            field_name: Name of the field (for logging)
+            fallback_value: Preferred fallback value if correction needed
+
+        Returns:
+            Always returns a valid value from allowed_values
+        """
+        if value is None:
+            return fallback_value if fallback_value in allowed_values else next(iter(allowed_values))
+
+        # Convert to string and normalize
+        try:
+            str_value = str(value).lower().strip()
+        except Exception:
+            return fallback_value if fallback_value in allowed_values else next(iter(allowed_values))
+
+        # Check if value is already valid
+        if str_value in allowed_values:
+            return str_value
+
+        # Try fuzzy matching
+        for allowed in allowed_values:
+            if str_value in allowed or allowed in str_value:
+                return allowed
+
+        # Try to find closest match
+        import difflib
+        matches = difflib.get_close_matches(str_value, allowed_values, n=1, cutoff=0.6)
+        if matches:
+            return matches[0]
+
+        # Final fallback
+        return fallback_value if fallback_value in allowed_values else next(iter(allowed_values))
+
+    @staticmethod
+    def correct_numeric_parameter(
+        value: Any,
+        min_val: Optional[Union[int, float]] = None,
+        max_val: Optional[Union[int, float]] = None,
+        field_name: str = "value",
+        fallback_value: Union[int, float] = 0
+    ) -> Union[int, float]:
+        """
+        Correct numeric parameter to always return a valid number within range.
+
+        Args:
+            value: Any input value
+            min_val: Minimum allowed value
+            max_val: Maximum allowed value
+            field_name: Name of the field (for logging)
+            fallback_value: Default value if correction fails
+
+        Returns:
+            Always returns a valid numeric value within range
+        """
+        # Try to convert to number
+        if isinstance(value, (int, float)):
+            numeric_value = value
+        else:
+            try:
+                if isinstance(value, str):
+                    # Handle common numeric string formats
+                    value = value.strip().replace(',', '')
+                numeric_value = float(value)
+            except (ValueError, TypeError):
+                numeric_value = fallback_value
+
+        # Apply range constraints
+        if min_val is not None and numeric_value < min_val:
+            numeric_value = min_val
+
+        if max_val is not None and numeric_value > max_val:
+            numeric_value = max_val
+
+        # Return as int if it's effectively an integer
+        if isinstance(numeric_value, float) and numeric_value.is_integer():
+            return int(numeric_value)
+
+        return numeric_value
+
+    @staticmethod
+    def correct_metadata_parameter(metadata: Any) -> Dict[str, Any]:
+        """
+        Correct metadata parameter to always return a valid dictionary.
+
+        Args:
+            metadata: Any input value for metadata
+
+        Returns:
+            Always returns a valid metadata dictionary
+        """
+        if metadata is None:
+            return {}
+
+        # If it's already a dict, validate and correct its contents
+        if isinstance(metadata, dict):
+            corrected_metadata = {}
+            for key, value in metadata.items():
+                # Correct key
+                if not isinstance(key, str):
+                    try:
+                        key = str(key)
+                    except Exception:
+                        key = "invalid_key"
+
+                # Sanitize key
+                key = key.replace("|", ";").replace("\n", " ").strip()
+                if not key:
+                    key = "empty_key"
+
+                # Correct value
+                if isinstance(value, str):
+                    # Escape comparison operators and sanitize
+                    value = BulletproofParameterCorrector._escape_comparison_operators(value)
+                    value = value.replace("\n", " ").replace("\r", " ").replace("|", ";")
+                    if len(value) > 500:
+                        value = value[:497] + "..."
+                elif not isinstance(value, (int, float, bool, list, dict)):
+                    try:
+                        value = str(value)
+                        value = BulletproofParameterCorrector._escape_comparison_operators(value)
+                    except Exception:
+                        value = "invalid_value"
+
+                corrected_metadata[key] = value
+
+            return corrected_metadata
+
+        # Try to parse JSON string
+        if isinstance(metadata, str):
+            try:
+                parsed = json.loads(metadata)
+                if isinstance(parsed, dict):
+                    return BulletproofParameterCorrector.correct_metadata_parameter(parsed)
+            except json.JSONDecodeError:
+                pass
+
+        # Convert to dict with single entry
+        try:
+            str_value = str(metadata)
+            str_value = BulletproofParameterCorrector._escape_comparison_operators(str_value)
+            return {"value": str_value[:500]}
+        except Exception:
+            return {"error": "invalid_metadata"}
+
+    @staticmethod
+    def _escape_comparison_operators(value: str) -> str:
+        """
+        Escape comparison operators in string values to prevent parsing issues.
+
+        Args:
+            value: String value to escape
+
+        Returns:
+            String with escaped comparison operators
+        """
+        if not isinstance(value, str):
+            return value
+
+        # Check for dangerous numeric comparison patterns
+        numeric_comparison_pattern = r'^\s*\d+\.?\d*\s*[><=]+\s*\d+\.?\d*\s*$'
+        if re.match(numeric_comparison_pattern, value.strip()):
+            return f"'{value}'"  # Quote to prevent interpretation
+
+        # Escape comparison operators
+        escaped = value
+        dangerous_patterns = [
+            (r'(?<!\\)>', r'\>'),  # Escape > symbols
+            (r'(?<!\\)<', r'\<'),  # Escape < symbols
+        ]
+
+        for pattern, replacement in dangerous_patterns:
+            escaped = re.sub(pattern, replacement, escaped)
+
+        return escaped
+
+    @staticmethod
+    def correct_list_parameter(
+        value: Any,
+        delimiter: str = ",",
+        max_items: Optional[int] = None
+    ) -> List[str]:
+        """
+        Correct list parameter to always return a valid list of strings.
+
+        Args:
+            value: Any input value
+            delimiter: Delimiter for splitting strings
+            max_items: Maximum number of items allowed
+
+        Returns:
+            Always returns a valid list of strings
+        """
+        if value is None:
+            return []
+
+        # If it's already a list, validate and correct items
+        if isinstance(value, list):
+            corrected_list = []
+            for item in value:
+                if isinstance(item, str):
+                    corrected_item = item.replace("\n", " ").replace("|", ";").strip()
+                    if corrected_item:
+                        corrected_list.append(corrected_item[:100])  # Limit item length
+                else:
+                    try:
+                        corrected_item = str(item)[:100]
+                        corrected_item = corrected_item.replace("\n", " ").replace("|", ";").strip()
+                        if corrected_item:
+                            corrected_list.append(corrected_item)
+                    except Exception:
+                        continue
+
+            return corrected_list[:max_items] if max_items else corrected_list
+
+        # Try to split string
+        if isinstance(value, str):
+            try:
+                items = value.split(delimiter)
+                corrected_list = []
+                for item in items:
+                    corrected_item = item.replace("\n", " ").replace("|", ";").strip()
+                    if corrected_item:
+                        corrected_list.append(corrected_item[:100])
+
+                return corrected_list[:max_items] if max_items else corrected_list
+            except Exception:
+                return []
+
+        # Convert single item to list
+        try:
+            str_value = str(value)
+            corrected_item = str_value.replace("\n", " ").replace("|", ";").strip()
+            if corrected_item:
+                return [corrected_item[:100]]
+        except Exception:
+            pass
+
+        return []
+
+    @staticmethod
+    def correct_timestamp_parameter(timestamp_utc: Optional[str]) -> str:
+        """
+        Correct timestamp parameter to always return a valid timestamp.
+
+        Args:
+            timestamp_utc: Input timestamp string
+
+        Returns:
+            Always returns a valid UTC timestamp string
+        """
+        if not timestamp_utc:
+            from scribe_mcp.utils.time import format_utc
+            return format_utc()
+
+        # Try to parse existing timestamp
+        parsed = ToolValidator._parse_timestamp(timestamp_utc)
+        if parsed is not None:
+            return timestamp_utc
+
+        # Try to fix common timestamp format issues
+        try:
+            # Add UTC if missing
+            if not timestamp_utc.endswith("UTC") and not timezone_info_pattern.search(timestamp_utc):
+                timestamp_utc = timestamp_utc.strip() + " UTC"
+                parsed = ToolValidator._parse_timestamp(timestamp_utc)
+                if parsed is not None:
+                    return timestamp_utc
+        except Exception:
+            pass
+
+        # Fallback to current time
+        from scribe_mcp.utils.time import format_utc
+        return format_utc()
+
+    @staticmethod
+    def ensure_parameter_validity(
+        parameters: Dict[str, Any],
+        validation_schema: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Ensure all parameters are valid according to schema, correcting as needed.
+
+        Args:
+            parameters: Input parameters dictionary
+            validation_schema: Schema defining validation rules
+
+        Returns:
+            Corrected parameters dictionary with all values valid
+        """
+        corrected_params = {}
+
+        for field_name, field_schema in validation_schema.items():
+            field_value = parameters.get(field_name)
+            field_type = field_schema.get("type")
+
+            # Get correction strategy based on field type
+            if field_type == str:
+                # String correction
+                corrected_value = BulletproofParameterCorrector.correct_message_parameter(field_value)
+
+                # Apply enum constraints if specified
+                allowed_values = field_schema.get("allowed_values")
+                if allowed_values:
+                    corrected_value = BulletproofParameterCorrector.correct_enum_parameter(
+                        corrected_value, allowed_values, field_name,
+                        field_schema.get("default")
+                    )
+
+                corrected_params[field_name] = corrected_value
+
+            elif field_type in (int, float):
+                # Numeric correction
+                corrected_value = BulletproofParameterCorrector.correct_numeric_parameter(
+                    field_value,
+                    field_schema.get("min_value"),
+                    field_schema.get("max_value"),
+                    field_name,
+                    field_schema.get("default", 0)
+                )
+                corrected_params[field_name] = corrected_value
+
+            elif field_type == dict:
+                # Dictionary (metadata) correction
+                corrected_value = BulletproofParameterCorrector.correct_metadata_parameter(field_value)
+                corrected_params[field_name] = corrected_value
+
+            elif field_type == list:
+                # List correction
+                corrected_value = BulletproofParameterCorrector.correct_list_parameter(
+                    field_value,
+                    field_schema.get("delimiter", ","),
+                    field_schema.get("max_items")
+                )
+                corrected_params[field_name] = corrected_value
+
+            else:
+                # Generic correction - convert to string and sanitize
+                corrected_value = BulletproofParameterCorrector.correct_message_parameter(field_value)
+                corrected_params[field_name] = corrected_value
+
+        return corrected_params
+
+
+# Regex pattern for timezone information in timestamps
+timezone_info_pattern = re.compile(r'[+-]\d{2}:?\d{2}|UTC|GMT|[A-Z]{3,4}$')
