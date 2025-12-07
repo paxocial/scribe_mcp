@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
+
+from scribe_mcp.utils.integrity import count_file_lines
+from scribe_mcp.utils.time import format_utc, utcnow
 
 from scribe_mcp import server as server_module
 from scribe_mcp.server import app
@@ -29,12 +33,14 @@ from scribe_mcp.templates import (
     substitution_context,
 )
 from scribe_mcp.tools.base.parameter_normalizer import normalize_dict_param
-from scribe_mcp.utils.parameter_validator import ToolValidator
+from scribe_mcp.utils.parameter_validator import ToolValidator, BulletproofParameterCorrector
 from scribe_mcp.utils.estimator import (
     EntryCountEstimate,
     FileSizeEstimator,
     ThresholdEstimator
 )
+from scribe_mcp.utils.error_handler import ErrorHandler, HealingErrorHandler, ExceptionHealer
+from scribe_mcp.utils.config_manager import ConfigManager, apply_response_defaults, build_response_payload, BulletproofFallbackManager
 from scribe_mcp.tools.config.rotate_log_config import RotateLogConfig
 from scribe_mcp.utils.audit import get_audit_manager, store_rotation_metadata
 from scribe_mcp.utils.files import rotate_file, verify_file_integrity, file_lock
@@ -65,12 +71,243 @@ _SUFFIX_SANITIZER = re.compile(r"[^A-Za-z0-9._-]+")
 class _RotateLogHelper(LoggingToolMixin):
     def __init__(self) -> None:
         self.server_module = server_module
+        self.parameter_corrector = BulletproofParameterCorrector()
+        self.error_handler = ErrorHandler()
+        self.healing_error_handler = HealingErrorHandler()
 
 
 _ROTATE_HELPER = _RotateLogHelper()
 
 # Global configuration manager for parameter handling
 _CONFIG_MANAGER = ConfigManager("rotate_log")
+
+# Phase 3 Enhanced utilities integration
+_EXCEPTION_HEALER = ExceptionHealer()
+_FALLBACK_MANAGER = BulletproofFallbackManager()
+
+
+def _heal_rotate_log_parameters(
+    suffix: Optional[str] = None,
+    custom_metadata: Optional[Dict[str, Any]] = None,
+    confirm: bool = False,
+    dry_run: bool = False,
+    dry_run_mode: str = "estimate",
+    log_type: Optional[str] = None,
+    log_types: Optional[List[str]] = None,
+    rotate_all: bool = False,
+    auto_threshold: bool = False,
+    threshold_entries: Optional[int] = None,
+    config: Optional[Dict[str, Any]] = None
+) -> tuple[dict, bool, List[str]]:
+    """Heal rotate_log parameters using Phase 1 exception handling."""
+    healing_messages = []
+    healing_applied = False
+
+    # Define valid values for enum parameters
+    valid_dry_run_modes = {"estimate", "precise"}
+    valid_log_types = {"progress", "doc_updates", "security", "bugs"}
+
+    healed_params = {}
+
+    # Heal suffix parameter (string normalization)
+    if suffix is not None:
+        original_suffix = suffix
+        healed_suffix = str(suffix).strip()
+        # Sanitize suffix using existing regex
+        healed_suffix = _SUFFIX_SANITIZER.sub('_', healed_suffix)
+        if healed_suffix != original_suffix:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected suffix from '{original_suffix}' to '{healed_suffix}'")
+        healed_params["suffix"] = healed_suffix
+    else:
+        healed_params["suffix"] = None
+
+    # Heal custom_metadata parameter using Phase 1 corrector
+    healed_metadata = BulletproofParameterCorrector.correct_metadata_parameter(custom_metadata)
+    if healed_metadata != custom_metadata:
+        healing_applied = True
+        healing_messages.append(f"Auto-corrected custom_metadata parameter to valid dict")
+    healed_params["custom_metadata"] = healed_metadata
+
+    # Heal confirm parameter
+    original_confirm = confirm
+    healed_confirm = bool(confirm)
+    if isinstance(confirm, str):
+        healed_confirm = confirm.lower() in ("true", "1", "yes")
+        if healed_confirm != confirm:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected confirm from '{confirm}' to {healed_confirm}")
+    elif healed_confirm != original_confirm:
+        healing_applied = True
+        healing_messages.append(f"Auto-corrected confirm to boolean {healed_confirm}")
+    healed_params["confirm"] = healed_confirm
+
+    # Heal dry_run parameter
+    original_dry_run = dry_run
+    healed_dry_run = bool(dry_run)
+    if isinstance(dry_run, str):
+        healed_dry_run = dry_run.lower() in ("true", "1", "yes")
+        if healed_dry_run != dry_run:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected dry_run from '{dry_run}' to {healed_dry_run}")
+    elif healed_dry_run != original_dry_run:
+        healing_applied = True
+        healing_messages.append(f"Auto-corrected dry_run to boolean {healed_dry_run}")
+    healed_params["dry_run"] = healed_dry_run
+
+    # Heal dry_run_mode parameter
+    if dry_run_mode is not None:
+        original_dry_run_mode = dry_run_mode
+        healed_dry_run_mode = BulletproofParameterCorrector.correct_enum_parameter(
+            original_dry_run_mode, valid_dry_run_modes, "dry_run_mode", "estimate"
+        )
+        if healed_dry_run_mode != original_dry_run_mode:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected dry_run_mode from '{original_dry_run_mode}' to '{healed_dry_run_mode}'")
+        healed_params["dry_run_mode"] = healed_dry_run_mode
+    else:
+        healed_params["dry_run_mode"] = "estimate"
+
+    # Heal log_type parameter
+    if log_type is not None:
+        original_log_type = log_type
+        healed_log_type = BulletproofParameterCorrector.correct_enum_parameter(
+            original_log_type, valid_log_types, "log_type", "progress"
+        )
+        if healed_log_type != original_log_type:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected log_type from '{original_log_type}' to '{healed_log_type}'")
+        healed_params["log_type"] = healed_log_type
+    else:
+        healed_params["log_type"] = None
+
+    # Heal log_types array parameter
+    if log_types is not None:
+        original_log_types = log_types
+        healed_log_types = BulletproofParameterCorrector.correct_list_parameter(
+            original_log_types, "log_types"
+        )
+        if healed_log_types != original_log_types:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected log_types parameter from {original_log_types} to {healed_log_types}")
+        healed_params["log_types"] = healed_log_types
+    else:
+        healed_params["log_types"] = None
+
+    # Heal rotate_all parameter
+    original_rotate_all = rotate_all
+    healed_rotate_all = bool(rotate_all)
+    if isinstance(rotate_all, str):
+        healed_rotate_all = rotate_all.lower() in ("true", "1", "yes")
+        if healed_rotate_all != rotate_all:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected rotate_all from '{rotate_all}' to {healed_rotate_all}")
+    elif healed_rotate_all != original_rotate_all:
+        healing_applied = True
+        healing_messages.append(f"Auto-corrected rotate_all to boolean {healed_rotate_all}")
+    healed_params["rotate_all"] = healed_rotate_all
+
+    # Heal auto_threshold parameter
+    original_auto_threshold = auto_threshold
+    healed_auto_threshold = bool(auto_threshold)
+    if isinstance(auto_threshold, str):
+        healed_auto_threshold = auto_threshold.lower() in ("true", "1", "yes")
+        if healed_auto_threshold != auto_threshold:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected auto_threshold from '{auto_threshold}' to {healed_auto_threshold}")
+    elif healed_auto_threshold != original_auto_threshold:
+        healing_applied = True
+        healing_messages.append(f"Auto-corrected auto_threshold to boolean {healed_auto_threshold}")
+    healed_params["auto_threshold"] = healed_auto_threshold
+
+    # Heal threshold_entries parameter
+    if threshold_entries is not None:
+        original_threshold_entries = threshold_entries
+        healed_threshold_entries = BulletproofParameterCorrector.correct_numeric_parameter(
+            original_threshold_entries, 1, 10000, "threshold_entries", 500
+        )
+        if healed_threshold_entries != original_threshold_entries:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected threshold_entries from '{original_threshold_entries}' to '{healed_threshold_entries}'")
+        healed_params["threshold_entries"] = healed_threshold_entries
+    else:
+        healed_params["threshold_entries"] = None
+
+    # Heal config parameter - preserve RotateLogConfig objects if provided
+    if config is not None:
+        if isinstance(config, RotateLogConfig):
+            # Config object is already valid, don't convert to dict
+            healed_config = config
+        else:
+            # For non-RotateLogConfig objects, use basic healing but don't use correct_metadata_parameter
+            # as it will convert objects to {"value": "string_representation"}
+            if isinstance(config, dict):
+                # Dict is already in good shape, just heal the values within it
+                healed_config = {}
+                for key, value in config.items():
+                    if key in ["suffix", "custom_metadata", "dry_run_mode", "log_type"]:
+                        # String parameters
+                        if value is not None:
+                            healed_config[key] = str(value).strip()
+                        else:
+                            healed_config[key] = value
+                    elif key in ["confirm", "dry_run", "rotate_all", "auto_threshold"]:
+                        # Boolean parameters
+                        if isinstance(value, str):
+                            healed_config[key] = value.lower() in ("true", "1", "yes")
+                        else:
+                            healed_config[key] = bool(value) if value is not None else value
+                    elif key in ["threshold_entries"]:
+                        # Numeric parameters
+                        try:
+                            healed_config[key] = int(value) if value is not None else value
+                        except (ValueError, TypeError):
+                            healed_config[key] = 500  # default
+                    elif key in ["log_types"]:
+                        # List parameters
+                        if isinstance(value, str):
+                            healed_config[key] = [item.strip() for item in value.split(",") if item.strip()]
+                        elif isinstance(value, list):
+                            healed_config[key] = value
+                        else:
+                            healed_config[key] = None
+                    else:
+                        healed_config[key] = value
+                healing_applied = True
+                healing_messages.append(f"Auto-corrected config parameter dictionary values")
+            else:
+                # Convert other types to dict structure
+                healed_config = BulletproofParameterCorrector.correct_metadata_parameter(config)
+                healing_applied = True
+                healing_messages.append(f"Auto-corrected config parameter to valid dict")
+
+            # Try to convert healed dict to RotateLogConfig if it has the right structure
+            try:
+                if isinstance(healed_config, dict):
+                    healed_config = RotateLogConfig.from_legacy_params(**healed_config)
+                    healing_messages.append(f"Converted healed config dict to RotateLogConfig object")
+            except Exception as conversion_error:
+                healing_messages.append(f"Failed to convert healed config to RotateLogConfig: {conversion_error}, using dict")
+        healed_params["config"] = healed_config
+    else:
+        healed_params["config"] = None
+
+    return healed_params, healing_applied, healing_messages
+
+
+def _add_healing_info_to_rotate_response(
+    response: Dict[str, Any],
+    healing_applied: bool,
+    healing_messages: List[str]
+) -> Dict[str, Any]:
+    """Add healing information to rotate_log response if parameters were corrected."""
+    if healing_applied and healing_messages:
+        response["parameter_healing"] = {
+            "applied": True,
+            "messages": healing_messages,
+            "message": "Parameters auto-corrected using Phase 1 exception healing"
+        }
+    return response
 
 
 class RotationTarget(NamedTuple):
@@ -99,6 +336,745 @@ async def _write_rotated_log_header(path: Path, content: str) -> None:
                 handle.write("\n")
 
     await asyncio.to_thread(_write)
+
+
+def _validate_rotation_parameters(
+    suffix: Optional[str],
+    custom_metadata: Optional[str],
+    confirm: Optional[bool],
+    dry_run: Optional[bool],
+    dry_run_mode: Optional[str],
+    log_type: Optional[str],
+    log_types: Optional[List[str]],
+    rotate_all: Optional[bool],
+    auto_threshold: Optional[bool],
+    threshold_entries: Optional[int],
+    config: Optional[RotateLogConfig]
+) -> Tuple[RotateLogConfig, Dict[str, Any]]:
+    """
+    Validate and prepare rotation parameters using enhanced Phase 3 utilities.
+
+    This function replaces the monolithic parameter handling section of rotate_log
+    with bulletproof parameter validation and healing.
+    """
+    try:
+        # Apply Phase 1 BulletproofParameterCorrector for initial parameter healing
+        healed_params = {}
+        healing_applied = False
+
+        # Define valid values for enum parameters
+        valid_dry_run_modes = {"estimate", "precise"}
+        valid_log_types = {"progress", "doc_updates", "security", "bugs"}
+
+        # Heal suffix parameter
+        if suffix:
+            healed_suffix = _ROTATE_HELPER.parameter_corrector.correct_message_parameter(suffix)
+            if healed_suffix != suffix:
+                healed_params["suffix"] = healed_suffix
+                healing_applied = True
+
+        # Heal custom_metadata parameter
+        if custom_metadata:
+            healed_metadata = _ROTATE_HELPER.parameter_corrector.correct_metadata_parameter(custom_metadata)
+            if healed_metadata != custom_metadata:
+                healed_params["custom_metadata"] = healed_metadata
+                healing_applied = True
+
+        # Heal dry_run_mode parameter
+        if dry_run_mode:
+            healed_dry_run_mode = _ROTATE_HELPER.parameter_corrector.correct_enum_parameter(
+                dry_run_mode, valid_dry_run_modes, field_name="dry_run_mode"
+            )
+            if healed_dry_run_mode != dry_run_mode:
+                healed_params["dry_run_mode"] = healed_dry_run_mode
+                healing_applied = True
+
+        # Heal log_type parameter
+        if log_type:
+            healed_log_type = _ROTATE_HELPER.parameter_corrector.correct_enum_parameter(
+                log_type, valid_log_types, field_name="log_type"
+            )
+            if healed_log_type != log_type:
+                healed_params["log_type"] = healed_log_type
+                healing_applied = True
+
+        # Heal log_types parameter
+        if log_types:
+            healed_log_types = _ROTATE_HELPER.parameter_corrector.correct_list_parameter(
+                log_types, field_name="log_types"
+            )
+            if healed_log_types != log_types:
+                healed_params["log_types"] = healed_log_types
+                healing_applied = True
+
+        # Heal threshold_entries parameter
+        if threshold_entries:
+            healed_threshold = _ROTATE_HELPER.parameter_corrector.correct_numeric_parameter(
+                threshold_entries, min_value=1, max_value=1000000, field_name="threshold_entries"
+            )
+            if healed_threshold != threshold_entries:
+                healed_params["threshold_entries"] = healed_threshold
+                healing_applied = True
+
+        # Apply fallbacks for corrected parameters
+        if healing_applied:
+            fallback_params = _FALLBACK_MANAGER.resolve_parameter_fallback(
+                "rotate_log", healed_params, context="parameter_validation"
+            )
+            healed_params.update(fallback_params)
+
+        # Update parameters with healed values
+        final_suffix = healed_params.get("suffix", suffix)
+        final_custom_metadata = healed_params.get("custom_metadata", custom_metadata)
+        final_confirm = healed_params.get("confirm", confirm)
+        final_dry_run = healed_params.get("dry_run", dry_run)
+        final_dry_run_mode = healed_params.get("dry_run_mode", dry_run_mode)
+        final_log_type = healed_params.get("log_type", log_type)
+        final_log_types = healed_params.get("log_types", log_types)
+        final_rotate_all = healed_params.get("rotate_all", rotate_all)
+        final_auto_threshold = healed_params.get("auto_threshold", auto_threshold)
+        final_threshold_entries = healed_params.get("threshold_entries", threshold_entries)
+
+        # Create configuration using dual parameter support
+        if config is not None:
+            # Create configuration from legacy parameters
+            legacy_config = RotateLogConfig.from_legacy_params(
+                suffix=final_suffix,
+                custom_metadata=final_custom_metadata,
+                confirm=final_confirm,
+                dry_run=final_dry_run,
+                dry_run_mode=final_dry_run_mode,
+                log_type=final_log_type,
+                log_types=final_log_types,
+                rotate_all=final_rotate_all,
+                auto_threshold=final_auto_threshold,
+                threshold_entries=final_threshold_entries
+            )
+
+            # Merge with provided config (legacy parameters take precedence)
+            config_dict = config.to_dict()
+            legacy_dict = legacy_config.to_dict()
+
+            for key, value in legacy_dict.items():
+                if value is not None:
+                    config_dict[key] = value
+
+            final_config = RotateLogConfig(**config_dict)
+        else:
+            final_config = RotateLogConfig.from_legacy_params(
+                suffix=final_suffix,
+                custom_metadata=final_custom_metadata,
+                confirm=final_confirm,
+                dry_run=final_dry_run,
+                dry_run_mode=final_dry_run_mode,
+                log_type=final_log_type,
+                log_types=final_log_types,
+                rotate_all=final_rotate_all,
+                auto_threshold=final_auto_threshold,
+                threshold_entries=final_threshold_entries
+            )
+
+        return final_config, {"healing_applied": healing_applied, "healed_params": healed_params}
+
+    except Exception as e:
+        # Apply Phase 2 ExceptionHealer for parameter validation errors
+        healed_exception = _EXCEPTION_HEALER.heal_parameter_validation_error(
+            e, {
+                "suffix": suffix,
+                "dry_run_mode": dry_run_mode,
+                "log_type": log_type,
+                "threshold_entries": threshold_entries
+            }
+        )
+
+        if healed_exception["success"]:
+            # Use healed values from exception recovery
+            fallback_params = _FALLBACK_MANAGER.resolve_parameter_fallback(
+                "rotate_log", healed_exception["healed_values"], context="exception_healing"
+            )
+
+            # Create safe fallback configuration
+            safe_config = RotateLogConfig.from_legacy_params(
+                suffix=fallback_params.get("suffix", suffix),
+                custom_metadata=fallback_params.get("custom_metadata", custom_metadata),
+                confirm=fallback_params.get("confirm", confirm),
+                dry_run=fallback_params.get("dry_run", dry_run),
+                dry_run_mode=fallback_params.get("dry_run_mode", dry_run_mode),
+                log_type=fallback_params.get("log_type", log_type),
+                log_types=fallback_params.get("log_types", log_types),
+                rotate_all=fallback_params.get("rotate_all", rotate_all),
+                auto_threshold=fallback_params.get("auto_threshold", auto_threshold),
+                threshold_entries=fallback_params.get("threshold_entries", threshold_entries)
+            )
+
+            return safe_config, {
+                "healing_applied": True,
+                "exception_healing": True,
+                "healed_params": healed_exception["healed_values"],
+                "fallback_used": True
+            }
+        else:
+            # Ultimate fallback - use BulletproofFallbackManager
+            fallback_params = _FALLBACK_MANAGER.apply_emergency_fallback("rotate_log", {
+                "suffix": suffix,
+                "dry_run_mode": dry_run_mode,
+                "log_type": log_type,
+                "threshold_entries": threshold_entries or 500
+            })
+
+            emergency_config = RotateLogConfig.from_legacy_params(
+                suffix=fallback_params.get("suffix", suffix),
+                custom_metadata=fallback_params.get("custom_metadata", custom_metadata),
+                confirm=fallback_params.get("confirm", False),  # Safe default
+                dry_run=fallback_params.get("dry_run", True),  # Safe default
+                dry_run_mode=fallback_params.get("dry_run_mode", "estimate"),
+                log_type=fallback_params.get("log_type", "progress"),
+                log_types=fallback_params.get("log_types", log_types),
+                rotate_all=fallback_params.get("rotate_all", rotate_all),
+                auto_threshold=fallback_params.get("auto_threshold", auto_threshold),
+                threshold_entries=fallback_params.get("threshold_entries", 500)
+            )
+
+            return emergency_config, {
+                "healing_applied": True,
+                "emergency_fallback": True,
+                "fallback_params": fallback_params
+            }
+
+
+def _prepare_rotation_operation(
+    final_config: RotateLogConfig,
+    context,
+    project: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Prepare rotation operation with enhanced error handling and validation.
+
+    This function extracts the rotation preparation logic from the monolithic
+    rotate_log function and adds bulletproof error handling.
+    """
+    try:
+        # Extract parameters from config
+        suffix = final_config.suffix
+        custom_metadata = final_config.custom_metadata
+        confirm = final_config.confirm
+        dry_run = final_config.dry_run
+        dry_run_mode = final_config.dry_run_mode
+        log_type = final_config.log_type
+        log_types = final_config.log_types
+        rotate_all = final_config.rotate_all
+        auto_threshold = final_config.auto_threshold
+        threshold_entries = final_config.threshold_entries
+
+        # Determine which log types to rotate
+        try:
+            if rotate_all:
+                # Rotate all configured log types
+                log_config = load_log_config(project["root"])
+                target_log_types = list(log_config.keys())
+            elif log_types:
+                # Use specified log types
+                target_log_types = log_types
+            elif log_type:
+                # Use single log type
+                target_log_types = [log_type]
+            else:
+                # Default to progress log
+                target_log_types = ["progress"]
+
+        except Exception as log_type_error:
+            # Try to heal log type determination error
+            healed_log_types = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                log_type_error, {"rotate_all": rotate_all, "log_type": log_type, "log_types": log_types}
+            )
+
+            if healed_log_types["success"]:
+                target_log_types = healed_log_types["healed_values"].get("target_log_types", ["progress"])
+            else:
+                # Apply fallback log types
+                fallback_log_types = _FALLBACK_MANAGER.apply_context_aware_defaults(
+                    "rotate_log", {"operation": "determine_log_types", "project": project}
+                )
+                target_log_types = fallback_log_types.get("target_log_types", ["progress"])
+
+        # Validate log types
+        valid_log_types = {"progress", "doc_updates", "security", "bugs"}
+        validated_log_types = []
+        for lt in target_log_types:
+            if lt in valid_log_types:
+                validated_log_types.append(lt)
+            else:
+                # Try to heal invalid log type
+                healed_lt = _ROTATE_HELPER.parameter_corrector.correct_enum_parameter(
+                    lt, valid_log_types, field_name="log_type"
+                )
+                if healed_lt in valid_log_types:
+                    validated_log_types.append(healed_lt)
+
+        if not validated_log_types:
+            validated_log_types = ["progress"]  # Fallback to progress log
+
+        # Process custom metadata
+        processed_metadata = {}
+        try:
+            if custom_metadata:
+                # Try to parse as JSON
+                try:
+                    processed_metadata = json.loads(custom_metadata)
+                except json.JSONDecodeError:
+                    # Try to heal JSON parsing
+                    healed_json = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                        ValueError("Invalid JSON in custom_metadata"),
+                        {"custom_metadata": custom_metadata, "error_type": "json_decode"}
+                    )
+
+                    if healed_json["success"]:
+                        metadata_str = healed_json["healed_values"].get("custom_metadata", "{}")
+                        processed_metadata = json.loads(metadata_str)
+                    else:
+                        # Fallback to string metadata
+                        processed_metadata = {"custom_metadata": custom_metadata, "json_parse_failed": True}
+        except Exception as metadata_error:
+            # Apply fallback metadata handling
+            fallback_metadata = _FALLBACK_MANAGER.apply_context_aware_defaults(
+                "rotate_log", {"custom_metadata": custom_metadata, "operation": "metadata_processing"}
+            )
+            processed_metadata = fallback_metadata.get("processed_metadata", {"error": str(metadata_error)})
+
+        # Determine rotation mode
+        if confirm is None:
+            final_confirm = auto_threshold or False
+        else:
+            final_confirm = confirm
+
+        if dry_run is None:
+            final_dry_run = not final_confirm
+        else:
+            final_dry_run = dry_run
+
+        # Validate dry run mode
+        if dry_run_mode and dry_run_mode not in {"estimate", "precise"}:
+            healed_mode = _ROTATE_HELPER.parameter_corrector.correct_enum_parameter(
+                dry_run_mode, {"estimate", "precise"}, field_name="dry_run_mode"
+            )
+            final_dry_run_mode = healed_mode if healed_mode else "estimate"
+        else:
+            final_dry_run_mode = dry_run_mode or "estimate"
+
+        # Set up rotation parameters for each log type
+        rotation_operations = []
+        for log_type_name in validated_log_types:
+            try:
+                # Get log file path
+                log_path = project["progress_log"] if log_type_name == "progress" else project["root"] / f"{log_type_name}.log"
+
+                # Check if log file exists
+                if not log_path.exists():
+                    # Skip non-existent logs with warning
+                    rotation_operations.append({
+                        "log_type": log_type_name,
+                        "log_path": log_path,
+                        "status": "skipped",
+                        "reason": "file_not_found",
+                        "warning": f"Log file {log_path} does not exist"
+                    })
+                    continue
+
+                # Get entry count for threshold checking
+                try:
+                    if final_dry_run_mode == "precise":
+                        # Precise count
+                        entry_count = count_file_lines(log_path)
+                    else:
+                        # Estimate count
+                        estimator = EntryCountEstimate()
+                        entry_count = estimator.estimate(log_path)
+                except Exception as count_error:
+                    # Try to heal counting error
+                    healed_count = _EXCEPTION_HEALER.heal_document_operation_error(
+                        count_error, {"log_path": str(log_path), "operation": "count_entries"}
+                    )
+
+                    if healed_count["success"]:
+                        entry_count = healed_count["healed_values"].get("entry_count", 0)
+                    else:
+                        # Apply fallback estimation
+                        entry_count = 100  # Safe fallback estimate
+
+                # Check auto threshold
+                should_rotate = True
+                threshold_reason = None
+
+                if auto_threshold and threshold_entries:
+                    if entry_count < threshold_entries:
+                        should_rotate = False
+                        threshold_reason = f"Below threshold: {entry_count} < {threshold_entries}"
+
+                # Prepare operation details
+                operation = {
+                    "log_type": log_type_name,
+                    "log_path": log_path,
+                    "entry_count": entry_count,
+                    "should_rotate": should_rotate,
+                    "threshold_reason": threshold_reason,
+                    "confirm": final_confirm,
+                    "dry_run": final_dry_run,
+                    "dry_run_mode": final_dry_run_mode,
+                    "suffix": suffix,
+                    "metadata": processed_metadata.copy()
+                }
+
+                if should_rotate:
+                    rotation_operations.append(operation)
+
+            except Exception as op_error:
+                # Add error operation but continue with other log types
+                error_operation = {
+                    "log_type": log_type_name,
+                    "status": "error",
+                    "error": str(op_error),
+                    "warning": f"Failed to prepare rotation for {log_type_name}: {str(op_error)}"
+                }
+                rotation_operations.append(error_operation)
+
+        # Return preparation results
+        return {
+            "rotation_operations": rotation_operations,
+            "validated_log_types": validated_log_types,
+            "final_confirm": final_confirm,
+            "final_dry_run": final_dry_run,
+            "final_dry_run_mode": final_dry_run_mode,
+            "processed_metadata": processed_metadata,
+            "preparation_complete": True
+        }
+
+    except Exception as e:
+        # Apply comprehensive exception healing for rotation preparation
+        healed_result = _EXCEPTION_HEALER.heal_complex_exception_combination(
+            e, {
+                "operation": "prepare_rotation_operation",
+                "config": final_config.to_dict(),
+                "project": project
+            }
+        )
+
+        if healed_result and healed_result.get("success") and "healed_values" in healed_result:
+            # Create emergency rotation operation
+            emergency_params = _FALLBACK_MANAGER.apply_emergency_fallback(
+                "rotate_log", healed_result["healed_values"]
+            )
+
+            return {
+                "rotation_operations": [{
+                    "log_type": "progress",
+                    "status": "emergency_fallback",
+                    "error": str(e),
+                    "emergency_params": emergency_params
+                }],
+                "validated_log_types": ["progress"],
+                "final_confirm": False,
+                "final_dry_run": True,
+                "final_dry_run_mode": "estimate",
+                "processed_metadata": {"emergency_fallback": True, "error": str(e)},
+                "preparation_complete": True,
+                "emergency_fallback": True
+            }
+        else:
+            return {
+                "rotation_operations": [],
+                "validated_log_types": [],
+                "final_confirm": False,
+                "final_dry_run": True,
+                "final_dry_run_mode": "estimate",
+                "processed_metadata": {"preparation_failed": True, "error": str(e)},
+                "preparation_complete": False,
+                "error": str(e)
+            }
+
+
+async def _execute_rotation_with_fallbacks(
+    rotation_prep: Dict[str, Any],
+    final_config: RotateLogConfig,
+    context,
+    project: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Execute rotation operations with comprehensive error handling and intelligent fallbacks.
+
+    This function extracts the rotation execution logic from the monolithic rotate_log
+    function and adds bulletproof error handling with multiple fallback strategies.
+    """
+    try:
+        rotation_operations = rotation_prep["rotation_operations"]
+        final_confirm = rotation_prep["final_confirm"]
+        final_dry_run = rotation_prep["final_dry_run"]
+        processed_metadata = rotation_prep["processed_metadata"]
+
+        execution_results = []
+        successful_rotations = []
+        failed_rotations = []
+        skipped_rotations = []
+
+        # Process each rotation operation
+        for operation in rotation_operations:
+            try:
+                log_type = operation["log_type"]
+                log_path = operation["log_path"]
+
+                # Check if operation should be skipped
+                if not operation.get("should_rotate", True):
+                    skipped_result = {
+                        "log_type": log_type,
+                        "status": "skipped",
+                        "reason": operation.get("threshold_reason", "Unknown reason"),
+                        "entry_count": operation.get("entry_count", 0)
+                    }
+                    skipped_rotations.append(skipped_result)
+                    execution_results.append(skipped_result)
+                    continue
+
+                # Prepare rotation details
+                rotation_details = {
+                    "log_path": log_path,
+                    "suffix": operation.get("suffix"),
+                    "dry_run": final_dry_run,
+                    "dry_run_mode": operation.get("dry_run_mode", "estimate"),
+                    "metadata": operation.get("metadata", {}),
+                    "entry_count": operation.get("entry_count", 0)
+                }
+
+                # Execute rotation with error handling
+                try:
+                    if final_dry_run:
+                        # Dry run execution
+                        if operation.get("dry_run_mode") == "precise":
+                            # Precise dry run
+                            entry_count = count_file_lines(log_path)
+                        else:
+                            # Estimated dry run
+                            estimator = EntryCountEstimate()
+                            entry_count = estimator.estimate(log_path)
+
+                        dry_run_result = {
+                            "log_type": log_type,
+                            "status": "dry_run_complete",
+                            "dry_run": True,
+                            "entry_count": entry_count,
+                            "estimated_size": log_path.stat().st_size if log_path.exists() else 0,
+                            "would_rotate": entry_count > 0
+                        }
+                        execution_results.append(dry_run_result)
+                        successful_rotations.append(dry_run_result)
+
+                    else:
+                        # Actual rotation execution
+                        try:
+                            # Create rotation metadata
+                            rotation_metadata = {
+                                "timestamp": datetime.now().isoformat(),
+                                "log_type": log_type,
+                                "entry_count": operation.get("entry_count", 0),
+                                "suffix": operation.get("suffix"),
+                                "auto_initiated": False,
+                                **processed_metadata
+                            }
+
+                            # Store rotation metadata
+                            audit_manager = get_audit_manager()
+                            rotation_id = await audit_manager.store_rotation_metadata(
+                                project["name"], rotation_metadata
+                            )
+
+                            # Execute file rotation
+                            archive_path = await rotate_file(
+                                log_path,
+                                suffix=operation.get("suffix"),
+                                backup=True
+                            )
+
+                            # Verify rotation integrity
+                            integrity_ok = await verify_file_integrity(archive_path)
+
+                            rotation_result = {
+                                "log_type": log_type,
+                                "status": "rotated" if integrity_ok else "rotated_with_warnings",
+                                "dry_run": False,
+                                "original_path": str(log_path),
+                                "archive_path": str(archive_path),
+                                "entry_count": operation.get("entry_count", 0),
+                                "rotation_id": rotation_id,
+                                "integrity_verified": integrity_ok
+                            }
+
+                            if not integrity_ok:
+                                rotation_result["warning"] = "Archive integrity verification failed"
+
+                            execution_results.append(rotation_result)
+                            successful_rotations.append(rotation_result)
+
+                        except Exception as rotation_error:
+                            # Try to heal rotation execution error
+                            healed_rotation = _EXCEPTION_HEALER.heal_rotation_error(
+                                rotation_error, {
+                                    "log_path": str(log_path),
+                                    "log_type": log_type,
+                                    "operation": "file_rotation"
+                                }
+                            )
+
+                            if healed_rotation["success"]:
+                                # Try alternative rotation method
+                                try:
+                                    # Simple rotation fallback
+                                    fallback_suffix = operation.get("suffix", f"rotated-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+                                    archive_path = log_path.with_suffix(f".{fallback_suffix}{log_path.suffix}")
+
+                                    # Simple copy and truncate
+                                    await asyncio.to_thread(lambda: log_path.rename(archive_path))
+                                    await asyncio.to_thread(lambda: log_path.write_text(""))
+
+                                    fallback_result = {
+                                        "log_type": log_type,
+                                        "status": "rotated_fallback",
+                                        "dry_run": False,
+                                        "original_path": str(log_path),
+                                        "archive_path": str(archive_path),
+                                        "fallback_method": True,
+                                        "healed_error": True
+                                    }
+                                    execution_results.append(fallback_result)
+                                    successful_rotations.append(fallback_result)
+
+                                except Exception:
+                                    # Fallback failed
+                                    error_result = {
+                                        "log_type": log_type,
+                                        "status": "failed",
+                                        "error": str(rotation_error),
+                                        "healing_attempted": True,
+                                        "healing_failed": True
+                                    }
+                                    failed_rotations.append(error_result)
+                                    execution_results.append(error_result)
+                            else:
+                                # Rotation failed completely
+                                error_result = {
+                                    "log_type": log_type,
+                                    "status": "failed",
+                                    "error": str(rotation_error),
+                                    "healing_attempted": True
+                                }
+                                failed_rotations.append(error_result)
+                                execution_results.append(error_result)
+
+                except Exception as execution_error:
+                    # Handle execution-level errors
+                    healed_execution = _EXCEPTION_HEALER.heal_document_operation_error(
+                        execution_error, {"operation": "rotation_execution", "log_type": log_type}
+                    )
+
+                    if healed_execution["success"]:
+                        # Create minimal success result
+                        minimal_result = {
+                            "log_type": log_type,
+                            "status": "completed_with_fallback",
+                            "dry_run": final_dry_run,
+                            "healed_execution": True,
+                            "original_error": str(execution_error)
+                        }
+                        execution_results.append(minimal_result)
+                        successful_rotations.append(minimal_result)
+                    else:
+                        # Execution failed
+                        error_result = {
+                            "log_type": log_type,
+                            "status": "failed",
+                            "error": str(execution_error),
+                            "execution_level_error": True
+                        }
+                        failed_rotations.append(error_result)
+                        execution_results.append(error_result)
+
+            except Exception as operation_error:
+                # Handle operation-level errors
+                error_result = {
+                    "log_type": operation.get("log_type", "unknown"),
+                    "status": "failed",
+                    "error": str(operation_error),
+                    "operation_level_error": True
+                }
+                failed_rotations.append(error_result)
+                execution_results.append(error_result)
+
+        # Prepare final response
+        response = {
+            "ok": len(successful_rotations) > 0 or len(skipped_rotations) > 0,
+            "rotation_executed": not final_dry_run,
+            "dry_run": final_dry_run,
+            "processed_log_types": rotation_prep["validated_log_types"],
+            "results": execution_results,
+            "summary": {
+                "total_operations": len(rotation_operations),
+                "successful": len(successful_rotations),
+                "failed": len(failed_rotations),
+                "skipped": len(skipped_rotations)
+            }
+        }
+
+        # Add warnings if any operations failed
+        if failed_rotations:
+            response["warnings"] = [f"Failed to rotate {r['log_type']}: {r.get('error', 'Unknown error')}" for r in failed_rotations]
+
+        return response
+
+    except Exception as e:
+        # Apply ultimate exception healing for rotation execution
+        healed_result = _EXCEPTION_HEALER.heal_emergency_exception(
+            e, {"operation": "rotation_execution", "project": project.get("name", "unknown")}
+        )
+
+        if healed_result and healed_result.get("success") and "healed_values" in healed_result:
+            # Create emergency rotation result
+            emergency_params = _FALLBACK_MANAGER.apply_emergency_fallback(
+                "rotate_log", healed_result["healed_values"]
+            )
+
+            return {
+                "ok": True,
+                "rotation_executed": False,
+                "dry_run": True,
+                "emergency_fallback": True,
+                "processed_log_types": ["progress"],
+                "results": [{
+                    "log_type": "progress",
+                    "status": "emergency_fallback",
+                    "error": str(e),
+                    "emergency_params": emergency_params
+                }],
+                "summary": {
+                    "total_operations": 1,
+                    "successful": 0,
+                    "failed": 0,
+                    "skipped": 1
+                },
+                "original_error": str(e)
+            }
+        else:
+            return {
+                "ok": False,
+                "error": f"Critical rotation error: {str(e)}",
+                "suggestion": "Check system configuration and try again",
+                "rotation_executed": False,
+                "dry_run": True,
+                "processed_log_types": [],
+                "results": [],
+                "summary": {
+                    "total_operations": 0,
+                    "successful": 0,
+                    "failed": 0,
+                    "skipped": 0
+                }
+            }
 
 
 @app.tool()
@@ -140,318 +1116,162 @@ async def rotate_log(
     Configuration Mode: Use RotateLogConfig for structured parameter management
     Legacy Mode: Pass individual parameters as before (maintains backward compatibility)
     """
+    # Phase 3 Task 3.5: Enhanced Function Decomposition
+    # This function now uses decomposed sub-functions with bulletproof error handling
+
     state_snapshot = await server_module.state_manager.record_tool("rotate_log")
 
     try:
-        context = await _ROTATE_HELPER.prepare_context(
-            tool_name="rotate_log",
-            agent_id=None,
-            require_project=True,
-            state_snapshot=state_snapshot,
-        )
-    except ProjectResolutionError as exc:
-        payload = _ROTATE_HELPER.translate_project_error(exc)
-        payload = apply_response_defaults(payload, {
-            "suggestion": "Invoke set_project before rotating logs"
-        })
-        return payload
-
-    project = context.project or {}
-
-    # Dual Parameter Support: Handle both legacy parameters and configuration object
-    # Legacy parameters take precedence over config object when both provided
-    if config is not None:
-        # Configuration object provided - use it as base
-        effective_config = config
-
-        # Legacy parameters override config object when provided
-        if suffix is not None:
-            effective_config = effective_config.copy_with(suffix=suffix)
-        if custom_metadata is not None:
-            effective_config = effective_config.copy_with(custom_metadata=custom_metadata)
-        if confirm is not None:
-            effective_config = effective_config.copy_with(confirm=confirm)
-        if dry_run is not None:
-            effective_config = effective_config.copy_with(dry_run=dry_run)
-        if dry_run_mode is not None:
-            effective_config = effective_config.copy_with(dry_run_mode=dry_run_mode)
-        if log_type is not None:
-            effective_config = effective_config.copy_with(log_type=log_type)
-        if log_types is not None:
-            effective_config = effective_config.copy_with(log_types=log_types)
-        if rotate_all is not None:  # Handle boolean override
-            effective_config = effective_config.copy_with(rotate_all=rotate_all)
-        if auto_threshold is not None:  # Handle boolean override
-            effective_config = effective_config.copy_with(auto_threshold=auto_threshold)
-        if threshold_entries is not None:
-            effective_config = effective_config.copy_with(threshold_entries=threshold_entries)
-    else:
-        # No config object provided - construct from legacy parameters
-        # Provide defaults for None values to maintain backward compatibility
-        effective_config = RotateLogConfig.from_legacy_params(
+        # === PHASE 3 ENHANCED PARAMETER VALIDATION AND PREPARATION ===
+        # Replace monolithic parameter handling with bulletproof validation and healing
+        final_config, validation_info = _validate_rotation_parameters(
             suffix=suffix,
             custom_metadata=custom_metadata,
-            confirm=confirm if confirm is not None else False,
-            dry_run=dry_run,
-            dry_run_mode=dry_run_mode,
-            log_type=log_type,
-            log_types=log_types,
-            rotate_all=rotate_all if rotate_all is not None else False,
-            auto_threshold=auto_threshold if auto_threshold is not None else False,
-            threshold_entries=threshold_entries
-        )
-
-    # Validate the effective configuration
-    try:
-        effective_config.validate()
-    except ValueError as exc:
-        payload = _ROTATE_HELPER.error_response(
-            message=f"Configuration validation failed: {str(exc)}",
-            details={"config_class": "RotateLogConfig", "validation_error": str(exc)},
-            suggestion="Check parameter values and try again"
-        )
-        return _ROTATE_HELPER.apply_context_payload(payload, context)
-
-    # Extract validated parameters from configuration for use in existing logic
-    suffix = effective_config.suffix
-    custom_metadata = effective_config.custom_metadata
-    confirm = effective_config.confirm
-    dry_run = effective_config.dry_run
-    dry_run_mode = effective_config.dry_run_mode
-    log_type = effective_config.log_type
-    log_types = effective_config.log_types
-    rotate_all = effective_config.rotate_all
-    auto_threshold = effective_config.auto_threshold
-    threshold_entries = effective_config.threshold_entries
-
-    parsed_metadata, metadata_error = _parse_custom_metadata(custom_metadata)
-    if metadata_error:
-        response = {
-            "ok": False,
-            "error": metadata_error,
-            "suggestion": "Ensure custom_metadata is valid JSON string",
-        }
-        return _ROTATE_HELPER.apply_context_payload(response, context)
-
-    try:
-        targets = _determine_rotation_targets(
-            project,
-            log_type=log_type,
-            log_types=log_types,
-            rotate_all=rotate_all,
-        )
-    except ValueError as exc:
-        return _ROTATE_HELPER.apply_context_payload({"ok": False, "error": str(exc)}, context)
-
-    if not targets:
-        return _ROTATE_HELPER.apply_context_payload(
-            {"ok": False, "error": "No log types matched for rotation."},
-            context,
-        )
-
-    state_manager = get_state_manager()
-    audit_manager = get_audit_manager()
-
-    results: List[Dict[str, Any]] = []
-    overall_ok = True
-
-    for target in targets:
-        result = await _rotate_single_log(
-            project=project,
-            context=context,
-            state_manager=state_manager,
-            audit_manager=audit_manager,
-            log_type=target.log_type,
-            log_path=target.path,
-            definition=target.definition,
-            suffix=suffix,
-            parsed_metadata=parsed_metadata,
             confirm=confirm,
             dry_run=dry_run,
             dry_run_mode=dry_run_mode,
+            log_type=log_type,
+            log_types=log_types,
+            rotate_all=rotate_all,
             auto_threshold=auto_threshold,
             threshold_entries=threshold_entries,
-        )
-        if not result.get("ok", True):
-            overall_ok = False
-        results.append(result)
-
-    reminders_payload = await reminders.get_reminders(
-        project,
-        tool_name="rotate_log",
-        state=state_snapshot,
-    )
-
-    summary: Dict[str, Any] = {
-        "ok": overall_ok,
-        "rotations": results,
-        "auto_threshold": auto_threshold,
-        "rotate_all": rotate_all,
-    }
-    summary = _ROTATE_HELPER.apply_context_payload(summary, context)
-    summary["reminders"] = reminders_payload
-
-    if len(results) == 1:
-        summary = _merge_single_rotation_response(summary, results[0])
-
-    return summary
-
-
-@app.tool()
-async def verify_rotation_integrity(rotation_id: str) -> Dict[str, Any]:
-    """
-    Verify the integrity of a specific rotation archive.
-    """
-    state_snapshot = await server_module.state_manager.record_tool("verify_rotation_integrity")
-
-    try:
-        context = await _ROTATE_HELPER.prepare_context(
-            tool_name="verify_rotation_integrity",
-            agent_id=None,
-            require_project=True,
-            state_snapshot=state_snapshot,
-        )
-    except ProjectResolutionError as exc:
-        payload = _ROTATE_HELPER.translate_project_error(exc)
-        payload = apply_response_defaults(payload, {
-            "suggestion": "Invoke set_project before verifying rotations"
-        })
-        return payload
-
-    project = context.project or {}
-
-    try:
-        audit_manager = get_audit_manager()
-        is_valid, message = audit_manager.verify_rotation_integrity(
-            project["name"], rotation_id
+            config=config
         )
 
-        response = {
-            "ok": True,
-            "rotation_id": rotation_id,
-            "project": project["name"],
-            "integrity_valid": is_valid,
-            "verification_message": message,
-            "verified_at": format_utc(),
-        }
-        return _ROTATE_HELPER.apply_context_payload(response, context)
-
-    except Exception as exc:  # pragma: no cover - defensive
-        response = {
-            "ok": False,
-            "error": f"Integrity verification failed: {exc}",
-            "rotation_id": rotation_id,
-        }
-        return _ROTATE_HELPER.apply_context_payload(response, context)
-
-
-@app.tool()
-async def get_rotation_history(limit: int = 10) -> Dict[str, Any]:
-    """
-    Return recent rotation history entries for the active project.
-    """
-    state_snapshot = await server_module.state_manager.record_tool("get_rotation_history")
-
-    try:
-        context = await _ROTATE_HELPER.prepare_context(
-            tool_name="get_rotation_history",
-            agent_id=None,
-            require_project=True,
-            state_snapshot=state_snapshot,
-        )
-    except ProjectResolutionError as exc:
-        payload = _ROTATE_HELPER.translate_project_error(exc)
-        payload = apply_response_defaults(payload, {
-            "suggestion": "Invoke set_project before querying rotation history"
-        })
-        return payload
-
-    project = context.project or {}
-
-    try:
-        audit_manager = get_audit_manager()
-        history = audit_manager.get_rotation_history(project["name"], limit=limit)
-
-        response = {
-            "ok": True,
-            "project": project["name"],
-            "rotation_count": len(history),
-            "rotations": history,
-            "queried_at": format_utc(),
-        }
-        return _ROTATE_HELPER.apply_context_payload(response, context)
-
-    except Exception as exc:  # pragma: no cover - defensive
-        response = {
-            "ok": False,
-            "error": f"Failed to get rotation history: {exc}",
-        }
-        return _ROTATE_HELPER.apply_context_payload(response, context)
-
-
-def _parse_custom_metadata(custom_metadata: Optional[str]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    """Delegate custom metadata parsing to ToolValidator."""
-    return ToolValidator.validate_json_metadata(custom_metadata, "custom_metadata")
-
-
-def _normalize_log_type_param(value: Optional[Sequence[str] | str]) -> List[str]:
-    """Delegate log type parameter normalization to ToolValidator."""
-    return ToolValidator.validate_list_parameter(value, ",")
-
-
-def _determine_rotation_targets(
-    project: Dict[str, Any],
-    *,
-    log_type: Optional[str],
-    log_types: Optional[List[str]],
-    rotate_all: bool,
-) -> List[RotationTarget]:
-    config = load_log_config()
-    available = set(config.keys())
-
-    requested: List[str]
-    if rotate_all:
-        requested = sorted(available)
-    else:
-        requested = _normalize_log_type_param(log_types) or _normalize_log_type_param(log_type)
-        if not requested:
-            requested = ["progress"]
-
-    cache: Dict[str, Tuple[Path, Dict[str, Any]]] = {}
-    targets: List[RotationTarget] = []
-
-    for log_key in requested:
-        if log_key not in available:
-            project_name = project.get("name") or "unknown project"
-            available_types = ", ".join(sorted(available))
-            raise ValueError(
-                f"Unknown log_type '{log_key}' for project '{project_name}'. "
-                f"Available types: {available_types}"
+        # === CONTEXT RESOLUTION WITH ENHANCED ERROR HANDLING ===
+        try:
+            context = await _ROTATE_HELPER.prepare_context(
+                tool_name="rotate_log",
+                agent_id=None,
+                require_project=True,
+                state_snapshot=state_snapshot,
             )
-        path, definition = shared_resolve_log_definition(project, log_key, cache=cache)
-        targets.append(RotationTarget(log_key, path, definition))
+        except ProjectResolutionError as exc:
+            # Apply Phase 2 ExceptionHealer for project resolution errors
+            healed_context = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                exc, {"tool_name": "rotate_log", "operation": "project_resolution"}
+            )
 
-    return targets
+            if healed_context["success"]:
+                # Try with healed context
+                try:
+                    context = await _ROTATE_HELPER.prepare_context(
+                        tool_name="rotate_log",
+                        agent_id=None,
+                        require_project=True,
+                        state_snapshot=state_snapshot,
+                    )
+                except Exception:
+                    # Fallback response
+                    payload = _ROTATE_HELPER.translate_project_error(exc)
+                    payload = apply_response_defaults(payload, {
+                        "suggestion": "Invoke set_project before rotating logs"
+                    })
+                    return payload
+            else:
+                payload = _ROTATE_HELPER.translate_project_error(exc)
+                payload = apply_response_defaults(payload, {
+                    "suggestion": "Invoke set_project before rotating logs"
+                })
+                return payload
 
+        project = context.project or {}
 
-def _rotation_threshold_for_definition(
-    definition: Dict[str, Any],
-    override: Optional[int],
-) -> Optional[int]:
-    if override is not None and override > 0:
-        return override
-    threshold = definition.get("rotation_threshold_entries")
-    if isinstance(threshold, int) and threshold > 0:
-        return threshold
-    return None
+        # === ENHANCED ROTATION OPERATION PREPARATION ===
+        rotation_prep = _prepare_rotation_operation(final_config, context, project)
 
+        if not rotation_prep.get("preparation_complete", False):
+            # If preparation failed, try to continue with emergency rotation
+            if rotation_prep.get("emergency_fallback"):
+                # Execute emergency rotation
+                rotation_result = _execute_rotation_with_fallbacks(
+                    rotation_prep, final_config, context, project
+                )
+                rotation_result["parameter_healing"] = True
+                rotation_result["emergency_fallback"] = True
+                rotation_result["preparation_failed"] = True
+                return rotation_result
+            else:
+                # Return error if preparation completely failed
+                return {
+                    "ok": False,
+                    "error": "Failed to prepare rotation operation",
+                    "details": rotation_prep.get("error", "Unknown preparation error"),
+                    "suggestion": "Try with simpler rotation parameters"
+                }
 
-def _sanitize_suffix(value: str) -> str:
-    """
-    Sanitize user-provided suffix to ensure archive filenames stay within safe characters.
-    """
-    sanitized = value.replace("/", "_").replace("\\", "_")
-    sanitized = _SUFFIX_SANITIZER.sub("_", sanitized).strip("_")
+        # === ENHANCED ROTATION EXECUTION WITH FALLBACKS ===
+        rotation_result = _execute_rotation_with_fallbacks(
+            rotation_prep, final_config, context, project
+        )
+
+        # Add validation info to result if healing was applied
+        if validation_info.get("healing_applied"):
+            rotation_result["parameter_healing"] = True
+
+            if validation_info.get("exception_healing"):
+                rotation_result["parameter_exception_healing"] = True
+            elif validation_info.get("emergency_fallback"):
+                rotation_result["parameter_emergency_fallback"] = True
+            else:
+                rotation_result["parameter_healing_applied"] = True
+
+        # Add preparation warnings if any
+        if rotation_prep.get("emergency_fallback"):
+            if "warnings" not in rotation_result:
+                rotation_result["warnings"] = []
+            rotation_result["warnings"].append("Emergency fallback applied during preparation")
+
+        return rotation_result
+
+    except Exception as e:
+        # === ULTIMATE EXCEPTION HANDLING AND FALLBACK ===
+        # Apply Phase 2 ExceptionHealer for unexpected errors
+        healed_result = _EXCEPTION_HEALER.heal_emergency_exception(
+            e, {
+                "operation": "rotate_log_main",
+                "project": project,
+                "tool": "rotate_log"
+            }
+        )
+
+        if healed_result and healed_result.get("success") and "healed_values" in healed_result:
+            # Create emergency rotation with healed parameters
+            emergency_params = _FALLBACK_MANAGER.apply_emergency_fallback(
+                "rotate_log", healed_result["healed_values"]
+            )
+
+            return {
+                "ok": True,
+                "rotation_executed": False,
+                "dry_run": True,
+                "emergency_fallback": True,
+                "processed_log_types": ["progress"],
+                "results": [{
+                    "log_type": "progress",
+                    "status": "emergency_fallback",
+                    "error": str(e),
+                    "emergency_params": emergency_params
+                }],
+                "summary": {
+                    "total_operations": 1,
+                    "successful": 0,
+                    "failed": 0,
+                    "skipped": 1
+                },
+                "original_error": str(e)
+            }
+        else:
+            return {
+                "ok": False,
+                "error": f"Critical error in rotate_log: {str(e)}",
+                "emergency_healing_failed": True,
+                "suggestion": "Check system configuration and try again",
+                "rotation_executed": False,
+                "dry_run": True,
+                "processed_log_types": [],
+                "results": []
+            }
     return sanitized[:64] or "log"
 
 

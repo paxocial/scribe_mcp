@@ -11,9 +11,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from scribe_mcp.utils.parameter_validator import ToolValidator
+from scribe_mcp.utils.parameter_validator import ToolValidator, BulletproofParameterCorrector
 from scribe_mcp.utils.config_manager import ConfigManager
-from scribe_mcp.utils.error_handler import ErrorHandler
+from scribe_mcp.utils.error_handler import ErrorHandler, HealingErrorHandler
 
 
 # Valid enumerated values for query parameters
@@ -72,16 +72,16 @@ class QueryEntriesConfig:
     _is_pagination_mode: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
-        """Post-initialization validation and setup."""
+        """Post-initialization validation and setup with Phase 1 exception healing."""
         # Auto-detect pagination mode vs legacy mode
         self._resolve_pagination_mode()
 
         # Normalize list parameters
         self._normalize_list_parameters()
 
-        # Apply defaults and validation
+        # Apply defaults and Phase 1 healing validation
         self.normalize()
-        self.validate()
+        self.heal_and_validate()
 
     def _resolve_pagination_mode(self) -> None:
         """Resolve pagination vs legacy limit mode."""
@@ -120,108 +120,170 @@ class QueryEntriesConfig:
         if self.document_types is not None:
             self.document_types = ToolValidator.validate_list_parameter(self.document_types)
 
-    def validate(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
-        """Validate all configuration parameters.
+    def heal_and_validate(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Heal and validate all configuration parameters using Phase 1 utilities.
 
         Returns:
             Tuple of (is_valid, error_response_dict)
         """
-        # Validate enum parameters
-        is_valid, error = self._validate_enum_parameters()
-        if not is_valid:
-            return False, error
+        all_healing_messages = []
 
-        # Validate range parameters
-        is_valid, error = self._validate_range_parameters()
-        if not is_valid:
-            return False, error
+        # Heal enum parameters (Phase 1 BulletproofParameterCorrector)
+        enum_healed, enum_messages = self._heal_enum_parameters()
+        if enum_healed and enum_messages:
+            all_healing_messages.extend(enum_messages)
 
-        # Validate regex pattern if needed
+        # Heal array parameters (Phase 1 BulletproofParameterCorrector)
+        array_healed, array_messages = self.heal_array_parameters()
+        if array_healed and array_messages:
+            all_healing_messages.extend(array_messages)
+
+        # Heal range parameters (Phase 1 BulletproofParameterCorrector)
+        range_healed, range_messages = self._heal_range_parameters()
+        if range_healed and range_messages:
+            all_healing_messages.extend(range_messages)
+
+        # Validate remaining parameters (regex, pagination, time)
+        # These use existing validation methods
         is_valid, error = self._validate_regex_pattern()
         if not is_valid:
             return False, error
 
-        # Validate pagination parameters
         is_valid, error = self._validate_pagination_parameters()
         if not is_valid:
             return False, error
 
-        # Validate time parameters
         is_valid, error = self._validate_time_parameters()
         if not is_valid:
             return False, error
 
+        # Return success with healing information if any parameters were corrected
+        if all_healing_messages:
+            return True, {
+                "healing_applied": True,
+                "healing_messages": all_healing_messages,
+                "message": "Parameters auto-corrected using Phase 1 exception healing"
+            }
+
         return True, None
 
-    def _validate_enum_parameters(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
-        """Validate enumeration parameters."""
-        # Validate message_mode
-        error = ToolValidator.validate_enum_value(
-            self.message_mode, VALID_MESSAGE_MODES, "message_mode"
-        )
-        if error:
-            error_response = {
-                "error_type": "enum_validation_error",
-                "error_message": error,
-                "context": {
-                    "parameter": "message_mode",
-                    "value": self.message_mode
-                }
-            }
-            return False, error_response
+    def validate(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Backward compatibility method for tests - delegates to heal_and_validate."""
+        is_valid, healing_info = self.heal_and_validate()
+        if healing_info and healing_info.get("healing_applied"):
+            # Return success with healing info for backward compatibility
+            return is_valid, healing_info
+        return is_valid, None
 
-        # Validate search_scope
-        error = ToolValidator.validate_enum_value(
-            self.search_scope, VALID_SEARCH_SCOPES, "search_scope"
-        )
-        if error:
-            error_response = {
-                "error_type": "enum_validation_error",
-                "error_message": error,
-                "context": {
-                    "parameter": "search_scope",
-                    "value": self.search_scope
-                }
-            }
-            return False, error_response
+    def _heal_enum_parameters(self) -> Tuple[bool, Optional[List[str]]]:
+        """Heal enumeration parameters using Phase 1 BulletproofParameterCorrector."""
+        healing_messages = []
 
-        # Validate document_types if provided
+        # Heal message_mode with auto-correction
+        original_message_mode = self.message_mode
+        healed_message_mode = BulletproofParameterCorrector.correct_enum_parameter(
+            original_message_mode, VALID_MESSAGE_MODES, "message_mode", "substring"
+        )
+        if healed_message_mode != original_message_mode:
+            self.message_mode = healed_message_mode
+            healing_messages.append(f"Auto-corrected message_mode from '{original_message_mode}' to '{healed_message_mode}'")
+
+        # Heal search_scope with auto-correction
+        original_search_scope = self.search_scope
+        healed_search_scope = BulletproofParameterCorrector.correct_enum_parameter(
+            original_search_scope, VALID_SEARCH_SCOPES, "search_scope", "project"
+        )
+        if healed_search_scope != original_search_scope:
+            self.search_scope = healed_search_scope
+            healing_messages.append(f"Auto-corrected search_scope from '{original_search_scope}' to '{healed_search_scope}'")
+
+        # Heal document_types if provided
         if self.document_types:
-            normalized_types, error = ToolValidator.validate_document_types(
-                self.document_types, VALID_DOCUMENT_TYPES
+            original_document_types = self.document_types.copy()
+            healed_document_types = []
+            for doc_type in self.document_types:
+                healed_type = BulletproofParameterCorrector.correct_enum_parameter(
+                    doc_type, VALID_DOCUMENT_TYPES, "document_types", "progress"
+                )
+                healed_document_types.append(healed_type)
+                if healed_type != doc_type:
+                    healing_messages.append(f"Auto-corrected document_type from '{doc_type}' to '{healed_type}'")
+
+            if healed_document_types != original_document_types:
+                self.document_types = healed_document_types
+
+        return len(healing_messages) > 0, healing_messages if healing_messages else None
+
+    def heal_array_parameters(self) -> Tuple[bool, Optional[List[str]]]:
+        """Heal array parameters using Phase 1 BulletproofParameterCorrector for list handling."""
+        healing_messages = []
+
+        # Heal emoji array parameter
+        if self.emoji is not None:
+            original_emoji = self.emoji
+            healed_emoji = BulletproofParameterCorrector.correct_list_parameter(
+                original_emoji, "emoji"
             )
-            if error:
-                error_response = {
-                    "error_type": "enum_validation_error",
-                    "error_message": error,
-                    "context": {
-                        "parameter": "document_types",
-                        "value": self.document_types
-                    }
-                }
-                return False, error_response
-            self.document_types = normalized_types
+            if healed_emoji != original_emoji:
+                self.emoji = healed_emoji
+                healing_messages.append(f"Auto-corrected emoji parameter from {original_emoji} to {healed_emoji}")
 
-        return True, None
+        # Heal status array parameter
+        if self.status is not None:
+            original_status = self.status
+            healed_status = BulletproofParameterCorrector.correct_list_parameter(
+                original_status, "status"
+            )
+            if healed_status != original_status:
+                self.status = healed_status
+                healing_messages.append(f"Auto-corrected status parameter from {original_status} to {healed_status}")
 
-    def _validate_range_parameters(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
-        """Validate range parameters."""
-        # Validate relevance_threshold (0.0-1.0)
-        error = ToolValidator.validate_range(
-            self.relevance_threshold, 0.0, 1.0, "relevance_threshold"
+        # Heal agents array parameter
+        if self.agents is not None:
+            original_agents = self.agents
+            healed_agents = BulletproofParameterCorrector.correct_list_parameter(
+                original_agents, "agents"
+            )
+            if healed_agents != original_agents:
+                self.agents = healed_agents
+                healing_messages.append(f"Auto-corrected agents parameter from {original_agents} to {healed_agents}")
+
+        # Heal fields array parameter
+        if self.fields is not None:
+            original_fields = self.fields
+            healed_fields = BulletproofParameterCorrector.correct_list_parameter(
+                original_fields, "fields"
+            )
+            if healed_fields != original_fields:
+                self.fields = healed_fields
+                healing_messages.append(f"Auto-corrected fields parameter from {original_fields} to {healed_fields}")
+
+        # Heal document_types array parameter (in addition to enum healing)
+        if self.document_types is not None:
+            original_document_types = self.document_types
+            healed_document_types = BulletproofParameterCorrector.correct_list_parameter(
+                original_document_types, "document_types"
+            )
+            if healed_document_types != original_document_types:
+                self.document_types = healed_document_types
+                healing_messages.append(f"Auto-corrected document_types parameter from {original_document_types} to {healed_document_types}")
+
+        return len(healing_messages) > 0, healing_messages if healing_messages else None
+
+    def _heal_range_parameters(self) -> Tuple[bool, Optional[List[str]]]:
+        """Heal range parameters using Phase 1 BulletproofParameterCorrector."""
+        healing_messages = []
+
+        # Heal relevance_threshold with auto-correction (0.0-1.0)
+        original_relevance_threshold = self.relevance_threshold
+        healed_relevance_threshold = BulletproofParameterCorrector.correct_numeric_parameter(
+            original_relevance_threshold, 0.0, 1.0, "relevance_threshold", 0.0
         )
-        if error:
-            error_response = {
-                "error_type": "validation_error",
-                "error_message": error,
-                "context": {
-                    "parameter": "relevance_threshold",
-                    "value": self.relevance_threshold
-                }
-            }
-            return False, error_response
+        if healed_relevance_threshold != original_relevance_threshold:
+            self.relevance_threshold = healed_relevance_threshold
+            healing_messages.append(f"Auto-corrected relevance_threshold from '{original_relevance_threshold}' to '{healed_relevance_threshold}'")
 
-        return True, None
+        return len(healing_messages) > 0, healing_messages if healing_messages else None
 
     def _validate_regex_pattern(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """Validate regex pattern if message_mode is 'regex'."""

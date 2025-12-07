@@ -18,23 +18,187 @@ from scribe_mcp.shared.logging_utils import (
    ProjectResolutionError,
    coerce_metadata_mapping,
 )
+from scribe_mcp.utils.parameter_validator import BulletproofParameterCorrector
+from scribe_mcp.utils.error_handler import HealingErrorHandler
+from scribe_mcp.utils.config_manager import ConfigManager
 from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
 
 
 class _ManageDocsHelper(LoggingToolMixin):
     def __init__(self) -> None:
         self.server_module = server_module
+        self.parameter_corrector = BulletproofParameterCorrector()
+        self.error_handler = HealingErrorHandler()
+        self.config_manager = ConfigManager("manage_docs")
 
 
 _MANAGE_DOCS_HELPER = _ManageDocsHelper()
 
 
-def _normalize_metadata(metadata: Optional[Dict[str, Any] | str]) -> Dict[str, Any]:
-    """Normalize metadata parameter using shared coercion helper."""
+def _normalize_metadata_with_healing(metadata: Optional[Dict[str, Any] | str]) -> tuple[Dict[str, Any], bool, List[str]]:
+    """Normalize metadata parameter using Phase 1 exception healing."""
+    healing_messages = []
+    healing_applied = False
+
+    # Apply Phase 1 BulletproofParameterCorrector for metadata healing
+    try:
+        healed_metadata = BulletproofParameterCorrector.correct_metadata_parameter(metadata)
+        if healed_metadata != metadata:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected metadata parameter from {type(metadata).__name__} to valid dict")
+
+        metadata = healed_metadata
+    except Exception as healing_error:
+        healing_messages.append(f"Metadata healing failed: {str(healing_error)}, using fallback")
+        metadata = {}
+
+    # Apply shared coercion helper for additional normalization
     mapping, error = coerce_metadata_mapping(metadata)
     if error:
         mapping.setdefault("meta_error", error)
-    return mapping
+        healing_messages.append(f"Metadata coercion warning: {error}")
+        healing_applied = True
+
+    return mapping, healing_applied, healing_messages
+
+
+def _heal_manage_docs_parameters(
+    action: str,
+    doc: str,
+    section: Optional[str] = None,
+    content: Optional[str] = None,
+    template: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    dry_run: bool = False,
+    doc_name: Optional[str] = None,
+    target_dir: Optional[str] = None,
+) -> tuple[dict, bool, List[str]]:
+    """Heal all manage_docs parameters using Phase 1 exception handling."""
+    healing_messages = []
+    healing_applied = False
+
+    # Define valid actions for enum correction
+    valid_actions = {
+        "replace_section", "append", "status_update", "create_research_doc",
+        "create_bug_report", "create_review_report", "create_agent_report_card"
+    }
+
+    # Define valid docs for enum correction
+    valid_docs = {"architecture", "phase_plan", "checklist", "implementation"}
+
+    healed_params = {}
+
+    # Heal action parameter
+    original_action = action
+    healed_action = BulletproofParameterCorrector.correct_enum_parameter(
+        original_action, valid_actions, "action", "replace_section"
+    )
+    if healed_action != original_action:
+        healing_applied = True
+        healing_messages.append(f"Auto-corrected action from '{original_action}' to '{healed_action}'")
+    healed_params["action"] = healed_action
+
+    # Heal doc parameter
+    original_doc = doc
+    healed_doc = BulletproofParameterCorrector.correct_enum_parameter(
+        original_doc, valid_docs, "doc", "architecture"
+    )
+    if healed_doc != original_doc:
+        healing_applied = True
+        healing_messages.append(f"Auto-corrected doc from '{original_doc}' to '{healed_doc}'")
+    healed_params["doc"] = healed_doc
+
+    # Heal section parameter (string normalization)
+    if section is not None:
+        original_section = section
+        healed_section = str(section).strip()
+        if healed_section != original_section:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected section from '{original_section}' to '{healed_section}'")
+        healed_params["section"] = healed_section
+    else:
+        healed_params["section"] = None
+
+    # Heal content parameter (string normalization)
+    if content is not None:
+        original_content = content
+        healed_content = str(content)
+        if healed_content != original_content:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected content parameter to string type")
+        healed_params["content"] = healed_content
+    else:
+        healed_params["content"] = None
+
+    # Heal template parameter (string normalization)
+    if template is not None:
+        original_template = template
+        healed_template = str(template).strip()
+        if healed_template != original_template:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected template from '{original_template}' to '{healed_template}'")
+        healed_params["template"] = healed_template
+    else:
+        healed_params["template"] = None
+
+    # Heal metadata parameter using enhanced function
+    healed_metadata, metadata_healed, metadata_messages = _normalize_metadata_with_healing(metadata)
+    if metadata_healed:
+        healing_applied = True
+        healing_messages.extend(metadata_messages)
+    healed_params["metadata"] = healed_metadata
+
+    # Heal dry_run parameter
+    original_dry_run = dry_run
+    healed_dry_run = bool(dry_run)
+    if isinstance(dry_run, str):
+        healed_dry_run = dry_run.lower() in ("true", "1", "yes")
+        if healed_dry_run != dry_run:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected dry_run from '{dry_run}' to {healed_dry_run}")
+    elif healed_dry_run != original_dry_run:
+        healing_applied = True
+        healing_messages.append(f"Auto-corrected dry_run to boolean {healed_dry_run}")
+    healed_params["dry_run"] = healed_dry_run
+
+    # Heal doc_name parameter (string normalization)
+    if doc_name is not None:
+        original_doc_name = doc_name
+        healed_doc_name = str(doc_name).strip()
+        if healed_doc_name != original_doc_name:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected doc_name from '{original_doc_name}' to '{healed_doc_name}'")
+        healed_params["doc_name"] = healed_doc_name
+    else:
+        healed_params["doc_name"] = None
+
+    # Heal target_dir parameter (string normalization)
+    if target_dir is not None:
+        original_target_dir = target_dir
+        healed_target_dir = str(target_dir).strip()
+        if healed_target_dir != original_target_dir:
+            healing_applied = True
+            healing_messages.append(f"Auto-corrected target_dir from '{original_target_dir}' to '{healed_target_dir}'")
+        healed_params["target_dir"] = healed_target_dir
+    else:
+        healed_params["target_dir"] = None
+
+    return healed_params, healing_applied, healing_messages
+
+
+def _add_healing_info_to_response(
+    response: Dict[str, Any],
+    healing_applied: bool,
+    healing_messages: List[str]
+) -> Dict[str, Any]:
+    """Add healing information to response if parameters were corrected."""
+    if healing_applied and healing_messages:
+        response["parameter_healing"] = {
+            "applied": True,
+            "messages": healing_messages,
+            "message": "Parameters auto-corrected using Phase 1 exception healing"
+        }
+    return response
 
 
 def _hash_text(content: str) -> str:
@@ -304,6 +468,44 @@ async def manage_docs(
 
     backend = server_module.storage_backend
 
+    # Apply Phase 1 exception healing to all parameters
+    try:
+        healed_params, healing_applied, healing_messages = _heal_manage_docs_parameters(
+            action=action, doc=doc, section=section, content=content,
+            template=template, metadata=metadata, dry_run=dry_run,
+            doc_name=doc_name, target_dir=target_dir
+        )
+
+        # Update parameters with healed values
+        action = healed_params["action"]
+        doc = healed_params["doc"]
+        section = healed_params["section"]
+        content = healed_params["content"]
+        template = healed_params["template"]
+        metadata = healed_params["metadata"]
+        dry_run = healed_params["dry_run"]
+        doc_name = healed_params["doc_name"]
+        target_dir = healed_params["target_dir"]
+
+    except Exception as healing_error:
+        # If healing fails completely, use safe defaults
+        healed_params = {
+            "action": "replace_section", "doc": "architecture", "section": None,
+            "content": None, "template": None, "metadata": {}, "dry_run": False,
+            "doc_name": None, "target_dir": None
+        }
+        healing_applied = False
+        healing_messages = [f"Parameter healing failed: {str(healing_error)}, using safe defaults"]
+        action = healed_params["action"]
+        doc = healed_params["doc"]
+        section = healed_params["section"]
+        content = healed_params["content"]
+        template = healed_params["template"]
+        metadata = healed_params["metadata"]
+        dry_run = healed_params["dry_run"]
+        doc_name = healed_params["doc_name"]
+        target_dir = healed_params["target_dir"]
+
     # Handle research, bug, review, and agent report card creation
     if action in ["create_research_doc", "create_bug_report", "create_review_report", "create_agent_report_card"]:
         return await _handle_special_document_creation(
@@ -374,7 +576,8 @@ async def manage_docs(
     log_error = None
     if not dry_run:
         # Use bulletproof metadata normalization
-        log_meta = _normalize_metadata(metadata)
+        healed_metadata, metadata_healed, metadata_messages = _normalize_metadata_with_healing(metadata)
+        log_meta = healed_metadata
         log_meta.update(
             {
                 "doc": doc,
@@ -657,8 +860,10 @@ async def _handle_special_document_creation(
     helper: LoggingToolMixin,
     context: LoggingContext,
 ) -> Dict[str, Any]:
-    """Handle creation of research, bug, review, and agent report card documents."""
-    metadata = _normalize_metadata(metadata)
+    """Handle creation of research, bug, review, and agent report card documents with Phase 1 exception healing."""
+    # Apply Phase 1 exception healing to metadata
+    healed_metadata, metadata_healed, metadata_messages = _normalize_metadata_with_healing(metadata)
+    metadata = healed_metadata
 
     project_root = Path(project.get("root", ""))
     docs_dir = project_root / "docs" / "dev_plans" / project.get("name", "")
@@ -848,7 +1053,8 @@ async def _handle_special_document_creation(
                 prepared_metadata,
             )
 
-        log_meta = _normalize_metadata(prepared_metadata)
+        healed_metadata, metadata_healed, metadata_messages = _normalize_metadata_with_healing(prepared_metadata)
+        log_meta = healed_metadata
         log_meta.update(
             {
                 "doc": doc_label,

@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "created_timestamp": "2025-10-24 11:35:00 UTC",
-  "last_updated": "2025-11-05T19:29:25.623040 UTC",
+  "last_updated": "2025-11-05T20:48:19.893634 UTC",
   "projects": {
     "enhanced-rotation-test": {
       "created_timestamp": "2025-10-24T12:05:59.361388 UTC",
@@ -889,6 +889,34 @@
           "initialized": true,
           "source": "tail_sample",
           "updated_at": "2025-11-02T07:11:18.427757 UTC"
+        }
+      },
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "TOOL_AUDIT_1112025": {
+      "created_timestamp": "2025-11-05T20:48:19.893236 UTC",
+      "current_sequence": 0,
+      "total_rotations": 0,
+      "last_rotation_timestamp": null,
+      "hash_chain": {
+        "root_hash": null,
+        "current_sequence": 0,
+        "last_hash": null
+      },
+      "rotation_ids": [],
+      "log_stats": {
+        "progress": {
+          "size_bytes": 200994,
+          "line_count": 426,
+          "ema_bytes_per_line": 471.8169014084507,
+          "mtime_ns": 1762375696323030212,
+          "inode": 905133,
+          "initialized": true,
+          "source": "precise_dry_run",
+          "updated_at": "2025-11-05T20:48:19.893632 UTC"
         }
       },
       "settings": {

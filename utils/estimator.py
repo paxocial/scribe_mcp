@@ -537,3 +537,232 @@ class EstimatorUtilities:
             "cached_estimate": cached_estimate,
             "refined_estimate": refined_estimate
         }
+
+
+class ParameterTypeEstimator:
+    """
+    Enhanced parameter type estimation and correction for bulletproof parameter handling.
+
+    Provides intelligent type detection, conversion, and validation to automatically
+    correct parameter type mismatches that cause MCP tool failures.
+    """
+
+    @staticmethod
+    def estimate_and_convert_parameter_type(
+        value: Any,
+        expected_type: type,
+        parameter_name: str = "parameter"
+    ) -> Tuple[Any, bool, Optional[str]]:
+        """
+        Estimate parameter type and convert if necessary.
+
+        Args:
+            value: Input value to convert
+            expected_type: Expected type for the parameter
+            parameter_name: Name of the parameter for error messages
+
+        Returns:
+            Tuple of (converted_value, conversion_successful, error_message)
+        """
+        # If value is already correct type, return as-is
+        if isinstance(value, expected_type):
+            return value, True, None
+
+        # Try type conversion based on expected type
+        try:
+            if expected_type == int:
+                # Handle numeric conversion
+                if isinstance(value, str):
+                    # Remove common numeric formatting
+                    cleaned = str(value).strip().replace(',', '')
+                    # Handle comparison operators in strings (the main bug cause)
+                    if cleaned and any(op in cleaned for op in ['<', '>', '=', '<=', '>=', '==', '!=']):
+                        # Extract numeric part from comparison
+                        import re
+                        numeric_match = re.search(r'(\d+\.?\d*)', cleaned)
+                        if numeric_match:
+                            converted = int(float(numeric_match.group(1)))
+                            return converted, True, f"Extracted numeric value from comparison: {cleaned}"
+                    else:
+                        converted = int(float(cleaned))
+                        return converted, True, f"Converted string to integer: {value} -> {converted}"
+                elif isinstance(value, float):
+                    converted = int(value)
+                    return converted, True, f"Converted float to integer: {value} -> {converted}"
+                elif isinstance(value, bool):
+                    converted = int(value)
+                    return converted, True, f"Converted boolean to integer: {value} -> {converted}"
+
+            elif expected_type == float:
+                if isinstance(value, str):
+                    cleaned = str(value).strip().replace(',', '')
+                    # Handle comparison operators
+                    if cleaned and any(op in cleaned for op in ['<', '>', '=', '<=', '>=', '==', '!=']):
+                        import re
+                        numeric_match = re.search(r'(\d+\.?\d*)', cleaned)
+                        if numeric_match:
+                            converted = float(numeric_match.group(1))
+                            return converted, True, f"Extracted numeric value from comparison: {cleaned}"
+                    else:
+                        converted = float(cleaned)
+                        return converted, True, f"Converted string to float: {value} -> {converted}"
+                elif isinstance(value, int):
+                    converted = float(value)
+                    return converted, True, f"Converted integer to float: {value} -> {converted}"
+                elif isinstance(value, bool):
+                    converted = float(value)
+                    return converted, True, f"Converted boolean to float: {value} -> {converted}"
+
+            elif expected_type == str:
+                converted = str(value)
+                return converted, True, f"Converted to string: {type(value).__name__} -> {converted}"
+
+            elif expected_type == bool:
+                if isinstance(value, str):
+                    lowered = str(value).lower().strip()
+                    if lowered in ['true', '1', 'yes', 'on', 'enabled']:
+                        converted = True
+                        return converted, True, f"Converted string to boolean: {value} -> True"
+                    elif lowered in ['false', '0', 'no', 'off', 'disabled']:
+                        converted = False
+                        return converted, True, f"Converted string to boolean: {value} -> False"
+                elif isinstance(value, (int, float)):
+                    converted = bool(value)
+                    return converted, True, f"Converted numeric to boolean: {value} -> {converted}"
+
+            elif expected_type == list:
+                if isinstance(value, str):
+                    # Handle comma-separated strings and common delimiters
+                    delimiters = [',', ';', '|', '\n']
+                    items = [value]
+                    for delimiter in delimiters:
+                        if delimiter in value:
+                            items = [item.strip() for item in value.split(delimiter) if item.strip()]
+                            break
+                    return items, True, f"Split string into list: {value} -> {items}"
+                elif not isinstance(value, list):
+                    # Convert single item to list
+                    return [value], True, f"Converted single item to list: {value} -> [{value}]"
+
+            elif expected_type == dict:
+                if isinstance(value, str):
+                    # Try JSON parsing
+                    try:
+                        import json
+                        parsed = json.loads(value)
+                        if isinstance(parsed, dict):
+                            return parsed, True, f"Parsed JSON string to dict: {value}"
+                        else:
+                            return {"value": parsed}, True, f"Wrapped JSON in dict: {parsed}"
+                    except json.JSONDecodeError:
+                        return {"value": value}, True, f"Wrapped string in dict: {value}"
+                elif not isinstance(value, dict):
+                    return {"value": value}, True, f"Wrapped value in dict: {value}"
+
+        except (ValueError, TypeError, AttributeError) as e:
+            return value, False, f"Failed to convert {parameter_name} from {type(value).__name__} to {expected_type.__name__}: {e}"
+
+        # If no conversion strategy worked, return original
+        return value, False, f"Cannot convert {parameter_name} from {type(value).__name__} to {expected_type.__name__}"
+
+    @staticmethod
+    def heal_comparison_operator_bug(
+        value: Any,
+        parameter_name: str = "parameter"
+    ) -> Tuple[Any, bool, Optional[str]]:
+        """
+        Specifically heal the comparison operator bug that causes type errors.
+
+        This addresses the core issue where strings containing comparison operators
+        like "10 < 20" cause type errors when compared with integers.
+
+        Args:
+            value: Input value that may contain comparison operators
+            parameter_name: Name of the parameter for error messages
+
+        Returns:
+            Tuple of (healed_value, healing_applied, healing_message)
+        """
+        if not isinstance(value, str):
+            return value, False, None
+
+        import re
+
+        # Check for comparison operator patterns that cause the bug
+        comparison_patterns = [
+            r'^\s*\d+\.?\d*\s*[<>=!]+\s*\d+\.?\d*\s*$',  # Basic comparisons: "10 < 20"
+            r'^\s*[<>=!]+\s*\d+\.?\d*\s*$',              # Prefix comparisons: "< 10"
+            r'^\s*\d+\.?\d*\s*[<>=!]+\s*$',              # Suffix comparisons: "10 >"
+        ]
+
+        for pattern in comparison_patterns:
+            if re.match(pattern, value.strip()):
+                # Extract numeric value from comparison
+                numeric_match = re.search(r'(\d+\.?\d*)', value)
+                if numeric_match:
+                    numeric_value = numeric_match.group(1)
+                    try:
+                        # Try to convert to int first, then float
+                        if '.' in numeric_value:
+                            healed_value = float(numeric_value)
+                        else:
+                            healed_value = int(numeric_value)
+
+                        healing_message = f"Healed comparison operator bug in {parameter_name}: '{value}' -> {healed_value}"
+                        return healed_value, True, healing_message
+                    except ValueError:
+                        # If conversion fails, quote the string to prevent interpretation
+                        healed_value = f"'{value}'"
+                        healing_message = f"Healed comparison operator bug in {parameter_name} by quoting: '{value}'"
+                        return healed_value, True, healing_message
+
+        return value, False, None
+
+    @staticmethod
+    def auto_heal_parameter_type(
+        value: Any,
+        expected_type: type,
+        parameter_name: str = "parameter",
+        fallback_value: Any = None
+    ) -> Tuple[Any, bool, Optional[str]]:
+        """
+        Comprehensive auto-healing for parameter type issues.
+
+        Args:
+            value: Input value to heal
+            expected_type: Expected type for the parameter
+            parameter_name: Name of the parameter
+            fallback_value: Fallback value if all healing attempts fail
+
+        Returns:
+            Tuple of (healed_value, healing_successful, healing_message)
+        """
+        # First, try to heal comparison operator bugs specifically
+        healed_value, comparison_healed, comparison_message = ParameterTypeEstimator.heal_comparison_operator_bug(
+            value, parameter_name
+        )
+
+        if comparison_healed:
+            # Try to convert the healed value to expected type
+            final_value, conversion_successful, conversion_message = ParameterTypeEstimator.estimate_and_convert_parameter_type(
+                healed_value, expected_type, parameter_name
+            )
+            if conversion_successful:
+                combined_message = f"{comparison_message}; {conversion_message}"
+                return final_value, True, combined_message
+            else:
+                return healed_value, True, comparison_message
+
+        # If no comparison bug, try regular type conversion
+        converted_value, conversion_successful, conversion_message = ParameterTypeEstimator.estimate_and_convert_parameter_type(
+            value, expected_type, parameter_name
+        )
+
+        if conversion_successful:
+            return converted_value, True, conversion_message
+
+        # If all else fails, use fallback value
+        if fallback_value is not None:
+            return fallback_value, True, f"Used fallback value for {parameter_name}: {fallback_value}"
+
+        return value, False, f"Could not auto-heal {parameter_name} type from {type(value).__name__} to {expected_type.__name__}"

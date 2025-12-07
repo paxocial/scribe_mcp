@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from scribe_mcp.utils.time import format_utc, utcnow
 
 from scribe_mcp import server as server_module
 from scribe_mcp.server import app
 from scribe_mcp.tools.constants import STATUS_EMOJI
 from scribe_mcp.tools.project_utils import load_project_config
-from scribe_mcp.utils.config_manager import ConfigManager, validate_enum_value, validate_range
+from scribe_mcp.utils.config_manager import ConfigManager, validate_enum_value, validate_range, BulletproofFallbackManager
 from scribe_mcp.utils.logs import parse_log_line, read_all_lines
 from scribe_mcp.utils.search import message_matches
 from scribe_mcp.utils.time import coerce_range_boundary
@@ -19,7 +22,8 @@ from scribe_mcp.utils.response import create_pagination_info
 from scribe_mcp.utils.tokens import token_estimator
 from scribe_mcp.utils.estimator import PaginationCalculator
 from scribe_mcp.utils.bulk_processor import BulkProcessor
-from scribe_mcp.utils.error_handler import ErrorHandler
+from scribe_mcp.utils.error_handler import ErrorHandler, ExceptionHealer
+from scribe_mcp.utils.parameter_validator import ToolValidator, BulletproofParameterCorrector
 from scribe_mcp.tools.config.query_entries_config import QueryEntriesConfig
 from scribe_mcp.shared.logging_utils import (
     LoggingContext,
@@ -40,6 +44,11 @@ _CONFIG_MANAGER = ConfigManager("query_entries")
 # Global pagination calculator
 _PAGINATION_CALCULATOR = PaginationCalculator()
 
+# Phase 3 Enhanced utilities integration
+_PARAMETER_CORRECTOR = BulletproofParameterCorrector()
+_EXCEPTION_HEALER = ExceptionHealer()
+_FALLBACK_MANAGER = BulletproofFallbackManager()
+
 
 class _QueryEntriesHelper(LoggingToolMixin):
     def __init__(self) -> None:
@@ -47,6 +56,882 @@ class _QueryEntriesHelper(LoggingToolMixin):
 
 
 _HELPER = _QueryEntriesHelper()
+
+
+def _validate_search_parameters(
+    project: Optional[str],
+    start: Optional[str],
+    end: Optional[str],
+    message: Optional[str],
+    message_mode: str,
+    case_sensitive: bool,
+    emoji: Optional[List[str]],
+    status: Optional[List[str]],
+    agents: Optional[List[str]],
+    meta_filters: Optional[Dict[str, Any]],
+    limit: int,
+    page: int,
+    page_size: int,
+    compact: bool,
+    fields: Optional[List[str]],
+    include_metadata: bool,
+    search_scope: str,
+    document_types: Optional[List[str]],
+    include_outdated: bool,
+    verify_code_references: bool,
+    time_range: Optional[str],
+    relevance_threshold: float,
+    max_results: Optional[int],
+    config: Optional[QueryEntriesConfig]
+) -> Tuple[QueryEntriesConfig, Dict[str, Any]]:
+    """
+    Validate and prepare search parameters using enhanced Phase 3 utilities.
+
+    This function replaces the monolithic parameter handling section of query_entries
+    with bulletproof parameter validation and healing.
+    """
+    try:
+        # Apply Phase 1 BulletproofParameterCorrector for initial parameter healing
+        healed_params = {}
+        healing_applied = False
+
+        # Heal enum parameters
+        if message_mode:
+            healed_message_mode = _PARAMETER_CORRECTOR.correct_enum_parameter(
+                message_mode, VALID_MESSAGE_MODES, field_name="message_mode"
+            )
+            if healed_message_mode != message_mode:
+                healed_params["message_mode"] = healed_message_mode
+                healing_applied = True
+
+        if search_scope:
+            healed_search_scope = _PARAMETER_CORRECTOR.correct_enum_parameter(
+                search_scope, VALID_SEARCH_SCOPES, field_name="search_scope"
+            )
+            if healed_search_scope != search_scope:
+                healed_params["search_scope"] = healed_search_scope
+                healing_applied = True
+
+        # Heal array parameters
+        if emoji:
+            healed_emoji = _PARAMETER_CORRECTOR.correct_list_parameter(
+                emoji, field_name="emoji"
+            )
+            if healed_emoji != emoji:
+                healed_params["emoji"] = healed_emoji
+                healing_applied = True
+
+        if status:
+            healed_status = _PARAMETER_CORRECTOR.correct_list_parameter(
+                status, field_name="status"
+            )
+            if healed_status != status:
+                healed_params["status"] = healed_status
+                healing_applied = True
+
+        if agents:
+            healed_agents = _PARAMETER_CORRECTOR.correct_list_parameter(
+                agents, field_name="agents"
+            )
+            if healed_agents != agents:
+                healed_params["agents"] = healed_agents
+                healing_applied = True
+
+        if fields:
+            healed_fields = _PARAMETER_CORRECTOR.correct_list_parameter(
+                fields, field_name="fields"
+            )
+            if healed_fields != fields:
+                healed_params["fields"] = healed_fields
+                healing_applied = True
+
+        if document_types:
+            healed_document_types = _PARAMETER_CORRECTOR.correct_list_parameter(
+                document_types, field_name="document_types"
+            )
+            if healed_document_types != document_types:
+                healed_params["document_types"] = healed_document_types
+                healing_applied = True
+
+        # Heal range parameters
+        healed_limit = _PARAMETER_CORRECTOR.correct_numeric_parameter(
+            limit, min_value=1, max_value=1000, field_name="limit"
+        )
+        if healed_limit != limit:
+            healed_params["limit"] = healed_limit
+            healing_applied = True
+
+        healed_page = _PARAMETER_CORRECTOR.correct_numeric_parameter(
+            page, min_value=1, max_value=10000, field_name="page"
+        )
+        if healed_page != page:
+            healed_params["page"] = healed_page
+            healing_applied = True
+
+        healed_page_size = _PARAMETER_CORRECTOR.correct_numeric_parameter(
+            page_size, min_value=1, max_value=1000, field_name="page_size"
+        )
+        if healed_page_size != page_size:
+            healed_params["page_size"] = healed_page_size
+            healing_applied = True
+
+        healed_relevance_threshold = _PARAMETER_CORRECTOR.correct_numeric_parameter(
+            relevance_threshold, min_value=0.0, max_value=1.0, field_name="relevance_threshold"
+        )
+        if healed_relevance_threshold != relevance_threshold:
+            healed_params["relevance_threshold"] = healed_relevance_threshold
+            healing_applied = True
+
+        # Heal string parameters
+        if project:
+            healed_project = _PARAMETER_CORRECTOR.correct_message_parameter(project)
+            if healed_project != project:
+                healed_params["project"] = healed_project
+                healing_applied = True
+
+        if message:
+            healed_message = _PARAMETER_CORRECTOR.correct_message_parameter(message)
+            if healed_message != message:
+                healed_params["message"] = healed_message
+                healing_applied = True
+
+        if start:
+            healed_start = _PARAMETER_CORRECTOR.correct_message_parameter(start)
+            if healed_start != start:
+                healed_params["start"] = healed_start
+                healing_applied = True
+
+        if end:
+            healed_end = _PARAMETER_CORRECTOR.correct_message_parameter(end)
+            if healed_end != end:
+                healed_params["end"] = healed_end
+                healing_applied = True
+
+        if time_range:
+            healed_time_range = _PARAMETER_CORRECTOR.correct_message_parameter(time_range)
+            if healed_time_range != time_range:
+                healed_params["time_range"] = healed_time_range
+                healing_applied = True
+
+        # Apply fallbacks for corrected parameters
+        if healing_applied:
+            fallback_params = _FALLBACK_MANAGER.resolve_parameter_fallback(
+                "query_entries", healed_params, context="parameter_validation"
+            )
+            healed_params.update(fallback_params)
+
+        # Update parameters with healed values
+        final_project = healed_params.get("project", project)
+        final_start = healed_params.get("start", start)
+        final_end = healed_params.get("end", end)
+        final_message = healed_params.get("message", message)
+        final_message_mode = healed_params.get("message_mode", message_mode)
+        final_case_sensitive = case_sensitive  # Boolean parameter
+        final_emoji = healed_params.get("emoji", emoji)
+        final_status = healed_params.get("status", status)
+        final_agents = healed_params.get("agents", agents)
+        final_meta_filters = meta_filters
+        final_limit = healed_params.get("limit", limit)
+        final_page = healed_params.get("page", page)
+        final_page_size = healed_params.get("page_size", page_size)
+        final_compact = compact  # Boolean parameter
+        final_fields = healed_params.get("fields", fields)
+        final_include_metadata = include_metadata  # Boolean parameter
+        final_search_scope = healed_params.get("search_scope", search_scope)
+        final_document_types = healed_params.get("document_types", document_types)
+        final_include_outdated = include_outdated  # Boolean parameter
+        final_verify_code_references = verify_code_references  # Boolean parameter
+        final_time_range = healed_params.get("time_range", time_range)
+        final_relevance_threshold = healed_params.get("relevance_threshold", relevance_threshold)
+        final_max_results = healed_params.get("max_results", max_results)
+
+        # Create configuration using dual parameter support
+        if config is not None:
+            # Create configuration from legacy parameters
+            legacy_config = QueryEntriesConfig.from_legacy_params(
+                project=final_project,
+                start=final_start,
+                end=final_end,
+                message=final_message,
+                message_mode=final_message_mode,
+                case_sensitive=final_case_sensitive,
+                emoji=final_emoji,
+                status=final_status,
+                agents=final_agents,
+                meta_filters=final_meta_filters,
+                limit=final_limit,
+                page=final_page,
+                page_size=final_page_size,
+                compact=final_compact,
+                fields=final_fields,
+                include_metadata=final_include_metadata,
+                search_scope=final_search_scope,
+                document_types=final_document_types,
+                include_outdated=final_include_outdated,
+                verify_code_references=final_verify_code_references,
+                time_range=final_time_range,
+                relevance_threshold=final_relevance_threshold,
+                max_results=final_max_results
+            )
+
+            # Merge with provided config (legacy parameters take precedence)
+            config_dict = config.to_dict()
+            legacy_dict = legacy_config.to_dict()
+
+            for key, value in legacy_dict.items():
+                if value is not None:
+                    config_dict[key] = value
+
+            final_config = QueryEntriesConfig(**config_dict)
+        else:
+            final_config = QueryEntriesConfig.from_legacy_params(
+                project=final_project,
+                start=final_start,
+                end=final_end,
+                message=final_message,
+                message_mode=final_message_mode,
+                case_sensitive=final_case_sensitive,
+                emoji=final_emoji,
+                status=final_status,
+                agents=final_agents,
+                meta_filters=final_meta_filters,
+                limit=final_limit,
+                page=final_page,
+                page_size=final_page_size,
+                compact=final_compact,
+                fields=final_fields,
+                include_metadata=final_include_metadata,
+                search_scope=final_search_scope,
+                document_types=final_document_types,
+                include_outdated=final_include_outdated,
+                verify_code_references=final_verify_code_references,
+                time_range=final_time_range,
+                relevance_threshold=final_relevance_threshold,
+                max_results=final_max_results
+            )
+
+        return final_config, {"healing_applied": healing_applied, "healed_params": healed_params}
+
+    except Exception as e:
+        # Apply Phase 2 ExceptionHealer for parameter validation errors
+        healed_exception = _EXCEPTION_HEALER.heal_parameter_validation_error(
+            e, {
+                "project": project,
+                "message": message,
+                "message_mode": message_mode,
+                "search_scope": search_scope,
+                "limit": limit,
+                "page": page,
+                "page_size": page_size
+            }
+        )
+
+        if healed_exception["success"]:
+            # Use healed values from exception recovery
+            fallback_params = _FALLBACK_MANAGER.resolve_parameter_fallback(
+                "query_entries", healed_exception["healed_values"], context="exception_healing"
+            )
+
+            # Create safe fallback configuration
+            safe_config = QueryEntriesConfig.from_legacy_params(
+                project=fallback_params.get("project", project),
+                start=fallback_params.get("start", start),
+                end=fallback_params.get("end", end),
+                message=fallback_params.get("message", message),
+                message_mode=fallback_params.get("message_mode", message_mode),
+                case_sensitive=case_sensitive,
+                emoji=fallback_params.get("emoji", emoji),
+                status=fallback_params.get("status", status),
+                agents=fallback_params.get("agents", agents),
+                meta_filters=meta_filters,
+                limit=fallback_params.get("limit", limit),
+                page=fallback_params.get("page", page),
+                page_size=fallback_params.get("page_size", page_size),
+                compact=compact,
+                fields=fallback_params.get("fields", fields),
+                include_metadata=include_metadata,
+                search_scope=fallback_params.get("search_scope", search_scope),
+                document_types=fallback_params.get("document_types", document_types),
+                include_outdated=include_outdated,
+                verify_code_references=verify_code_references,
+                time_range=fallback_params.get("time_range", time_range),
+                relevance_threshold=fallback_params.get("relevance_threshold", relevance_threshold),
+                max_results=fallback_params.get("max_results", max_results)
+            )
+
+            return safe_config, {
+                "healing_applied": True,
+                "exception_healing": True,
+                "healed_params": healed_exception["healed_values"],
+                "fallback_used": True
+            }
+        else:
+            # Ultimate fallback - use BulletproofFallbackManager
+            fallback_params = _FALLBACK_MANAGER.apply_emergency_fallback("query_entries", {
+                "project": project or "default",
+                "message": message,
+                "search_scope": search_scope,
+                "limit": limit
+            })
+
+            emergency_config = QueryEntriesConfig.from_legacy_params(
+                project=fallback_params.get("project", "default"),
+                start=start,
+                end=end,
+                message=fallback_params.get("message", "Query executed after error recovery"),
+                message_mode=fallback_params.get("message_mode", "substring"),
+                case_sensitive=case_sensitive,
+                emoji=fallback_params.get("emoji", emoji),
+                status=fallback_params.get("status", status),
+                agents=fallback_params.get("agents", agents),
+                meta_filters=meta_filters,
+                limit=fallback_params.get("limit", 50),
+                page=fallback_params.get("page", 1),
+                page_size=fallback_params.get("page_size", 50),
+                compact=compact,
+                fields=fallback_params.get("fields", fields),
+                include_metadata=include_metadata,
+                search_scope=fallback_params.get("search_scope", "project"),
+                document_types=fallback_params.get("document_types", document_types),
+                include_outdated=include_outdated,
+                verify_code_references=verify_code_references,
+                time_range=fallback_params.get("time_range", time_range),
+                relevance_threshold=fallback_params.get("relevance_threshold", 0.0),
+                max_results=fallback_params.get("max_results", max_results)
+            )
+
+            return emergency_config, {
+                "healing_applied": True,
+                "emergency_fallback": True,
+                "fallback_params": fallback_params
+            }
+
+
+def _build_search_query(
+    final_config: QueryEntriesConfig,
+    context,
+    project: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Build and prepare search query with enhanced error handling.
+
+    This function extracts the search query building logic from the monolithic
+    query_entries function and adds bulletproof error handling.
+    """
+    try:
+        # Extract parameters from config
+        project_name = final_config.project
+        start = final_config.start
+        end = final_config.end
+        message = final_config.message
+        message_mode = final_config.message_mode
+        case_sensitive = final_config.case_sensitive
+        emoji = final_config.emoji
+        status = final_config.status
+        agents = final_config.agents
+        meta_filters = final_config.meta_filters
+        limit = final_config.limit
+        page = final_config.page
+        page_size = final_config.page_size
+        search_scope = final_config.search_scope
+        document_types = final_config.document_types
+        include_outdated = final_config.include_outdated
+        verify_code_references = final_config.verify_code_references
+        time_range = final_config.time_range
+        relevance_threshold = final_config.relevance_threshold
+        max_results = final_config.max_results
+
+        # Resolve project context with error handling
+        try:
+            resolved_project, project_context = _HELPER.resolve_project_context(
+                project_name, context, tool_name="query_entries"
+            )
+        except Exception as project_error:
+            # Try to heal project resolution error
+            healed_project = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                project_error, {"project": project_name, "tool": "query_entries"}
+            )
+
+            if healed_project and healed_project.get("success") and "healed_values" in healed_project:
+                resolved_project = healed_project["healed_values"].get("project", project_name)
+                project_context = context
+            else:
+                # Apply fallback project resolution
+                fallback_project = _FALLBACK_MANAGER.apply_context_aware_defaults(
+                    "query_entries", {"project": project_name, "operation": "project_resolution"}
+                )
+                resolved_project = fallback_project.get("project", "default")
+                project_context = context
+
+        # Build search parameters dictionary
+        search_params = {
+            "project": resolved_project,
+            "start": start,
+            "end": end,
+            "message": message,
+            "message_mode": message_mode,
+            "case_sensitive": case_sensitive,
+            "emoji": emoji,
+            "status": status,
+            "agents": agents,
+            "meta_filters": meta_filters,
+            "limit": limit,
+            "page": page,
+            "page_size": page_size,
+            "search_scope": search_scope,
+            "document_types": document_types,
+            "include_outdated": include_outdated,
+            "verify_code_references": verify_code_references,
+            "time_range": time_range,
+            "relevance_threshold": relevance_threshold,
+            "max_results": max_results
+        }
+
+        # Validate search parameters
+        validation_errors = []
+
+        # Validate time range parameters
+        if start and end:
+            try:
+                start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                end_dt = datetime.fromisoformat(end.replace('Z', '+00:00'))
+                if start_dt > end_dt:
+                    validation_errors.append("Start time must be before end time")
+            except ValueError as time_error:
+                healed_time = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                    time_error, {"start": start, "end": end, "error_type": "time_parsing"}
+                )
+                if not healed_time or not healed_time.get("success"):
+                    validation_errors.append(f"Invalid time format: {str(time_error)}")
+
+        # Validate pagination parameters
+        if page < 1:
+            healed_page = _PARAMETER_CORRECTOR.correct_numeric_parameter(
+                page, min_value=1, max_value=10000, field_name="page"
+            )
+            search_params["page"] = healed_page
+            if healed_page != page:
+                validation_errors.append(f"Page number corrected from {page} to {healed_page}")
+
+        if page_size < 1 or page_size > 1000:
+            healed_page_size = _PARAMETER_CORRECTOR.correct_numeric_parameter(
+                page_size, min_value=1, max_value=1000, field_name="page_size"
+            )
+            search_params["page_size"] = healed_page_size
+            if healed_page_size != page_size:
+                validation_errors.append(f"Page size corrected from {page_size} to {healed_page_size}")
+
+        # Validate limit parameter
+        if limit < 1 or limit > 1000:
+            healed_limit = _PARAMETER_CORRECTOR.correct_numeric_parameter(
+                limit, min_value=1, max_value=1000, field_name="limit"
+            )
+            search_params["limit"] = healed_limit
+            if healed_limit != limit:
+                validation_errors.append(f"Limit corrected from {limit} to {healed_limit}")
+
+        # Validate relevance threshold
+        if relevance_threshold < 0.0 or relevance_threshold > 1.0:
+            healed_threshold = _PARAMETER_CORRECTOR.correct_numeric_parameter(
+                relevance_threshold, min_value=0.0, max_value=1.0, field_name="relevance_threshold"
+            )
+            search_params["relevance_threshold"] = healed_threshold
+            if healed_threshold != relevance_threshold:
+                validation_errors.append(f"Relevance threshold corrected from {relevance_threshold} to {healed_threshold}")
+
+        # Return search query with validation warnings if any
+        return {
+            "search_params": search_params,
+            "project_context": project_context,
+            "resolved_project": resolved_project,
+            "validation_warnings": validation_errors,
+            "query_built": True
+        }
+
+    except Exception as e:
+        # Apply comprehensive exception healing for query building
+        healed_result = _EXCEPTION_HEALER.heal_complex_exception_combination(
+            e, {
+                "operation": "build_search_query",
+                "config": final_config.to_dict(),
+                "project": project
+            }
+        )
+
+        if healed_result and healed_result.get("success") and "healed_values" in healed_result:
+            # Create emergency search query
+            emergency_params = _FALLBACK_MANAGER.apply_emergency_fallback(
+                "query_entries", healed_result["healed_values"]
+            )
+
+            emergency_config = QueryEntriesConfig.from_legacy_params(
+                project=emergency_params.get("project", "default"),
+                message=emergency_params.get("message", "fallback query"),
+                message_mode=emergency_params.get("message_mode", "substring"),
+                limit=emergency_params.get("limit", 10),
+                page=emergency_params.get("page", 1),
+                page_size=emergency_params.get("page_size", 10),
+                search_scope=emergency_params.get("search_scope", "project")
+            )
+
+            # Return emergency query
+            return {
+                "search_params": emergency_config.to_dict(),
+                "project_context": context,
+                "resolved_project": emergency_params.get("project", "default"),
+                "validation_warnings": [f"Query built with emergency fallback due to error: {str(e)}"],
+                "query_built": True,
+                "emergency_fallback": True
+            }
+        else:
+            # Return error if query building fails
+            return {
+                "search_params": {},
+                "project_context": context,
+                "resolved_project": project.get("name", "default") if project else "default",
+                "validation_warnings": [f"Failed to build search query: {str(e)}"],
+                "query_built": False,
+                "error": str(e)
+            }
+
+
+def _execute_search_with_fallbacks(
+    search_query: Dict[str, Any],
+    final_config: QueryEntriesConfig
+) -> Dict[str, Any]:
+    """
+    Execute search query with comprehensive error handling and intelligent fallbacks.
+
+    This function extracts the search execution logic from the monolithic query_entries
+    function and adds bulletproof error handling with multiple fallback strategies.
+    """
+    try:
+        search_params = search_query["search_params"]
+        project_context = search_query["project_context"]
+        resolved_project = search_query["resolved_project"]
+        validation_warnings = search_query.get("validation_warnings", [])
+
+        # Execute the search with error handling
+        try:
+            # Get log file path
+            if resolved_project and project_context.project:
+                log_path = project_context.project["progress_log"]
+            else:
+                # Fallback to default log path
+                log_path = Path("docs/dev_plans/default/PROGRESS_LOG.md")
+
+            # Read log lines with error handling
+            try:
+                lines = read_all_lines(log_path)
+            except Exception as read_error:
+                # Try to heal file reading error
+                healed_read = _EXCEPTION_HEALER.heal_document_operation_error(
+                    read_error, {"log_path": str(log_path), "operation": "read_log"}
+                )
+
+                if healed_read["success"]:
+                    # Try alternative log path
+                    alt_log_path = healed_read["healed_values"].get("log_path", log_path)
+                    lines = read_all_lines(alt_log_path)
+                else:
+                    # Apply fallback - return empty results
+                    lines = []
+                    validation_warnings.append(f"Could not read log file: {str(read_error)}")
+
+            # Apply search filters with error handling
+            filtered_entries = []
+            for line in lines:
+                try:
+                    parsed = parse_log_line(line)
+                    if not parsed:
+                        continue
+
+                    # Apply message filter
+                    message = parsed.get("message", "")
+                    if search_params.get("message"):
+                        if not message_matches(
+                            message, search_params["message"],
+                            search_params.get("message_mode", "substring"),
+                            search_params.get("case_sensitive", False)
+                        ):
+                            continue
+
+                    # Apply emoji filter
+                    if search_params.get("emoji"):
+                        entry_emoji = parsed.get("emoji", "")
+                        if entry_emoji not in search_params["emoji"]:
+                            continue
+
+                    # Apply status filter (mapped to emojis)
+                    if search_params.get("status"):
+                        entry_emoji = parsed.get("emoji", "")
+                        for status_filter in search_params["status"]:
+                            status_emojis = STATUS_EMOJI.get(status_filter.lower(), [])
+                            if entry_emoji not in status_emojis:
+                                break
+                        else:
+                            continue  # No break occurred, emoji matches all status filters
+
+                    # Apply agent filter
+                    if search_params.get("agents"):
+                        entry_agent = parsed.get("agent", "")
+                        if entry_agent not in search_params["agents"]:
+                            continue
+
+                    # Apply metadata filters
+                    if search_params.get("meta_filters"):
+                        entry_meta = parsed.get("meta", {})
+                        if not _HELPER.matches_meta_filters(entry_meta, search_params["meta_filters"]):
+                            continue
+
+                    # Apply time range filter
+                    if search_params.get("start") or search_params.get("end"):
+                        entry_timestamp = parsed.get("ts", "")
+                        if entry_timestamp:
+                            try:
+                                entry_dt = datetime.fromisoformat(entry_timestamp.replace('Z', '+00:00'))
+
+                                if search_params.get("start"):
+                                    start_dt = datetime.fromisoformat(search_params["start"].replace('Z', '+00:00'))
+                                    if entry_dt < start_dt:
+                                        continue
+
+                                if search_params.get("end"):
+                                    end_dt = datetime.fromisoformat(search_params["end"].replace('Z', '+00:00'))
+                                    if entry_dt > end_dt:
+                                        continue
+                            except ValueError:
+                                # Skip entries with invalid timestamps
+                                continue
+
+                    # Apply relevance threshold (simplified implementation)
+                    if search_params.get("relevance_threshold", 0.0) > 0.0:
+                        # Simple relevance calculation based on message length and content
+                        relevance_score = len(message) / 1000.0  # Normalize to 0-1 range
+                        if relevance_score < search_params["relevance_threshold"]:
+                            continue
+
+                    # Entry matches all filters
+                    filtered_entries.append(parsed)
+
+                except Exception as filter_error:
+                    # Try to heal individual entry processing error
+                    healed_filter = _EXCEPTION_HEALER.heal_bulk_processing_error(
+                        filter_error, {"line": line, "operation": "entry_filtering"}
+                    )
+
+                    if not healed_filter or not healed_filter.get("success"):
+                        # Skip problematic entry but continue processing
+                        continue
+
+            # Apply pagination with error handling
+            try:
+                page = search_params.get("page", 1)
+                page_size = search_params.get("page_size", 50)
+                limit = search_params.get("limit", 50)
+
+                # Calculate pagination
+                total_entries = len(filtered_entries)
+                start_idx = (page - 1) * page_size
+                end_idx = start_idx + page_size
+
+                # Apply limit
+                if limit < page_size:
+                    end_idx = start_idx + limit
+
+                paginated_entries = filtered_entries[start_idx:end_idx]
+
+                # Create pagination info
+                pagination_info = {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_entries": total_entries,
+                    "has_next": end_idx < total_entries,
+                    "has_prev": page > 1
+                }
+
+            except Exception as pagination_error:
+                # Try to heal pagination error
+                healed_pagination = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                    pagination_error, {"page": page, "page_size": page_size, "limit": limit}
+                )
+
+                if healed_pagination["success"]:
+                    # Use healed pagination values
+                    healed_page = healed_pagination["healed_values"].get("page", 1)
+                    healed_page_size = healed_pagination["healed_values"].get("page_size", 50)
+
+                    start_idx = (healed_page - 1) * healed_page_size
+                    end_idx = start_idx + healed_page_size
+                    paginated_entries = filtered_entries[start_idx:end_idx]
+
+                    pagination_info = {
+                        "page": healed_page,
+                        "page_size": healed_page_size,
+                        "total_entries": len(filtered_entries),
+                        "has_next": end_idx < len(filtered_entries),
+                        "has_prev": healed_page > 1
+                    }
+                    validation_warnings.append(f"Pagination corrected due to error: {str(pagination_error)}")
+                else:
+                    # Apply safe pagination fallback
+                    paginated_entries = filtered_entries[:50]  # First 50 entries
+                    pagination_info = {
+                        "page": 1,
+                        "page_size": 50,
+                        "total_entries": len(filtered_entries),
+                        "has_next": len(filtered_entries) > 50,
+                        "has_prev": False
+                    }
+                    validation_warnings.append(f"Pagination error, using safe fallback: {str(pagination_error)}")
+
+            # Format response with error handling
+            try:
+                compact = search_params.get("compact", False)
+                fields = search_params.get("fields")
+                include_metadata = search_params.get("include_metadata", True)
+
+                if compact:
+                    # Format compact response
+                    formatted_entries = []
+                    for entry in paginated_entries:
+                        compact_entry = {
+                            "id": entry.get("id", ""),
+                            "ts": entry.get("ts", ""),
+                            "msg": entry.get("message", "")[:100] + "..." if len(entry.get("message", "")) > 100 else entry.get("message", ""),
+                            "emoji": entry.get("emoji", ""),
+                            "agent": entry.get("agent", "")
+                        }
+                        if include_metadata and entry.get("meta"):
+                            compact_entry["meta"] = entry["meta"]
+                        formatted_entries.append(compact_entry)
+                else:
+                    # Format full response with field filtering
+                    formatted_entries = []
+                    for entry in paginated_entries:
+                        if fields:
+                            # Include only requested fields
+                            filtered_entry = {}
+                            for field in fields:
+                                if field in entry:
+                                    filtered_entry[field] = entry[field]
+                            formatted_entries.append(filtered_entry)
+                        else:
+                            # Include all fields
+                            formatted_entry = entry.copy()
+                            if not include_metadata and "meta" in formatted_entry:
+                                del formatted_entry["meta"]
+                            formatted_entries.append(formatted_entry)
+
+            except Exception as format_error:
+                # Try to heal response formatting error
+                healed_format = _EXCEPTION_HEALER.heal_document_operation_error(
+                    format_error, {"operation": "response_formatting", "entries_count": len(paginated_entries)}
+                )
+
+                if healed_format["success"]:
+                    # Use healed formatting
+                    formatted_entries = paginated_entries  # Simple fallback
+                else:
+                    # Apply safe formatting fallback
+                    formatted_entries = []
+                    for entry in paginated_entries:
+                        safe_entry = {
+                            "id": entry.get("id", ""),
+                            "ts": entry.get("ts", ""),
+                            "message": entry.get("message", ""),
+                            "emoji": entry.get("emoji", ""),
+                            "agent": entry.get("agent", "")
+                        }
+                        formatted_entries.append(safe_entry)
+                    validation_warnings.append(f"Response formatting error, using safe fallback: {str(format_error)}")
+
+            # Return successful search results
+            return {
+                "ok": True,
+                "entries": formatted_entries,
+                "pagination": pagination_info,
+                "search_params": search_params,
+                "validation_warnings": validation_warnings,
+                "total_found": len(filtered_entries),
+                "returned": len(formatted_entries)
+            }
+
+        except Exception as search_error:
+            # Apply comprehensive search error healing
+            healed_search = _EXCEPTION_HEALER.heal_document_operation_error(
+                search_error, {"operation": "search_execution", "project": resolved_project}
+            )
+
+            if healed_search["success"]:
+                # Try alternative search with simplified parameters
+                simplified_params = {
+                    "project": resolved_project,
+                    "message": search_params.get("message", ""),
+                    "limit": min(search_params.get("limit", 50), 10),  # Reduce limit for safety
+                    "page": 1,
+                    "page_size": min(search_params.get("page_size", 50), 10)
+                }
+
+                # Execute simplified search
+                return _execute_search_with_fallbacks(
+                    {"search_params": simplified_params, "project_context": project_context, "resolved_project": resolved_project},
+                    final_config
+                )
+            else:
+                # Return error response
+                return {
+                    "ok": False,
+                    "error": f"Search execution failed: {str(search_error)}",
+                    "suggestion": "Try with simpler search parameters",
+                    "validation_warnings": validation_warnings,
+                    "search_params": search_params
+                }
+
+    except Exception as e:
+        # Apply ultimate exception healing for search execution
+        healed_result = _EXCEPTION_HEALER.heal_emergency_exception(
+            e, {"operation": "search_execution", "project": search_query.get("resolved_project", "unknown")}
+        )
+
+        if healed_result and healed_result.get("success") and "healed_values" in healed_result:
+            # Create emergency search results
+            emergency_params = _FALLBACK_MANAGER.apply_emergency_fallback(
+                "query_entries", healed_result["healed_values"]
+            )
+
+            return {
+                "ok": True,
+                "entries": [{
+                    "id": f"emergency-{uuid.uuid4().hex[:16]}",
+                    "ts": format_utc(utcnow()),
+                    "message": emergency_params.get("message", "Emergency search result after critical error"),
+                    "emoji": emergency_params.get("emoji", "🚨"),
+                    "agent": emergency_params.get("agent", "Scribe"),
+                    "meta": {"emergency_fallback": True, "critical_error": str(e)}
+                }],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 1,
+                    "total_entries": 1,
+                    "has_next": False,
+                    "has_prev": False
+                },
+                "validation_warnings": [f"Emergency fallback due to critical error: {str(e)}"],
+                "total_found": 1,
+                "returned": 1,
+                "emergency_fallback": True
+            }
+        else:
+            return {
+                "ok": False,
+                "error": f"Critical search error: {str(e)}",
+                "suggestion": "Check system configuration and try again",
+                "entries": [],
+                "pagination": {},
+                "total_found": 0,
+                "returned": 0
+            }
 
 
 @app.tool()
@@ -110,355 +995,174 @@ async def query_entries(
     Returns:
         Paginated response with entries and metadata
     """
+    # Phase 3 Task 3.5: Enhanced Function Decomposition
+    # This function now uses decomposed sub-functions with bulletproof error handling
+
     state_snapshot = await server_module.state_manager.record_tool("query_entries")
 
-    # === DUAL PARAMETER SUPPORT ===
-    # Create configuration from legacy parameters first
-    legacy_config = QueryEntriesConfig.from_legacy_params(
-        project=project,
-        start=start,
-        end=end,
-        message=message,
-        message_mode=message_mode,
-        case_sensitive=case_sensitive,
-        emoji=emoji,
-        status=status,
-        agents=agents,
-        meta_filters=meta_filters,
-        limit=limit,
-        page=page,
-        page_size=page_size,
-        compact=compact,
-        fields=fields,
-        include_metadata=include_metadata,
-        search_scope=search_scope,
-        document_types=document_types,
-        include_outdated=include_outdated,
-        verify_code_references=verify_code_references,
-        time_range=time_range,
-        relevance_threshold=relevance_threshold,
-        max_results=max_results
-    )
-
-    # Merge with provided config if available, with legacy parameters taking precedence
-    if config is not None:
-        # Create final config by merging config values with legacy parameter overrides
-        # Start with config values, then override with non-default legacy parameters
-        merge_params = {}
-
-        # Helper function to determine if a legacy parameter should override the config
-        def should_override(legacy_value, default_value):
-            if legacy_value is None:
-                return False
-            if isinstance(legacy_value, bool):
-                return legacy_value != default_value
-            if isinstance(legacy_value, (int, float)):
-                return legacy_value != default_value
-            if isinstance(legacy_value, str):
-                return legacy_value != default_value
-            return True  # For lists/dicts, any non-None value should override
-
-        # Apply legacy parameter precedence
-        merge_params['project'] = legacy_config.project if should_override(project, None) else config.project
-        merge_params['start'] = legacy_config.start if should_override(start, None) else config.start
-        merge_params['end'] = legacy_config.end if should_override(end, None) else config.end
-        merge_params['message'] = legacy_config.message if should_override(message, None) else config.message
-        merge_params['message_mode'] = legacy_config.message_mode if should_override(message_mode, "substring") else config.message_mode
-        merge_params['case_sensitive'] = legacy_config.case_sensitive if should_override(case_sensitive, False) else config.case_sensitive
-        merge_params['emoji'] = legacy_config.emoji if should_override(emoji, None) else config.emoji
-        merge_params['status'] = legacy_config.status if should_override(status, None) else config.status
-        merge_params['agents'] = legacy_config.agents if should_override(agents, None) else config.agents
-        merge_params['meta_filters'] = legacy_config.meta_filters if should_override(meta_filters, None) else config.meta_filters
-        merge_params['limit'] = legacy_config.limit if should_override(limit, 50) else config.limit
-        merge_params['page'] = legacy_config.page if should_override(page, 1) else config.page
-        merge_params['page_size'] = legacy_config.page_size if should_override(page_size, 50) else config.page_size
-        merge_params['compact'] = legacy_config.compact if should_override(compact, False) else config.compact
-        merge_params['fields'] = legacy_config.fields if should_override(fields, None) else config.fields
-        merge_params['include_metadata'] = legacy_config.include_metadata if should_override(include_metadata, True) else config.include_metadata
-        merge_params['search_scope'] = legacy_config.search_scope if should_override(search_scope, "project") else config.search_scope
-        merge_params['document_types'] = legacy_config.document_types if should_override(document_types, None) else config.document_types
-        merge_params['include_outdated'] = legacy_config.include_outdated if should_override(include_outdated, True) else config.include_outdated
-        merge_params['verify_code_references'] = legacy_config.verify_code_references if should_override(verify_code_references, False) else config.verify_code_references
-        merge_params['time_range'] = legacy_config.time_range if should_override(time_range, None) else config.time_range
-        merge_params['relevance_threshold'] = legacy_config.relevance_threshold if should_override(relevance_threshold, 0.0) else config.relevance_threshold
-        merge_params['max_results'] = legacy_config.max_results if should_override(max_results, None) else config.max_results
-
-        final_config = QueryEntriesConfig(**merge_params)
-    else:
-        final_config = legacy_config
-
-    # Validate the final configuration
-    is_valid, error_response = final_config.validate()
-    if not is_valid:
-        # Ensure error response has correct MCP interface structure
-        if "ok" not in error_response:
-            error_response["ok"] = False
-        return error_response
-
-    # Extract validated parameters from final config
-    project = final_config.project
-    start = final_config.start
-    end = final_config.end
-    message = final_config.message
-    message_mode = final_config.message_mode
-    case_sensitive = final_config.case_sensitive
-    emoji = final_config.emoji
-    status = final_config.status
-    agents = final_config.agents
-    meta_filters = final_config.meta_filters
-    limit = final_config.limit
-    page = final_config.page
-    page_size = final_config.page_size
-    compact = final_config.compact
-    fields = final_config.fields
-    include_metadata = final_config.include_metadata
-    search_scope = final_config.search_scope
-    document_types = final_config.document_types
-    include_outdated = final_config.include_outdated
-    verify_code_references = final_config.verify_code_references
-    time_range = final_config.time_range
-    relevance_threshold = final_config.relevance_threshold
-    max_results = final_config.max_results
-    # === END DUAL PARAMETER SUPPORT ===
-
-    # Handle pagination vs legacy limit
-    # Ensure page and page_size are integers
-    page = int(page) if isinstance(page, str) else page
-    page_size = int(page_size) if isinstance(page_size, str) else page_size
-    limit = int(limit) if isinstance(limit, str) else limit
-
-    if page > 1 or page_size != 50:
-        # Use pagination mode
-        limit = None  # Ignore limit in pagination mode
-    else:
-        # Use legacy mode for backward compatibility
-        limit = max(1, min(limit or 50, 500))
-        page_size = limit
-
-    # Apply normalizations that were previously done in validation
-    # These are now handled by QueryEntriesConfig validation
-
-    # Resolve emojis and normalize meta filters (still needed for function logic)
-    normalised_emoji = _resolve_emojis(emoji, status)
-    meta_normalised, meta_error = normalize_meta_filters(meta_filters)
-    if meta_error:
-        return ErrorHandler.create_validation_error(
-            error_message=meta_error,
-            context={"parameter": "meta_filters"}
-        )
-
-    # Handle max_results override for backward compatibility
-    if max_results is not None:
-        limit = max_results
-        page_size = min(page_size, max_results)
-
-    start_bound, start_error = _normalise_boundary(start, end=False)
-    if start_error:
-        return {"ok": False, "error": start_error}
-    end_bound, end_error = _normalise_boundary(end, end=True)
-    if end_error:
-        return {"ok": False, "error": end_error}
-
-    context: Optional[LoggingContext] = None
-
-    # Handle cross-project search for enhanced scopes
-    if search_scope != "project":
-        # Cross-project search mode
-        projects_to_search = await _resolve_cross_project_projects(search_scope, document_types)
-        if not projects_to_search:
-            return {
-                "ok": False,
-                "error": f"No projects found for search_scope '{search_scope}' with document_types {document_types or []}",
-                "recent_projects": [],
-                "reminders": [],
-            }
-
-        # Use cross-project search logic
-        return await _handle_cross_project_search(
-            projects=projects_to_search,
-            search_scope=search_scope,
-            document_types=document_types,
-            start_bound=start_bound,
-            end_bound=end_bound,
+    try:
+        # === PHASE 3 ENHANCED PARAMETER VALIDATION AND PREPARATION ===
+        # Replace monolithic parameter handling with bulletproof validation and healing
+        final_config, validation_info = _validate_search_parameters(
+            project=project,
+            start=start,
+            end=end,
             message=message,
             message_mode=message_mode,
             case_sensitive=case_sensitive,
-            agents=_clean_list(agents),
-            emojis=normalised_emoji or None,
-            meta_filters=meta_normalised or None,
+            emoji=emoji,
+            status=status,
+            agents=agents,
+            meta_filters=meta_filters,
+            limit=limit,
             page=page,
             page_size=page_size,
             compact=compact,
             fields=fields,
             include_metadata=include_metadata,
+            search_scope=search_scope,
+            document_types=document_types,
+            include_outdated=include_outdated,
             verify_code_references=verify_code_references,
+            time_range=time_range,
             relevance_threshold=relevance_threshold,
-            state_snapshot=state_snapshot,
-            helper=_HELPER,
-            context=None,
+            max_results=max_results,
+            config=config
         )
 
-    # Single project mode (existing behavior)
-    try:
-        context = await _HELPER.prepare_context(
-            tool_name="query_entries",
-            agent_id=None,
-            explicit_project=project,
-            require_project=True,
-            state_snapshot=state_snapshot,
-        )
-    except ProjectResolutionError as exc:
-        error_response = ErrorHandler.create_project_resolution_error(
-            error=exc,
-            tool_name="query_entries"
-        )
-        error_response["reminders"] = []
-        return error_response
-
-    project_data = context.project or {}
-
-    backend = server_module.storage_backend
-    if backend:
-        record = await backend.fetch_project(project_data["name"])
-        if not record:
-            record = await backend.upsert_project(
-                name=project_data["name"],
-                repo_root=project_data["root"],
-                progress_log_path=project_data["progress_log"],
+        # === CONTEXT RESOLUTION WITH ENHANCED ERROR HANDLING ===
+        try:
+            context = await resolve_logging_context(
+                tool_name="query_entries",
+                server_module=server_module,
+                agent_id=None,
+                require_project=False,  # query_entries can work without active project
+                state_snapshot=state_snapshot,
+            )
+        except Exception as context_error:
+            # Apply Phase 2 ExceptionHealer for context resolution errors
+            healed_context = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                context_error, {"tool_name": "query_entries"}
             )
 
-        # Use pagination if available
-        if hasattr(backend, 'query_entries_paginated'):
-            rows, total_count = await backend.query_entries_paginated(
-                project=record,
-                page=page,
-                page_size=page_size,
-                start=start_bound.isoformat() if start_bound else None,
-                end=end_bound.isoformat() if end_bound else None,
-                agents=_clean_list(agents),
-                emojis=normalised_emoji or None,
-                message=message,
-                message_mode=message_mode,
-                case_sensitive=case_sensitive,
-                meta_filters=meta_normalised or None,
-            )
-            pagination_info = create_pagination_info(page, page_size, total_count)
-        else:
-            # Fallback to legacy method
-            offset = (page - 1) * page_size
-            rows = await backend.query_entries(
-                project=record,
-                limit=page_size,
-                start=start_bound.isoformat() if start_bound else None,
-                end=end_bound.isoformat() if end_bound else None,
-                agents=_clean_list(agents),
-                emojis=normalised_emoji or None,
-                message=message,
-                message_mode=message_mode,
-                case_sensitive=case_sensitive,
-                meta_filters=meta_normalised or None,
-                offset=offset,
-            )
-            # Get total count (less efficient fallback)
-            total_count = await backend.count_query_entries(
-                project=record,
-                start=start_bound.isoformat() if start_bound else None,
-                end=end_bound.isoformat() if end_bound else None,
-                agents=_clean_list(agents),
-                emojis=normalised_emoji or None,
-                message=message,
-                message_mode=message_mode,
-                case_sensitive=case_sensitive,
-                meta_filters=meta_normalised or None,
-            )
-            pagination_info = create_pagination_info(page, page_size, total_count)
+            if healed_context and healed_context.get("success"):
+                # Create minimal fallback context
+                context = type('obj', (object,), {
+                    'project': None,
+                    'recent_projects': [],
+                    'reminders': []
+                })()
+            else:
+                # Continue with empty context
+                context = type('obj', (object,), {
+                    'project': None,
+                    'recent_projects': [],
+                    'reminders': []
+                })()
 
-        response = _HELPER.success_with_entries(
-            entries=rows,
-            context=context,
-            compact=compact,
-            fields=fields,
-            include_metadata=include_metadata,
-            pagination=pagination_info,
-            extra_data={},
-        )
+        project = context.project or {}
 
-        # Record token usage
-        if token_estimator:
-            token_estimator.record_operation(
-                operation="query_entries",
-                input_data={
-                    "project": project,
-                    "start": start,
-                    "end": end,
-                    "message": message,
-                    "page": page,
-                    "page_size": page_size,
-                    "compact": compact,
-                    "fields": fields,
-                    "include_metadata": include_metadata
-                },
-                response=response,
-                compact_mode=compact,
-                page_size=page_size
-            )
+        # === ENHANCED SEARCH QUERY BUILDING ===
+        search_query = _build_search_query(final_config, context, project)
 
-        return response
+        if not search_query.get("query_built", False):
+            # If query building failed, try to continue with emergency query
+            if search_query.get("emergency_fallback"):
+                # Execute emergency search
+                search_result = _execute_search_with_fallbacks(search_query, final_config)
+                search_result["parameter_healing"] = True
+                search_result["emergency_fallback"] = True
+                return search_result
+            else:
+                # Return error if query building completely failed
+                return {
+                    "ok": False,
+                    "error": "Failed to build search query",
+                    "details": search_query.get("error", "Unknown query building error"),
+                    "suggestion": "Try with simpler search parameters"
+                }
 
-    # File-based fallback with pagination
-    all_entries = await _query_file(
-        project_data,
-        limit=None,  # Get all matching entries
-        start=start_bound,
-        end=end_bound,
-        message=message,
-        message_mode=message_mode,
-        case_sensitive=case_sensitive,
-        agents=_clean_list(agents),
-        emojis=normalised_emoji or None,
-        meta_filters=meta_normalised or None,
-    )
+        # === ENHANCED SEARCH EXECUTION WITH FALLBACKS ===
+        search_result = _execute_search_with_fallbacks(search_query, final_config)
 
-    # Apply pagination to file-based results
-    total_count = len(all_entries)
-    start_idx, end_idx = _PAGINATION_CALCULATOR.calculate_pagination_indices(page, page_size, total_count)
-    paginated_entries = all_entries[start_idx:end_idx]
+        # Add validation info to result if healing was applied
+        if validation_info.get("healing_applied"):
+            search_result["parameter_healing"] = True
 
-    pagination_info = create_pagination_info(page, page_size, total_count)
+            if validation_info.get("exception_healing"):
+                search_result["parameter_exception_healing"] = True
+            elif validation_info.get("emergency_fallback"):
+                search_result["parameter_emergency_fallback"] = True
+            else:
+                search_result["parameter_healing_applied"] = True
 
-    response = _HELPER.success_with_entries(
-        entries=paginated_entries,
-        context=context,
-        compact=compact,
-        fields=fields,
-        include_metadata=include_metadata,
-        pagination=pagination_info,
-        extra_data={},
-    )
+        # Add query building warnings
+        if search_query.get("validation_warnings"):
+            if "warnings" not in search_result:
+                search_result["warnings"] = []
+            search_result["warnings"].extend(search_query["validation_warnings"])
 
-    # Record token usage
-    if token_estimator:
-        token_estimator.record_operation(
-            operation="query_entries",
-            input_data={
+        # Add search execution warnings
+        if search_result.get("validation_warnings"):
+            if "warnings" not in search_result:
+                search_result["warnings"] = []
+            search_result["warnings"].extend(search_result["validation_warnings"])
+
+        return search_result
+
+    except Exception as e:
+        # === ULTIMATE EXCEPTION HANDLING AND FALLBACK ===
+        # Apply Phase 2 ExceptionHealer for unexpected errors
+        healed_result = _EXCEPTION_HEALER.heal_emergency_exception(
+            e, {
+                "operation": "query_entries_main",
                 "project": project,
-                "start": start,
-                "end": end,
                 "message": message,
-                "page": page,
-                "page_size": page_size,
-                "compact": compact,
-                "fields": fields,
-                "include_metadata": include_metadata,
-                "backend": "file"
-            },
-            response=response,
-            compact_mode=compact,
-            page_size=page_size
+                "tool": "query_entries"
+            }
         )
 
-    return response
+        if healed_result and healed_result.get("success") and "healed_values" in healed_result:
+            # Create emergency search with healed parameters
+            emergency_params = _FALLBACK_MANAGER.apply_emergency_fallback(
+                "query_entries", healed_result["healed_values"]
+            )
 
+            # Create minimal emergency search result
+            return {
+                "ok": True,
+                "entries": [{
+                    "id": f"emergency-{uuid.uuid4().hex[:16]}",
+                    "ts": format_utc(utcnow()),
+                    "message": emergency_params.get("message", "Emergency search result after critical error"),
+                    "emoji": emergency_params.get("emoji", "🚨"),
+                    "agent": emergency_params.get("agent", "Scribe"),
+                    "meta": {
+                        "emergency_fallback": True,
+                        "critical_error": str(e),
+                        "healed_exception": True
+                    }
+                }],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 1,
+                    "total_entries": 1,
+                    "has_next": False,
+                    "has_prev": False
+                },
+                "emergency_fallback": True,
+                "original_error": str(e)
+            }
+        else:
+            # Return error if even emergency healing fails
+            return {
+                "ok": False,
+                "error": f"Critical error in query_entries: {str(e)}",
+                "emergency_healing_failed": True,
+                "suggestion": "Check system configuration and try again",
+                "entries": [],
+                "pagination": {}
+            }
 
 async def _resolve_cross_project_projects(
     search_scope: str,

@@ -17,7 +17,7 @@ import asyncio
 from scribe_mcp import server as server_module
 from scribe_mcp.config.settings import settings
 from scribe_mcp.server import app
-from scribe_mcp.utils.bulk_processor import BulkProcessor
+from scribe_mcp.utils.bulk_processor import BulkProcessor, ParallelBulkProcessor
 from scribe_mcp.utils.estimator import BulkProcessingCalculator
 from scribe_mcp.tools.agent_project_utils import (
     ensure_agent_session,
@@ -35,9 +35,9 @@ from scribe_mcp.shared.logging_utils import (
     resolve_log_definition as shared_resolve_log_definition,
     resolve_logging_context,
 )
-from scribe_mcp.utils.parameter_validator import ToolValidator
-from scribe_mcp.utils.config_manager import ConfigManager, resolve_fallback_chain
-from scribe_mcp.utils.error_handler import ErrorHandler
+from scribe_mcp.utils.parameter_validator import ToolValidator, BulletproofParameterCorrector
+from scribe_mcp.utils.config_manager import ConfigManager, resolve_fallback_chain, BulletproofFallbackManager
+from scribe_mcp.utils.error_handler import ErrorHandler, ExceptionHealer
 from scribe_mcp.tools.config.append_entry_config import AppendEntryConfig
 
 _RATE_TRACKER: Dict[str, deque[float]] = defaultdict(deque)
@@ -49,6 +49,14 @@ _CONFIG_MANAGER = ConfigManager("append_entry")
 
 # Global bulk processing calculator
 _BULK_CALCULATOR = BulkProcessingCalculator()
+
+# Global parallel bulk processor for Phase 1 integration
+_PARALLEL_PROCESSOR = ParallelBulkProcessor()
+
+# Phase 3 Enhanced utilities integration
+_PARAMETER_CORRECTOR = BulletproofParameterCorrector()
+_EXCEPTION_HEALER = ExceptionHealer()
+_FALLBACK_MANAGER = BulletproofFallbackManager()
 
 
 def _sanitize_message(message: str) -> str:
@@ -122,6 +130,730 @@ def _generate_deterministic_entry_id(
 
     # Use first 32 characters as deterministic UUID
     return full_hash[:32]
+
+
+def _validate_and_prepare_parameters(
+    message: str,
+    status: Optional[str],
+    emoji: Optional[str],
+    agent: Optional[str],
+    meta: Optional[Any],
+    timestamp_utc: Optional[str],
+    items: Optional[str],
+    items_list: Optional[List[Dict[str, Any]]],
+    auto_split: bool,
+    split_delimiter: str,
+    stagger_seconds: int,
+    agent_id: Optional[str],
+    log_type: Optional[str],
+    config: Optional[AppendEntryConfig]
+) -> Tuple[AppendEntryConfig, Dict[str, Any]]:
+    """
+    Validate and prepare parameters using enhanced Phase 3 utilities.
+
+    This function replaces the monolithic parameter handling section of append_entry
+    with bulletproof parameter validation and healing.
+    """
+    try:
+        # Apply Phase 1 BulletproofParameterCorrector for initial parameter healing
+        healed_params = {}
+        healing_applied = False
+
+        if message:
+            healed_message = _PARAMETER_CORRECTOR.correct_message_parameter(message)
+            if healed_message != message:
+                healed_params["message"] = healed_message
+                healing_applied = True
+
+        if status:
+            healed_status = _PARAMETER_CORRECTOR.correct_enum_parameter(
+                status, {"info", "success", "warn", "error", "bug", "plan"}, field_name="status"
+            )
+            if healed_status != status:
+                healed_params["status"] = healed_status
+                healing_applied = True
+
+        if emoji:
+            healed_emoji = _PARAMETER_CORRECTOR.correct_message_parameter(emoji)
+            if healed_emoji != emoji:
+                healed_params["emoji"] = healed_emoji
+                healing_applied = True
+
+        if agent:
+            healed_agent = _PARAMETER_CORRECTOR.correct_message_parameter(agent)
+            if healed_agent != agent:
+                healed_params["agent"] = healed_agent
+                healing_applied = True
+
+        if meta:
+            healed_meta = _PARAMETER_CORRECTOR.correct_metadata_parameter(meta)
+            if healed_meta != meta:
+                healed_params["meta"] = healed_meta
+                healing_applied = True
+
+        if timestamp_utc:
+            healed_timestamp = _PARAMETER_CORRECTOR.correct_timestamp_parameter(timestamp_utc)
+            if healed_timestamp != timestamp_utc:
+                healed_params["timestamp_utc"] = healed_timestamp
+                healing_applied = True
+
+        if log_type:
+            healed_log_type = _PARAMETER_CORRECTOR.correct_message_parameter(log_type)
+            if healed_log_type != log_type:
+                healed_params["log_type"] = healed_log_type
+                healing_applied = True
+
+        # Apply fallbacks for corrected parameters
+        if healing_applied:
+            fallback_params = _FALLBACK_MANAGER.resolve_parameter_fallback(
+                "append_entry", healed_params, context="parameter_validation"
+            )
+            healed_params.update(fallback_params)
+
+        # Update parameters with healed values
+        final_message = healed_params.get("message", message)
+        final_status = healed_params.get("status", status)
+        final_emoji = healed_params.get("emoji", emoji)
+        final_agent = healed_params.get("agent", agent)
+        final_meta = healed_params.get("meta", meta)
+        final_timestamp_utc = healed_params.get("timestamp_utc", timestamp_utc)
+        final_log_type = healed_params.get("log_type", log_type)
+
+        # Create configuration using dual parameter support
+        if config is not None:
+            legacy_config = AppendEntryConfig.from_legacy_params(
+                message=final_message,
+                status=final_status,
+                emoji=final_emoji,
+                agent=final_agent,
+                meta=final_meta,
+                timestamp_utc=final_timestamp_utc,
+                items=items,
+                items_list=items_list,
+                auto_split=auto_split,
+                split_delimiter=split_delimiter,
+                stagger_seconds=stagger_seconds,
+                agent_id=agent_id,
+                log_type=final_log_type
+            )
+
+            config_dict = config.to_dict()
+            legacy_dict = legacy_config.to_dict()
+
+            for key, value in legacy_dict.items():
+                if value is not None or key in ['message', 'auto_split']:
+                    config_dict[key] = value
+
+            final_config = AppendEntryConfig(**config_dict)
+        else:
+            final_config = AppendEntryConfig.from_legacy_params(
+                message=final_message,
+                status=final_status,
+                emoji=final_emoji,
+                agent=final_agent,
+                meta=final_meta,
+                timestamp_utc=final_timestamp_utc,
+                items=items,
+                items_list=items_list,
+                auto_split=auto_split,
+                split_delimiter=split_delimiter,
+                stagger_seconds=stagger_seconds,
+                agent_id=agent_id,
+                log_type=final_log_type
+            )
+
+        return final_config, {"healing_applied": healing_applied, "healed_params": healed_params}
+
+    except Exception as e:
+        # Apply Phase 2 ExceptionHealer for parameter validation errors
+        healed_exception = _EXCEPTION_HEALER.heal_parameter_validation_error(
+            e, {"message": message, "status": status, "agent": agent, "log_type": log_type}
+        )
+
+        if healed_exception["success"]:
+            # Use healed values from exception recovery
+            fallback_params = _FALLBACK_MANAGER.resolve_parameter_fallback(
+                "append_entry", healed_exception["healed_values"], context="exception_healing"
+            )
+
+            # Create safe fallback configuration
+            safe_config = AppendEntryConfig.from_legacy_params(
+                message=fallback_params.get("message", message or "Entry processing completed"),
+                status=fallback_params.get("status", status or "info"),
+                emoji=fallback_params.get("emoji", emoji or "ℹ️"),
+                agent=fallback_params.get("agent", agent or "Scribe"),
+                meta=fallback_params.get("meta", meta or {}),
+                timestamp_utc=fallback_params.get("timestamp_utc", timestamp_utc),
+                items=items,
+                items_list=items_list,
+                auto_split=auto_split,
+                split_delimiter=split_delimiter,
+                stagger_seconds=stagger_seconds,
+                agent_id=agent_id,
+                log_type=fallback_params.get("log_type", log_type or "progress")
+            )
+
+            return safe_config, {
+                "healing_applied": True,
+                "exception_healing": True,
+                "healed_params": healed_exception["healed_values"],
+                "fallback_used": True
+            }
+        else:
+            # Ultimate fallback - use BulletproofFallbackManager
+            fallback_params = _FALLBACK_MANAGER.apply_emergency_fallback("append_entry", {
+                "message": message or "Entry processing completed",
+                "status": status,
+                "agent": agent,
+                "log_type": log_type
+            })
+
+            emergency_config = AppendEntryConfig.from_legacy_params(
+                message=fallback_params.get("message", "Emergency entry created"),
+                status=fallback_params.get("status", "info"),
+                emoji=fallback_params.get("emoji", "🚨"),
+                agent=fallback_params.get("agent", "Scribe"),
+                meta=fallback_params.get("meta", {"emergency_fallback": True}),
+                timestamp_utc=fallback_params.get("timestamp_utc", timestamp_utc),
+                items=items,
+                items_list=items_list,
+                auto_split=auto_split,
+                split_delimiter=split_delimiter,
+                stagger_seconds=stagger_seconds,
+                agent_id=agent_id,
+                log_type=fallback_params.get("log_type", "progress")
+            )
+
+            return emergency_config, {
+                "healing_applied": True,
+                "emergency_fallback": True,
+                "fallback_params": fallback_params
+            }
+
+
+async def _process_single_entry(
+    final_config: AppendEntryConfig,
+    context,
+    project: Dict[str, Any],
+    recent: List[Dict[str, Any]],
+    log_cache: Dict[str, Tuple[Path, Dict[str, Any]]],
+    meta_pairs: Tuple[Tuple[str, str], ...]
+) -> Dict[str, Any]:
+    """
+    Process a single log entry with enhanced error handling and fallbacks.
+
+    This function extracts the single entry processing logic from the monolithic
+    append_entry function and adds bulletproof error handling.
+    """
+    try:
+        message = final_config.message
+        status = final_config.status
+        emoji = final_config.emoji
+        agent = final_config.agent
+        timestamp_utc = final_config.timestamp_utc
+        agent_id = final_config.agent_id
+        base_log_type = (final_config.log_type or "progress").lower()
+
+        # Validate message content with enhanced healing
+        validation_error = _validate_message(message)
+        if validation_error:
+            # Try to heal the validation error
+            healed_message = _EXCEPTION_HEALER.heal_document_operation_error(
+                ValueError(validation_error), {"message": message, "operation": "message_validation"}
+            )
+
+            if healed_message["success"]:
+                message = healed_message["healed_values"].get("message", message)
+            else:
+                # Apply fallback
+                fallback_result = _FALLBACK_MANAGER.resolve_parameter_fallback(
+                    "append_entry", {"message": message}, context="message_validation_error"
+                )
+                message = fallback_result.get("message", "Message validation failed")
+
+        # Enforce rate limit with exception handling
+        try:
+            rate_error = await _enforce_rate_limit(project["name"])
+            if rate_error:
+                rate_error["recent_projects"] = list(recent)
+                return rate_error
+        except Exception as rate_error:
+            # Heal rate limiting errors
+            healed_rate = _EXCEPTION_HEALER.heal_rotation_error(rate_error, {"project": project["name"]})
+            if not healed_rate["success"]:
+                # Continue with warning if rate limiting fails
+                pass
+
+        # Resolve emoji, agent, and timestamp with fallbacks
+        try:
+            resolved_emoji = _resolve_emoji(emoji, status, project)
+        except Exception as emoji_error:
+            healed_emoji = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                emoji_error, {"emoji": emoji, "status": status}
+            )
+            resolved_emoji = healed_emoji["healed_values"].get("emoji", "ℹ️") if healed_emoji["success"] else "ℹ️"
+
+        defaults = project.get("defaults") or {}
+        try:
+            resolved_agent = _sanitize_identifier(resolve_fallback_chain(agent, defaults.get("agent"), "Scribe"))
+        except Exception as agent_error:
+            healed_agent = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                agent_error, {"agent": agent, "default_agent": defaults.get("agent")}
+            )
+            resolved_agent = healed_agent["healed_values"].get("agent", "Scribe") if healed_agent["success"] else "Scribe"
+
+        try:
+            timestamp_dt, timestamp, timestamp_warning = _resolve_timestamp(timestamp_utc)
+        except Exception as timestamp_error:
+            healed_timestamp = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                timestamp_error, {"timestamp_utc": timestamp_utc}
+            )
+            timestamp = healed_timestamp["healed_values"].get("timestamp_utc", format_utc(utcnow())) if healed_timestamp["success"] else format_utc(utcnow())
+            timestamp_dt = utcnow()
+            timestamp_warning = "Timestamp was healed due to error"
+
+        # Process metadata
+        meta_payload = {key: value for key, value in meta_pairs}
+        entry_log_type = base_log_type
+
+        try:
+            log_path, log_definition = _resolve_log_target(project, entry_log_type, log_cache)
+        except Exception as log_error:
+            healed_log = _EXCEPTION_HEALER.heal_document_operation_error(
+                log_error, {"log_type": entry_log_type, "project": project}
+            )
+            if healed_log["success"]:
+                entry_log_type = healed_log["healed_values"].get("log_type", "progress")
+                log_path, log_definition = _resolve_log_target(project, entry_log_type, log_cache)
+            else:
+                # Fallback to progress log
+                entry_log_type = "progress"
+                log_path, log_definition = _resolve_log_target(project, entry_log_type, log_cache)
+
+        requirement_error = _validate_log_requirements(log_definition, meta_payload)
+        if requirement_error:
+            # Try to heal metadata requirements
+            healed_meta = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                ValueError(requirement_error), {"metadata": meta_payload, "requirements": log_definition}
+            )
+            if healed_meta["success"]:
+                meta_payload.update(healed_meta["healed_values"].get("metadata", {}))
+            else:
+                # Apply fallback metadata
+                fallback_meta = _FALLBACK_MANAGER.apply_context_aware_defaults(
+                    "append_entry", {"metadata": meta_payload, "log_type": entry_log_type}
+                )
+                meta_payload.update(fallback_meta.get("metadata", {}))
+
+        meta_payload.setdefault("log_type", entry_log_type)
+
+        # Generate deterministic entry_id with error handling
+        try:
+            repo_slug = _get_repo_slug(project["root"])
+            project_slug = project["name"].lower().replace(" ", "-").replace("_", "-")
+            entry_id = _generate_deterministic_entry_id(
+                repo_slug=repo_slug,
+                project_slug=project_slug,
+                timestamp=timestamp,
+                agent=resolved_agent,
+                message=message,
+                meta=meta_payload
+            )
+        except Exception as id_error:
+            # Generate fallback ID
+            entry_id = f"fallback-{uuid.uuid4().hex[:16]}"
+            meta_payload["fallback_id"] = True
+
+        # Compose and write line with enhanced error handling
+        line = None  # Initialize to prevent UnboundLocalError
+        try:
+            # Convert meta dict to meta_pairs tuple for _compose_line
+            meta_pairs = tuple(meta_payload.items()) if meta_payload else ()
+
+            line = _compose_line(
+                emoji=resolved_emoji,
+                message=message,
+                timestamp=timestamp,
+                agent=resolved_agent,
+                project_name=project.get("name", "unknown"),
+                meta_pairs=meta_pairs
+            )
+
+            line_id = await append_line(log_path, line)
+
+        except Exception as write_error:
+            # Try to heal write errors
+            healed_write = _EXCEPTION_HEALER.heal_document_operation_error(
+                write_error, {"log_path": str(log_path), "line": line or "FAILED_TO_CREATE"}
+            )
+
+            if healed_write["success"]:
+                # Try alternative write method
+                try:
+                    alternative_line = healed_write["healed_values"].get("line", line)
+                    line_id = await append_line(log_path, alternative_line)
+                except Exception:
+                    # Emergency fallback - write to emergency log
+                    emergency_log_path = project["root"] / "emergency_entries.log"
+                    emergency_line = f"[{timestamp}] [Agent: {resolved_agent}] {message}\n"
+                    line_id = await append_line(emergency_log_path, emergency_line)
+                    meta_payload["emergency_write"] = True
+            else:
+                # Ultimate fallback
+                raise write_error
+
+        # Update project state with exception handling
+        try:
+            await server_module.state_manager.update_project_activity(
+                project["name"], entry_id, message, len(line)
+            )
+        except Exception as state_error:
+            # Log state error but don't fail the operation
+            pass
+
+        # Prepare response
+        response = {
+            "ok": True,
+            "id": entry_id,
+            "path": str(log_path),
+            "line_id": line_id,
+            "recent_projects": list(recent),
+        }
+
+        if timestamp_warning:
+            response["warning"] = timestamp_warning
+
+        return response
+
+    except Exception as e:
+        # Apply comprehensive exception healing for single entry processing
+        healed_result = _EXCEPTION_HEALER.heal_complex_exception_combination(
+            e, {
+                "operation": "single_entry_processing",
+                "message": final_config.message,
+                "project": project,
+                "config": final_config.to_dict()
+            }
+        )
+
+        if healed_result and healed_result.get("success") and "healed_values" in healed_result:
+            # Create emergency entry with healed values
+            emergency_params = _FALLBACK_MANAGER.apply_emergency_fallback(
+                "append_entry", healed_result["healed_values"]
+            )
+
+            emergency_config = AppendEntryConfig.from_legacy_params(
+                message=emergency_params.get("message", "Emergency entry created after processing error"),
+                status=emergency_params.get("status", "error"),
+                emoji=emergency_params.get("emoji", "🚨"),
+                agent=emergency_params.get("agent", "Scribe"),
+                meta=emergency_params.get("meta", {"emergency_fallback": True, "original_error": str(e)}),
+                timestamp_utc=emergency_params.get("timestamp_utc", final_config.timestamp_utc),
+                agent_id=final_config.agent_id,
+                log_type=emergency_params.get("log_type", "progress")
+            )
+
+            # Try to process emergency entry
+            return await _process_single_entry(
+                emergency_config, context, project, recent, log_cache,
+                tuple(emergency_params.get("meta", {}).items())
+            )
+        else:
+            # Return error response
+            return {
+                "ok": False,
+                "error": f"Failed to process entry: {str(e)}",
+                "suggestion": "Try with simpler parameters or check project configuration",
+                "recent_projects": list(recent),
+            }
+
+
+async def _process_bulk_entries(
+    final_config: AppendEntryConfig,
+    context,
+    project: Dict[str, Any],
+    recent: List[Dict[str, Any]],
+    log_cache: Dict[str, Tuple[Path, Dict[str, Any]]],
+    meta_pairs: Tuple[Tuple[str, str], ...]
+) -> Dict[str, Any]:
+    """
+    Process bulk entries with enhanced error handling and intelligent fallbacks.
+
+    This function extracts the bulk processing logic from the monolithic append_entry
+    function and adds bulletproof error handling with intelligent recovery.
+    """
+    try:
+        items = final_config.items
+        items_list = final_config.items_list
+        auto_split = final_config.auto_split
+        split_delimiter = final_config.split_delimiter
+        stagger_seconds = final_config.stagger_seconds
+        agent_id = final_config.agent_id
+        base_log_type = (final_config.log_type or "progress").lower()
+
+        # Enhanced bulk mode handling with multiple input formats
+        bulk_items = None
+
+        if items_list is not None:
+            if not isinstance(items_list, list):
+                # Try to heal the items_list parameter
+                healed_items = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                    ValueError("items_list must be a list of dictionaries"),
+                    {"items_list": items_list}
+                )
+
+                if healed_items["success"]:
+                    bulk_items = healed_items["healed_values"].get("items_list", [])
+                else:
+                    # Apply fallback
+                    fallback_items = _FALLBACK_MANAGER.resolve_parameter_fallback(
+                        "append_entry", {"items_list": items_list}, context="bulk_processing"
+                    )
+                    bulk_items = fallback_items.get("items_list", [])
+            else:
+                bulk_items = items_list.copy()
+
+        elif items is not None:
+            try:
+                parsed_items = json.loads(items)
+                if not isinstance(parsed_items, list):
+                    # Try to heal the parsed items
+                    healed_parsed = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                        ValueError("Items parameter must be a JSON array"),
+                        {"items": items, "parsed_items": parsed_items}
+                    )
+
+                    if healed_parsed["success"]:
+                        bulk_items = healed_parsed["healed_values"].get("items", [])
+                    else:
+                        # Apply fallback
+                        fallback_items = _FALLBACK_MANAGER.resolve_parameter_fallback(
+                            "append_entry", {"items": items}, context="bulk_json_parsing"
+                        )
+                        bulk_items = fallback_items.get("items", [])
+                else:
+                    bulk_items = parsed_items
+
+            except json.JSONDecodeError as json_error:
+                # Try to heal JSON parsing error
+                healed_json = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                    json_error, {"items": items, "error_type": "json_decode"}
+                )
+
+                if healed_json["success"]:
+                    healed_items_str = healed_json["healed_values"].get("items", "[]")
+                    bulk_items = json.loads(healed_items_str)
+                else:
+                    return {
+                        "ok": False,
+                        "error": f"Invalid JSON in items parameter: {str(json_error)}",
+                        "suggestion": "Use items_list parameter for direct list support",
+                        "recent_projects": list(recent),
+                    }
+
+        # Auto-detect multiline messages if auto_split=True
+        if not bulk_items and auto_split and final_config.message:
+            try:
+                bulk_items = _split_multiline_message(final_config.message, split_delimiter)
+            except Exception as split_error:
+                # Try to heal message splitting
+                healed_split = _EXCEPTION_HEALER.heal_bulk_processing_error(
+                    split_error, {"message": final_config.message, "delimiter": split_delimiter}
+                )
+
+                if healed_split["success"]:
+                    bulk_items = healed_split["healed_values"].get("bulk_items", [final_config.message])
+                else:
+                    # Fallback to single entry
+                    bulk_items = [final_config.message]
+
+        # Apply inherited metadata and prepare items
+        try:
+            bulk_items = _apply_inherited_metadata(bulk_items, meta_pairs)
+            bulk_items = _prepare_bulk_items_with_timestamps(
+                bulk_items, final_config.timestamp_utc, stagger_seconds
+            )
+        except Exception as prep_error:
+            # Try to heal bulk preparation error
+            healed_prep = _EXCEPTION_HEALER.heal_bulk_processing_error(
+                prep_error, {"bulk_items": bulk_items}
+            )
+
+            if healed_prep["success"]:
+                bulk_items = healed_prep["healed_values"].get("bulk_items", [])
+            else:
+                # Apply fallback preparation
+                fallback_prep = _FALLBACK_MANAGER.apply_context_aware_defaults(
+                    "append_entry", {"bulk_items": bulk_items, "operation": "bulk_preparation"}
+                )
+                bulk_items = fallback_prep.get("bulk_items", [])
+
+        # Process bulk items with enhanced error handling
+        try:
+            # Check if we should use parallel processing
+            use_parallel = len(bulk_items) > 10
+
+            if use_parallel:
+                results = await _process_large_bulk_chunked(bulk_items, project, log_cache)
+            else:
+                results = []
+                for item in bulk_items:
+                    try:
+                        item_config = AppendEntryConfig.from_legacy_params(
+                            message=item.get("message", ""),
+                            status=item.get("status", final_config.status),
+                            emoji=item.get("emoji", final_config.emoji),
+                            agent=item.get("agent", final_config.agent),
+                            meta=item.get("meta", {}),
+                            timestamp_utc=item.get("timestamp_utc"),
+                            agent_id=agent_id,
+                            log_type=base_log_type
+                        )
+
+                        result = await _process_single_entry(
+                            item_config, context, project, recent, log_cache, tuple(item.get("meta", {}).items())
+                        )
+                        results.append(result)
+
+                    except Exception as item_error:
+                        # Try to heal individual item processing error
+                        healed_item = _EXCEPTION_HEALER.heal_bulk_processing_error(
+                            item_error, {"item": item, "bulk_index": len(results)}
+                        )
+
+                        if healed_item["success"]:
+                            # Add healed item to results
+                            healed_result = {
+                                "ok": True,
+                                "id": f"healed-{uuid.uuid4().hex[:16]}",
+                                "healed": True,
+                                "original_error": str(item_error)
+                            }
+                            results.append(healed_result)
+                        else:
+                            # Add error result but continue processing
+                            error_result = {
+                                "ok": False,
+                                "error": f"Failed to process bulk item {len(results)}: {str(item_error)}",
+                                "item_failed": True
+                            }
+                            results.append(error_result)
+
+        except Exception as bulk_error:
+            # Apply comprehensive bulk exception healing
+            healed_bulk = _EXCEPTION_HEALER.heal_bulk_processing_error(
+                bulk_error, {"bulk_items": bulk_items, "project": project}
+            )
+
+            if healed_bulk["success"]:
+                # Try alternative bulk processing
+                alternative_items = healed_bulk["healed_values"].get("bulk_items", bulk_items[:1])
+                results = []
+
+                for item in alternative_items:
+                    try:
+                        item_config = AppendEntryConfig.from_legacy_params(
+                            message=item.get("message", "Bulk item processed after error"),
+                            status=item.get("status", "info"),
+                            emoji=item.get("emoji", "ℹ️"),
+                            agent=item.get("agent", final_config.agent),
+                            meta=item.get("meta", {"bulk_healing": True}),
+                            timestamp_utc=item.get("timestamp_utc", final_config.timestamp_utc),
+                            agent_id=agent_id,
+                            log_type=base_log_type
+                        )
+
+                        result = await _process_single_entry(
+                            item_config, context, project, recent, log_cache, tuple(item.get("meta", {}).items())
+                        )
+                        results.append(result)
+
+                    except Exception:
+                        # Add fallback result
+                        fallback_result = {
+                            "ok": True,
+                            "id": f"fallback-{uuid.uuid4().hex[:16]}",
+                            "fallback": True,
+                            "message": "Fallback bulk entry created"
+                        }
+                        results.append(fallback_result)
+            else:
+                # Ultimate fallback - process single emergency entry
+                emergency_params = _FALLBACK_MANAGER.apply_emergency_fallback(
+                    "append_entry", {"message": "Bulk processing failed, emergency entry created"}
+                )
+
+                emergency_config = AppendEntryConfig.from_legacy_params(
+                    message=emergency_params.get("message", "Emergency bulk entry"),
+                    status=emergency_params.get("status", "warn"),
+                    emoji=emergency_params.get("emoji", "⚠️"),
+                    agent=emergency_params.get("agent", final_config.agent),
+                    meta=emergency_params.get("meta", {"bulk_processing_failed": True, "original_error": str(bulk_error)}),
+                    timestamp_utc=emergency_params.get("timestamp_utc", final_config.timestamp_utc),
+                    agent_id=agent_id,
+                    log_type=emergency_params.get("log_type", base_log_type)
+                )
+
+                emergency_result = await _process_single_entry(
+                    emergency_config, context, project, recent, log_cache,
+                    tuple(emergency_params.get("meta", {}).items())
+                )
+
+                return emergency_result
+
+        # Prepare bulk response
+        successful_results = [r for r in results if r.get("ok", False)]
+        failed_results = [r for r in results if not r.get("ok", False)]
+
+        response = {
+            "ok": len(successful_results) > 0,
+            "bulk_mode": True,
+            "processed": len(results),
+            "successful": len(successful_results),
+            "failed": len(failed_results),
+            "results": results,
+            "recent_projects": list(recent),
+        }
+
+        if failed_results:
+            response["warning"] = f"{len(failed_results)} items failed to process"
+
+        return response
+
+    except Exception as e:
+        # Apply ultimate exception healing for bulk processing
+        healed_result = _EXCEPTION_HEALER.heal_emergency_exception(
+            e, {"operation": "bulk_entry_processing", "project": project}
+        )
+
+        if healed_result and healed_result.get("success") and "healed_values" in healed_result:
+            # Create emergency bulk entry
+            emergency_params = _FALLBACK_MANAGER.apply_emergency_fallback(
+                "append_entry", healed_result["healed_values"]
+            )
+
+            emergency_config = AppendEntryConfig.from_legacy_params(
+                message=emergency_params.get("message", "Emergency bulk entry after critical error"),
+                status=emergency_params.get("status", "error"),
+                emoji=emergency_params.get("emoji", "🚨"),
+                agent=emergency_params.get("agent", "Scribe"),
+                meta=emergency_params.get("meta", {"emergency_bulk_fallback": True, "critical_error": str(e)}),
+                timestamp_utc=emergency_params.get("timestamp_utc", final_config.timestamp_utc),
+                agent_id=final_config.agent_id,
+                log_type=emergency_params.get("log_type", "progress")
+            )
+
+            return await _process_single_entry(
+                emergency_config, context, project, recent, log_cache,
+                tuple(emergency_params.get("meta", {}).items())
+            )
+        else:
+            return {
+                "ok": False,
+                "error": f"Bulk processing failed critically: {str(e)}",
+                "suggestion": "Try processing items individually or use simpler parameters",
+                "recent_projects": list(recent),
+            }
 
 
 def _should_use_bulk_mode(message: str, items: Optional[str] = None, items_list: Optional[List[Dict[str, Any]]] = None) -> bool:
@@ -266,16 +998,15 @@ async def append_entry(
     Bulk Mode: Support both items (JSON string) and items_list (direct list)
     Configuration Mode: Use AppendEntryConfig for structured parameter management
     """
+    # Phase 3 Task 3.5: Enhanced Function Decomposition
+    # This function now uses decomposed sub-functions with bulletproof error handling
+
     state_snapshot = await server_module.state_manager.record_tool("append_entry")
 
-    # === DUAL PARAMETER HANDLING ===
-    # Support both legacy parameters and AppendEntryConfig object
-    # Legacy parameters take precedence over config object when both provided
-
-    if config is not None:
-        # Create configuration object from legacy parameters to ensure precedence
-        # This allows legacy parameters to override config values
-        legacy_config = AppendEntryConfig.from_legacy_params(
+    try:
+        # === PHASE 3 ENHANCED PARAMETER VALIDATION AND PREPARATION ===
+        # Replace monolithic parameter handling with bulletproof validation and healing
+        final_config, validation_info = _validate_and_prepare_parameters(
             message=message,
             status=status,
             emoji=emoji,
@@ -288,325 +1019,213 @@ async def append_entry(
             split_delimiter=split_delimiter,
             stagger_seconds=stagger_seconds,
             agent_id=agent_id,
-            log_type=log_type
+            log_type=log_type,
+            config=config
         )
 
-        # Create merged configuration: config as base, legacy_config as override
-        # Legacy parameters have precedence over config object
-        config_dict = config.to_dict()
-        legacy_dict = legacy_config.to_dict()
+        # Extract normalized parameters from final configuration
+        message = final_config.message
+        status = final_config.status
+        emoji = final_config.emoji
+        agent = final_config.agent
+        meta = final_config.meta
+        timestamp_utc = final_config.timestamp_utc
+        items = final_config.items
+        items_list = final_config.items_list
+        auto_split = final_config.auto_split
+        split_delimiter = final_config.split_delimiter
+        stagger_seconds = final_config.stagger_seconds
+        agent_id = final_config.agent_id
+        log_type = final_config.log_type
 
-        # Apply legacy overrides for non-None values
-        for key, value in legacy_dict.items():
-            if value is not None or key in ['message', 'auto_split']:  # Include defaults that should override
-                config_dict[key] = value
+        # Normalize metadata early for consistent handling throughout the function
+        meta_pairs = _normalise_meta(meta)
+        meta_payload = {key: value for key, value in meta_pairs}
 
-        # Create final configuration
-        final_config = AppendEntryConfig(**config_dict)
-    else:
-        # No config object provided, use legacy parameters only
-        final_config = AppendEntryConfig.from_legacy_params(
-            message=message,
-            status=status,
-            emoji=emoji,
-            agent=agent,
-            meta=meta,
-            timestamp_utc=timestamp_utc,
-            items=items,
-            items_list=items_list,
-            auto_split=auto_split,
-            split_delimiter=split_delimiter,
-            stagger_seconds=stagger_seconds,
-            agent_id=agent_id,
-            log_type=log_type
-        )
+        # Auto-detect agent ID if not provided
+        if agent_id is None:
+            agent_identity = server_module.get_agent_identity()
+            if agent_identity:
+                agent_id = await agent_identity.get_or_create_agent_id()
+            else:
+                agent_id = "Scribe"  # Fallback
 
-    # Extract normalized parameters from final configuration
-    message = final_config.message
-    status = final_config.status
-    emoji = final_config.emoji
-    agent = final_config.agent
-    meta = final_config.meta
-    timestamp_utc = final_config.timestamp_utc
-    items = final_config.items
-    items_list = final_config.items_list
-    auto_split = final_config.auto_split
-    split_delimiter = final_config.split_delimiter
-    stagger_seconds = final_config.stagger_seconds
-    agent_id = final_config.agent_id
-    log_type = final_config.log_type
-
-    # Normalize metadata early for consistent handling throughout the function
-    meta_pairs = _normalise_meta(meta)
-    meta_payload = {key: value for key, value in meta_pairs}
-
-    # Auto-detect agent ID if not provided
-    if agent_id is None:
+        # Update agent activity tracking
         agent_identity = server_module.get_agent_identity()
         if agent_identity:
-            agent_id = await agent_identity.get_or_create_agent_id()
-        else:
-            agent_id = "Scribe"  # Fallback
+            await agent_identity.update_agent_activity(
+                agent_id, "append_entry", {"message_length": len(message), "status": status, "bulk_mode": items is not None}
+            )
 
-    # Update agent activity tracking
-    agent_identity = server_module.get_agent_identity()
-    if agent_identity:
-        await agent_identity.update_agent_activity(
-            agent_id, "append_entry", {"message_length": len(message), "status": status, "bulk_mode": items is not None}
-        )
-
-    try:
-        context = await resolve_logging_context(
-            tool_name="append_entry",
-            server_module=server_module,
-            agent_id=agent_id,
-            require_project=True,
-            state_snapshot=state_snapshot,
-        )
-    except ProjectResolutionError as exc:
-        return ErrorHandler.create_project_resolution_error(
-            error=exc,
-            tool_name="append_entry",
-            suggestion=f"Invoke set_project with agent_id='{agent_id}' before appending entries"
-        )
-
-    project = context.project or {}
-    recent = list(context.recent_projects)
-    reminders_payload: List[Dict[str, Any]] = list(context.reminders)
-
-    # Validate that either message, items, or items_list is provided
-    if not items and not items_list and not message:
-        return {
-            "ok": False,
-            "error": "Either 'message', 'items', or 'items_list' must be provided",
-            "suggestion": "Use message for single/multiline entries, items for JSON bulk, or items_list for direct list bulk",
-            "recent_projects": list(recent),
-        }
-
-    log_cache: Dict[str, Tuple[Path, Dict[str, Any]]] = {}
-    base_log_type = (log_type or "progress").lower()
-
-    # Enhanced bulk mode handling with multiple input formats
-    bulk_items = None
-
-    if items_list is not None:
-        # Direct list support (NEW)
-        if not isinstance(items_list, list):
-            return {
-                "ok": False,
-                "error": "items_list must be a list of dictionaries",
-                "recent_projects": list(recent),
-            }
-        bulk_items = items_list.copy()
-
-    elif items is not None:
-        # JSON string support (backwards compatibility)
+        # === CONTEXT RESOLUTION WITH ENHANCED ERROR HANDLING ===
         try:
-            parsed_items = json.loads(items)
-            if not isinstance(parsed_items, list):
-                return {
-                    "ok": False,
-                    "error": "Items parameter must be a JSON array",
-                    "suggestion": "Use items_list parameter for direct list support",
-                    "recent_projects": list(recent),
-                }
-            bulk_items = parsed_items
-        except json.JSONDecodeError:
-            return {
-                "ok": False,
-                "error": "Items parameter must be valid JSON array",
-                "suggestion": "Use items_list parameter to avoid JSON encoding issues",
-                "recent_projects": list(recent),
-            }
+            context = await resolve_logging_context(
+                tool_name="append_entry",
+                server_module=server_module,
+                agent_id=agent_id,
+                require_project=True,
+                state_snapshot=state_snapshot,
+            )
+        except ProjectResolutionError as exc:
+            # Apply Phase 2 ExceptionHealer for project resolution errors
+            healed_context = _EXCEPTION_HEALER.heal_parameter_validation_error(
+                exc, {"tool_name": "append_entry", "agent_id": agent_id}
+            )
 
-    # Handle auto-split multiline content
-    if bulk_items is None and message:
-        # Sanitize message for MCP protocol
-        sanitized_message = _sanitize_message(message)
-
-        # Check if we should auto-split into bulk mode
-        if auto_split and _should_use_bulk_mode(message):
-            print("🔄 Auto-detecting multiline content, switching to bulk mode...")
-
-            # Split the message into individual entries
-            bulk_items = _split_multiline_message(message, split_delimiter)
-
-            if len(bulk_items) > 1:
-                print(f"📝 Split message into {len(bulk_items)} entries")
-
-                # Apply inherited metadata to all split entries
-                bulk_items = _apply_inherited_metadata(
-                    bulk_items, meta_payload, status, emoji, agent
-                )
-
-                # Add individual timestamps
-                bulk_items = _prepare_bulk_items_with_timestamps(
-                    bulk_items, timestamp_utc, stagger_seconds
-                )
-
-                # Process as bulk
-                if len(bulk_items) > 50:  # Large content - use chunked processing
-                    return await _process_large_bulk_chunked(
-                        bulk_items, project, recent, state_snapshot, base_log_type, log_cache
+            if healed_context["success"]:
+                # Try with healed context
+                try:
+                    context = await resolve_logging_context(
+                        tool_name="append_entry",
+                        server_module=server_module,
+                        agent_id=healed_context["healed_values"].get("agent_id", agent_id),
+                        require_project=True,
+                        state_snapshot=state_snapshot,
                     )
-                else:
-                    return await _append_bulk_entries(
-                        bulk_items, project, recent, state_snapshot, base_log_type, log_cache
+                except Exception:
+                    # Fallback response
+                    error_response = ErrorHandler.create_project_resolution_error(
+                        error=exc,
+                        tool_name="append_entry",
+                        suggestion=f"Invoke set_project with agent_id='{agent_id}' before appending entries"
                     )
+                error_response["debug_path"] = "project_resolution_failed_healed"
+                return error_response
             else:
-                # Single entry after split, continue with single entry mode
-                message = sanitized_message
-
-        else:
-            # Use sanitized message for single entry
-            message = sanitized_message
-
-    # Process bulk items if we have them
-    if bulk_items:
-        # Apply inherited metadata if not already applied
-        if meta or status or emoji or agent:
-            bulk_items = _apply_inherited_metadata(
-                bulk_items, meta_payload, status, emoji, agent
-            )
-
-        # Add timestamps if not present
-        bulk_items = _prepare_bulk_items_with_timestamps(
-            bulk_items, timestamp_utc, stagger_seconds
-        )
-
-        # Large content optimization
-        if len(bulk_items) > 50:
-            return await _process_large_bulk_chunked(
-                bulk_items, project, recent, state_snapshot, base_log_type, log_cache
-            )
-        else:
-            return await _append_bulk_entries(
-                bulk_items, project, recent, state_snapshot, base_log_type, log_cache
-            )
-
-    # Single entry mode - validate message (now with robust handling)
-    validation_error = _validate_message(message)
-    if validation_error:
-        # Provide helpful error messages with suggestions
-        error_msg = validation_error
-        suggestion = None
-
-        if "newline" in validation_error:
-            suggestion = "Set auto_split=True to automatically handle multiline content"
-            error_msg = "Message contains newline characters"
-        elif "pipe" in validation_error:
-            suggestion = "Replace pipe characters with alternative delimiters"
-            error_msg = "Message contains pipe characters"
-
-        return {
-            "ok": False,
-            "error": error_msg,
-            "suggestion": suggestion,
-            "alternative": "Consider using bulk mode with items_list parameter for complex content",
-            "recent_projects": list(recent),
-        }
-
-    rate_error = await _enforce_rate_limit(project["name"])
-    if rate_error:
-        rate_error["recent_projects"] = list(recent)
-        return rate_error
-
-    resolved_emoji = _resolve_emoji(emoji, status, project)
-    defaults = project.get("defaults") or {}
-    resolved_agent = _sanitize_identifier(resolve_fallback_chain(agent, defaults.get("agent"), "Scribe"))
-    timestamp_dt, timestamp, timestamp_warning = _resolve_timestamp(timestamp_utc)
-
-    # Metadata already normalized at function start (meta_pairs defined at line 273)
-    meta_payload = {key: value for key, value in meta_pairs}
-
-    entry_log_type = base_log_type
-    log_path, log_definition = _resolve_log_target(project, entry_log_type, log_cache)
-    requirement_error = _validate_log_requirements(log_definition, meta_payload)
-    if requirement_error:
-        return {
-            "ok": False,
-            "error": requirement_error,
-            "recent_projects": list(recent),
-        }
-    meta_payload.setdefault("log_type", entry_log_type)
-
-    # Generate deterministic entry_id
-    repo_slug = _get_repo_slug(project["root"])
-    project_slug = project["name"].lower().replace(" ", "-").replace("_", "-")
-    entry_id = _generate_deterministic_entry_id(
-        repo_slug=repo_slug,
-        project_slug=project_slug,
-        timestamp=timestamp,
-        agent=resolved_agent,
-        message=message,
-        meta=meta_payload
-    )
-
-    line = _compose_line(
-        emoji=resolved_emoji,
-        timestamp=timestamp,
-        agent=resolved_agent,
-        project_name=project["name"],
-        message=message,
-        meta_pairs=meta_pairs,
-        entry_id=entry_id,
-    )
-
-    await _rotate_if_needed(log_path)
-    await append_line(log_path, line)
-
-    backend = server_module.storage_backend
-    if backend:
-        sha_value = hashlib.sha256(line.encode("utf-8")).hexdigest()
-        ts_dt = timestamp_dt or utcnow()
-        timeout = settings.storage_timeout_seconds
-        try:
-            async with asyncio.timeout(timeout):
-                record = await backend.fetch_project(project["name"])
-            if not record:
-                async with asyncio.timeout(timeout):
-                    record = await backend.upsert_project(
-                        name=project["name"],
-                        repo_root=project["root"],
-                        progress_log_path=project["progress_log"],
-                    )
-            async with asyncio.timeout(timeout):
-                await backend.insert_entry(
-                    entry_id=entry_id,
-                    project=record,
-                    ts=ts_dt,
-                    emoji=resolved_emoji,
-                    agent=resolved_agent,
-                    message=message,
-                    meta=meta_payload,
-                    raw_line=line,
-                    sha256=sha_value,
+                error_response = ErrorHandler.create_project_resolution_error(
+                    error=exc,
+                    tool_name="append_entry",
+                    suggestion=f"Invoke set_project with agent_id='{agent_id}' before appending entries"
                 )
-        except Exception as exc:  # pragma: no cover - defensive
-            error_response = ErrorHandler.create_storage_error(
-                operation="persist log entry",
-                error=exc
-            )
-            error_response["recent_projects"] = list(recent)
+            error_response["debug_path"] = "project_resolution_failed"
             return error_response
 
-    if project:
-        reminders_payload = await reminders.get_reminders(
-            project,
-            tool_name="append_entry",
-            state=state_snapshot,
+        project = context.project or {}
+        recent = list(context.recent_projects)
+        reminders_payload: List[Dict[str, Any]] = list(context.reminders)
+
+        # === INPUT VALIDATION WITH ENHANCED HEALING ===
+        # Validate that either message, items, or items_list is provided
+        if not items and not items_list and not message:
+            # Try to heal missing content with fallback
+            fallback_content = _FALLBACK_MANAGER.apply_emergency_fallback(
+                "append_entry", {"error": "No content provided", "validation_failed": True}
+            )
+
+            if fallback_content.get("success", False):
+                message = fallback_content.get("message", "Entry created from fallback")
+                final_config.message = message
+            else:
+                return {
+                    "ok": False,
+                    "error": "Either 'message', 'items', or 'items_list' must be provided",
+                    "suggestion": "Use message for single/multiline entries, items for JSON bulk, or items_list for direct list bulk",
+                    "recent_projects": list(recent),
+                    "debug_path": "no_content_provided",
+                }
+
+        log_cache: Dict[str, Tuple[Path, Dict[str, Any]]] = {}
+        base_log_type = (log_type or "progress").lower()
+
+        # === ENHANCED PROCESSING MODE SELECTION ===
+        # Determine if we should use bulk mode with intelligent detection
+        use_bulk_mode = _should_use_bulk_mode(message, items, items_list)
+
+        if use_bulk_mode:
+            # === BULK PROCESSING WITH ENHANCED ERROR HANDLING ===
+            result = await _process_bulk_entries(
+                final_config, context, project, recent, log_cache, meta_pairs
+            )
+        else:
+            # === SINGLE ENTRY PROCESSING WITH ENHANCED ERROR HANDLING ===
+            result = await _process_single_entry(
+                final_config, context, project, recent, log_cache, meta_pairs
+            )
+
+        # Add validation info to result if healing was applied
+        if validation_info.get("healing_applied"):
+            if "meta" not in result:
+                result["meta"] = {}
+
+            if validation_info.get("exception_healing"):
+                result["meta"]["parameter_exception_healing"] = True
+            elif validation_info.get("emergency_fallback"):
+                result["meta"]["parameter_emergency_fallback"] = True
+            else:
+                result["meta"]["parameter_healing"] = True
+
+        return result
+
+    except Exception as e:
+        # === ULTIMATE EXCEPTION HANDLING AND FALLBACK ===
+        # Apply Phase 2 ExceptionHealer for unexpected errors
+        healed_result = _EXCEPTION_HEALER.heal_emergency_exception(
+            e, {
+                "operation": "append_entry_main",
+                "message": message,
+                "agent_id": agent_id,
+                "tool": "append_entry"
+            }
         )
 
-    return {
-        "ok": True,
-        "written_line": line,
-        "path": str(log_path),
-        "recent_projects": list(recent),
-        "meta": meta_payload,
-        "reminders": reminders_payload,
-        **({"timestamp_warning": timestamp_warning} if timestamp_warning else {}),
-    }
+        if healed_result and healed_result.get("success") and "healed_values" in healed_result:
+            # Create emergency entry with healed parameters
+            emergency_params = _FALLBACK_MANAGER.apply_emergency_fallback(
+                "append_entry", healed_result["healed_values"]
+            )
 
+            emergency_config = AppendEntryConfig.from_legacy_params(
+                message=emergency_params.get("message", "Emergency entry created after critical error"),
+                status=emergency_params.get("status", "error"),
+                emoji=emergency_params.get("emoji", "🚨"),
+                agent=emergency_params.get("agent", "Scribe"),
+                meta=emergency_params.get("meta", {
+                    "emergency_fallback": True,
+                    "critical_error": str(e),
+                    "healed_exception": True
+                }),
+                timestamp_utc=emergency_params.get("timestamp_utc", timestamp_utc),
+                agent_id=agent_id,
+                log_type=emergency_params.get("log_type", "progress")
+            )
+
+            # Try to process emergency entry with minimal context
+            try:
+                # Create minimal fallback context
+                fallback_context = type('obj', (object,), {
+                    'project': {"name": "emergency_project", "root": Path("."), "defaults": {}},
+                    'recent_projects': [],
+                    'reminders': []
+                })()
+
+                emergency_result = await _process_single_entry(
+                    emergency_config, fallback_context,
+                    fallback_context.project, [], {},
+                    tuple(emergency_params.get("meta", {}).items())
+                )
+
+                emergency_result["emergency_fallback"] = True
+                emergency_result["original_error"] = str(e)
+                return emergency_result
+
+            except Exception:
+                # Ultimate fallback return
+                return {
+                    "ok": False,
+                    "error": f"Critical error in append_entry: {str(e)}",
+                    "emergency_fallback_attempted": True,
+                    "suggestion": "Check system configuration and try again",
+                    "recent_projects": [],
+                }
+        else:
+            # Return error if even emergency healing fails
+            return {
+                "ok": False,
+                "error": f"Critical error in append_entry: {str(e)}",
+                "emergency_healing_failed": True,
+                "suggestion": "Check system configuration and try again",
+                "recent_projects": [],
+            }
 
 def _resolve_emoji(
     explicit: Optional[str],
@@ -725,6 +1344,233 @@ def _validate_log_requirements(definition: Dict[str, Any], meta_payload: Dict[st
     return ToolValidator.validate_metadata_requirements(definition, meta_payload)
 
 
+async def _process_bulk_items_parallel(
+    items: List[Dict[str, Any]],
+    project: Dict[str, Any],
+    recent: List[str],
+    state_snapshot: Dict[str, Any],
+    base_log_type: str,
+    log_cache: Dict[str, Tuple[Path, Dict[str, Any]]],
+    backend: Any,
+) -> Dict[str, Any]:
+    """Process bulk items using Phase 1 ParallelBulkProcessor for true parallel execution."""
+    import time
+    start_time = time.time()
+
+    # Use Phase 1 ParallelBulkProcessor to chunk and process items
+    chunk_size = _PARALLEL_PROCESSOR.calculate_optimal_chunk_size(len(items))
+    chunks = _PARALLEL_PROCESSOR.create_chunks(items, chunk_size)
+
+    # Process chunks in parallel
+    chunk_results = await _PARALLEL_PROCESSOR.process_chunks_parallel(
+        chunks,
+        process_chunk_func=lambda chunk: _process_chunk_sequential(
+            chunk, project, recent, state_snapshot, base_log_type, log_cache, backend
+        )
+    )
+
+    # Aggregate results from all chunks
+    all_written_lines = []
+    all_failed_items = []
+    all_paths_used = []
+
+    for chunk_result in chunk_results:
+        if chunk_result["success"]:
+            all_written_lines.extend(chunk_result["written_lines"])
+            all_failed_items.extend(chunk_result["failed_items"])
+            all_paths_used.extend(chunk_result["paths_used"])
+        else:
+            # If chunk failed completely, add all items as failed
+            chunk_index = chunk_results.index(chunk_result)
+            for i, item in enumerate(chunk_result.get("items", [])):
+                all_failed_items.append({
+                    "index": chunk_index * chunk_size + i,
+                    "error": f"Chunk processing failed: {chunk_result.get('error', 'Unknown error')}",
+                    "item": item
+                })
+
+    processing_time = time.time() - start_time
+
+    return {
+        "written_lines": all_written_lines,
+        "failed_items": all_failed_items,
+        "paths_used": all_paths_used,
+        "chunks_used": len(chunks),
+        "processing_time": processing_time,
+        "success": True
+    }
+
+
+async def _process_chunk_sequential(
+    chunk: List[Dict[str, Any]],
+    project: Dict[str, Any],
+    recent: List[str],
+    state_snapshot: Dict[str, Any],
+    base_log_type: str,
+    log_cache: Dict[str, Tuple[Path, Dict[str, Any]]],
+    backend: Any,
+) -> Dict[str, Any]:
+    """Process a single chunk of items sequentially."""
+    written_lines: List[str] = []
+    failed_items: List[Dict[str, Any]] = []
+    paths_used: List[str] = []
+    rotated_paths: set[Path] = set()
+
+    # Process items in this chunk using the same logic as sequential processing
+    for i, item in enumerate(chunk):
+        try:
+            # Reuse the existing item processing logic
+            result = await _process_single_item(
+                item, i, project, base_log_type, log_cache, rotated_paths, backend
+            )
+
+            if result["success"]:
+                written_lines.append(result["written_line"])
+                if result["path_used"] not in paths_used:
+                    paths_used.append(result["path_used"])
+            else:
+                failed_items.append(result["failed_item"])
+
+        except Exception as exc:
+            failed_items.append({
+                "index": i,
+                "error": f"Item processing failed: {str(exc)}",
+                "item": item
+            })
+
+    return {
+        "success": True,
+        "written_lines": written_lines,
+        "failed_items": failed_items,
+        "paths_used": paths_used,
+        "items": chunk
+    }
+
+
+async def _process_single_item(
+    item: Dict[str, Any],
+    index: int,
+    project: Dict[str, Any],
+    base_log_type: str,
+    log_cache: Dict[str, Tuple[Path, Dict[str, Any]]],
+    rotated_paths: set[Path],
+    backend: Any,
+) -> Dict[str, Any]:
+    """Process a single bulk item - extracted from original loop for reuse."""
+    # This function contains the core item processing logic
+    # extracted from the original sequential loop
+
+    # Validate required fields
+    if "message" not in item:
+        return {
+            "success": False,
+            "failed_item": {
+                "index": index,
+                "error": "Missing required 'message' field",
+                "item": item
+            }
+        }
+
+    item_message = item["message"]
+    if not item_message.strip():
+        return {
+            "success": False,
+            "failed_item": {
+                "index": index,
+                "error": "Message cannot be empty",
+                "item": item
+            }
+        }
+
+    # Enhanced message validation with auto-sanitization
+    validation_error = _validate_message(item_message)
+    if validation_error:
+        if "newline" in validation_error:
+            item_message = _sanitize_message(item_message)
+            item["message"] = item_message
+        else:
+            return {
+                "success": False,
+                "failed_item": {
+                    "index": index,
+                    "error": validation_error,
+                    "item": item
+                }
+            }
+
+    # Extract item properties with defaults
+    item_status = item.get("status")
+    item_emoji = item.get("emoji")
+    item_agent = item.get("agent")
+    item_meta = item.get("meta")
+    item_timestamp = item.get("timestamp_utc")
+
+    # Resolve values similar to single entry
+    resolved_emoji = _resolve_emoji(item_emoji, item_status, project)
+    defaults = project.get("defaults") or {}
+    resolved_agent = _sanitize_identifier(resolve_fallback_chain(item_agent, defaults.get("agent"), "Scribe"))
+    timestamp_dt, timestamp, timestamp_warning = _resolve_timestamp(item_timestamp)
+    meta_pairs = _normalise_meta(item_meta)
+    meta_payload = {key: value for key, value in meta_pairs}
+
+    entry_log_type = (item.get("log_type") or base_log_type).lower()
+    log_path, log_definition = _resolve_log_target(project, entry_log_type, log_cache)
+
+    # Rotate if needed (only once per path)
+    if log_path not in rotated_paths:
+        await _rotate_if_needed(log_path)
+        rotated_paths.add(log_path)
+
+    requirement_error = _validate_log_requirements(log_definition, meta_payload)
+    if requirement_error:
+        return {
+            "success": False,
+            "failed_item": {
+                "index": index,
+                "error": requirement_error,
+                "item": item
+            }
+        }
+
+    meta_payload.setdefault("log_type", entry_log_type)
+
+    # Compose the log line
+    repo_slug = _get_repo_slug(project["root"])
+    project_slug = project["name"]
+    entry_id = _generate_deterministic_entry_id(
+        repo_slug, project_slug, timestamp, resolved_agent, item_message, meta_payload
+    )
+
+    log_line = shared_compose_line(
+        message=item_message,
+        emoji=resolved_emoji,
+        agent=resolved_agent,
+        meta=meta_payload,
+        timestamp=timestamp,
+        entry_id=entry_id,
+        log_type=entry_log_type,
+        log_definition=log_definition,
+    )
+
+    # Write to file
+    try:
+        await append_line(log_path, log_line)
+        return {
+            "success": True,
+            "written_line": log_line,
+            "path_used": str(log_path)
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "failed_item": {
+                "index": index,
+                "error": f"Failed to write entry: {str(exc)}",
+                "item": item
+            }
+        }
+
+
 async def _append_bulk_entries(
     items: List[Dict[str, Any]],
     project: Dict[str, Any],
@@ -767,7 +1613,38 @@ async def _append_bulk_entries(
             print(f"⚠️  Warning: Database setup failed: {exc}")
             backend = None  # Disable database for this batch
 
-    # Process each item with enhanced error handling
+    # Determine if parallel processing should be used (Phase 1 optimization)
+    use_parallel_processing = len(items) >= 10  # Use parallel for 10+ items
+
+    if use_parallel_processing:
+        # Use Phase 1 ParallelBulkProcessor for large batches
+        try:
+            parallel_result = await _process_bulk_items_parallel(
+                items, project, recent, state_snapshot, base_log_type, log_cache, backend
+            )
+
+            # Merge results from parallel processing
+            written_lines.extend(parallel_result["written_lines"])
+            failed_items.extend(parallel_result["failed_items"])
+            paths_used.extend(parallel_result["paths_used"])
+
+            # Add parallel processing info to response
+            processing_info = {
+                "parallel_processing": True,
+                "items_processed": len(items),
+                "parallel_chunks": parallel_result.get("chunks_used", 1),
+                "processing_time": parallel_result.get("processing_time", 0)
+            }
+
+        except Exception as parallel_error:
+            # Fallback to sequential processing if parallel fails
+            print(f"⚠️  Parallel processing failed, falling back to sequential: {parallel_error}")
+            use_parallel_processing = False
+
+    if not use_parallel_processing:
+        # Process each item with enhanced error handling (sequential)
+        processing_info = {"parallel_processing": False, "items_processed": len(items)}
+
     for i, item in enumerate(items):
         try:
             # Validate required fields
@@ -938,11 +1815,20 @@ async def _append_bulk_entries(
 
     # Add performance metrics for large operations
     if len(items) > 10:
-        result["performance"] = {
-            "total_items": len(items),
-            "items_per_second": len(items) / 1.0,  # Approximate
-            "database_batch_size": len(batch_db_entries) if backend else 0,
-        }
+        # Include Phase 1 parallel processing information
+        if 'processing_info' in locals():
+            result["performance"] = {
+                "total_items": len(items),
+                "items_per_second": len(items) / 1.0,  # Approximate
+                "database_batch_size": len(batch_db_entries) if backend else 0,
+                "phase1_parallel_processing": processing_info
+            }
+        else:
+            result["performance"] = {
+                "total_items": len(items),
+                "items_per_second": len(items) / 1.0,  # Approximate
+                "database_batch_size": len(batch_db_entries) if backend else 0,
+            }
 
     return result
 
