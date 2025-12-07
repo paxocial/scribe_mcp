@@ -665,8 +665,12 @@ def _prepare_rotation_operation(
         rotation_operations = []
         for log_type_name in validated_log_types:
             try:
-                # Get log file path
-                log_path = project["progress_log"] if log_type_name == "progress" else project["root"] / f"{log_type_name}.log"
+                # Get log file path (always normalize to Path)
+                if log_type_name == "progress":
+                    log_path = Path(project["progress_log"])
+                else:
+                    log_root = Path(project["root"])
+                    log_path = log_root / f"{log_type_name}.log"
 
                 # Check if log file exists
                 if not log_path.exists():
@@ -733,7 +737,10 @@ def _prepare_rotation_operation(
                     "log_type": log_type_name,
                     "status": "error",
                     "error": str(op_error),
-                    "warning": f"Failed to prepare rotation for {log_type_name}: {str(op_error)}"
+                    "warning": f"Failed to prepare rotation for {log_type_name}: {str(op_error)}",
+                    # Provide a best-effort log_path when available so execution
+                    # logic can still reason about this operation without crashing.
+                    "log_path": Path(project["progress_log"]) if log_type_name == "progress" else None,
                 }
                 rotation_operations.append(error_operation)
 
@@ -759,17 +766,23 @@ def _prepare_rotation_operation(
         )
 
         if healed_result and healed_result.get("success") and "healed_values" in healed_result:
-            # Create emergency rotation operation
+            # Create emergency rotation operation; best-effort log_path for progress.
             emergency_params = _FALLBACK_MANAGER.apply_emergency_fallback(
                 "rotate_log", healed_result["healed_values"]
             )
+
+            try:
+                emergency_log_path = Path(project.get("progress_log", ""))
+            except Exception:
+                emergency_log_path = None
 
             return {
                 "rotation_operations": [{
                     "log_type": "progress",
                     "status": "emergency_fallback",
                     "error": str(e),
-                    "emergency_params": emergency_params
+                    "emergency_params": emergency_params,
+                    "log_path": emergency_log_path,
                 }],
                 "validated_log_types": ["progress"],
                 "final_confirm": False,
@@ -818,8 +831,21 @@ async def _execute_rotation_with_fallbacks(
         # Process each rotation operation
         for operation in rotation_operations:
             try:
-                log_type = operation["log_type"]
-                log_path = operation["log_path"]
+                log_type = operation.get("log_type", "unknown")
+                log_path = operation.get("log_path")
+
+                # If we don't have a log_path (e.g., emergency/errored prep),
+                # record a structured failure and skip execution for this entry.
+                if log_path is None:
+                    error_result = {
+                        "log_type": log_type,
+                        "status": "failed",
+                        "error": "Missing log_path for rotation operation",
+                        "operation_level_error": True,
+                    }
+                    failed_rotations.append(error_result)
+                    execution_results.append(error_result)
+                    continue
 
                 # Check if operation should be skipped
                 if not operation.get("should_rotate", True):
@@ -848,12 +874,16 @@ async def _execute_rotation_with_fallbacks(
                     if final_dry_run:
                         # Dry run execution
                         if operation.get("dry_run_mode") == "precise":
-                            # Precise dry run
-                            entry_count = count_file_lines(log_path)
+                            # Precise dry run: full line count
+                            entry_count = count_file_lines(str(log_path))
                         else:
-                            # Estimated dry run
-                            estimator = EntryCountEstimate()
-                            entry_count = estimator.estimate(log_path)
+                            # Lightweight estimate based on file size
+                            try:
+                                size_bytes = log_path.stat().st_size if log_path.exists() else 0
+                            except OSError:
+                                size_bytes = 0
+                            # Simple heuristic: avoid pulling in the full estimator stack here
+                            entry_count = int(size_bytes / DEFAULT_BYTES_PER_LINE) if size_bytes > 0 else 0
 
                         dry_run_result = {
                             "log_type": log_type,
@@ -925,13 +955,35 @@ async def _execute_rotation_with_fallbacks(
                             if healed_rotation["success"]:
                                 # Try alternative rotation method
                                 try:
-                                    # Simple rotation fallback
-                                    fallback_suffix = operation.get("suffix", f"rotated-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
-                                    archive_path = log_path.with_suffix(f".{fallback_suffix}{log_path.suffix}")
+                                    # Simple rotation fallback: rename current log and
+                                    # create a fresh file with a minimal rotation header.
+                                    fallback_suffix = operation.get(
+                                        "suffix",
+                                        f\"rotated-{datetime.now().strftime('%Y%m%d-%H%M%S')}\",
+                                    )
+                                    archive_path = log_path.with_suffix(
+                                        f\".{fallback_suffix}{log_path.suffix}\"
+                                    )
 
-                                    # Simple copy and truncate
+                                    # Move current log to archive
                                     await asyncio.to_thread(lambda: log_path.rename(archive_path))
-                                    await asyncio.to_thread(lambda: log_path.write_text(""))
+
+                                    # Write a simple rotation header into the new log file
+                                    try:
+                                        timestamp = datetime.now().strftime(\"%Y-%m-%d %H:%M:%S UTC\")
+                                        project_name = project.get(\"name\", \"Unknown Project\")
+                                        header = (
+                                            \"# Progress Log\\n\\n\"
+                                            \"## Rotation Notice\\n\"
+                                            f\"Previous log was archived to: {archive_path.name}\\n\\n\"
+                                            f\"Rotation Time: {timestamp}\\n\"
+                                            f\"Project: {project_name}\\n\\n\"
+                                            \"---\\n\\n\"
+                                        )
+                                        await asyncio.to_thread(lambda: log_path.write_text(header))
+                                    except Exception:
+                                        # If header write fails, fall back to an empty file.
+                                        await asyncio.to_thread(lambda: log_path.write_text(\"\"))
 
                                     fallback_result = {
                                         "log_type": log_type,
@@ -1201,7 +1253,7 @@ async def rotate_log(
                 }
 
         # === ENHANCED ROTATION EXECUTION WITH FALLBACKS ===
-        rotation_result = _execute_rotation_with_fallbacks(
+        rotation_result = await _execute_rotation_with_fallbacks(
             rotation_prep, final_config, context, project
         )
 
