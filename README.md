@@ -4,9 +4,9 @@
 
 **[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](tests/)**
 **[![Version](https://img.shields.io/badge/version-2.1-blue)](docs/whitepapers/)**
-**[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)**
+**[![License](https://img.shields.io/badge/license-Community+Small%20Business-orange)](LICENSE)**
 
-*Enterprise-grade documentation governance for AI-powered development*
+*Enterprise-grade documentation governance for AI-powered development — by Corta Labs*
 
 **Drop-in ready** • **13+ specialized templates** • **Zero-config SQLite** • **Production-tested**
 
@@ -33,7 +33,7 @@ Scribe transforms how AI agents and developers maintain project documentation. I
 
 ## ⚡ Quick Start
 
-**Get Scribe running in under 60 seconds:**
+**Get Scribe running in under 60 seconds (MCP-first, CLI optional):**
 
 ### 1️⃣ Install Dependencies
 ```bash
@@ -49,24 +49,30 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2️⃣ Start Logging Immediately
-```bash
-# From the parent directory (MCP_SPINE/)
-python -m scribe_mcp.scripts.scribe "🚀 My project is ready!" --status success --emoji 🎉
-```
-
-**That's it!** You've just created your first structured log entry. Scribe automatically:
-- ✅ Created a project configuration
-- ✅ Generated documentation templates
-- ✅ Started your progress log
-- ✅ Provided intelligent reminders
-
-### 3️⃣ Launch MCP Server (Optional)
+### 2️⃣ Launch MCP Server (Primary Integration Path)
 ```bash
 # Start the MCP server for Claude/Claude Code integration
 export SCRIBE_ROOT=$(pwd)  # Set your project root
 python -m scribe_mcp.server
 ```
+
+Once connected from Claude / Codex MCP:
+
+- Use **`set_project`** to register/select a project and bootstrap dev_plan docs.
+- Use **`append_entry`** for all logging (single/bulk).
+- Use **`manage_docs`** for architecture/phase/checklist updates.
+- Use **`read_recent` / `list_projects`** to resume context after compaction.
+
+### 3️⃣ (Optional) Manual CLI Logging
+
+For shell workflows or quick one-off logs, you can call the MCP-aligned CLI:
+
+```bash
+# From the scribe_mcp directory or MCP_SPINE root
+python -m scribe_mcp.scripts.scribe "🚀 My project is ready!" --status success --emoji 🎉
+```
+
+Under the hood this uses `set_project` + `append_entry`, so manual usage stays in sync with the registry, SQLite mirror, and reminder system.
 
 ---
 
@@ -122,15 +128,24 @@ python -m scribe_mcp.scripts.scribe "Starting new feature work" --project fronte
 
 ### MCP Integration
 
-**For Claude Desktop:**
-```json
+In all examples below, **`REPO_ROOT`** means the directory that contains the
+`scribe_mcp` package (i.e., where `scribe_mcp/server.py` lives). In your
+personal setup this might be `.../MCP_SPINE`, but in the public repo it will
+typically just be the cloned `scribe_mcp` directory.
+
+**For Claude Desktop (JSON config):**
+```jsonc
 {
   "mcpServers": {
     "scribe": {
-      "command": "python",
-      "args": ["/absolute/path/to/scribe_mcp/server.py"],
+      // Run from REPO_ROOT so `scribe_mcp` imports resolve
+      "command": "bash",
+      "args": [
+        "-lc",
+        "cd /absolute/path/to/REPO_ROOT && exec python -m scribe_mcp.server"
+      ],
       "env": {
-        "SCRIBE_ROOT": "/absolute/path/to/scribe_mcp",
+        // Optional: override storage backend; SQLite is default
         "SCRIBE_STORAGE_BACKEND": "sqlite"
       }
     }
@@ -138,13 +153,17 @@ python -m scribe_mcp.scripts.scribe "Starting new feature work" --project fronte
 }
 ```
 
-**For Claude Code CLI:**
+**For Codex / Claude Code CLI:**
 ```bash
+# From anywhere; codex will remember this configuration
 codex mcp add scribe \
-  --env SCRIBE_ROOT=/path/to/scribe_mcp \
   --env SCRIBE_STORAGE_BACKEND=sqlite \
-  -- python -m scribe_mcp.server
+  -- bash -lc 'cd /absolute/path/to/REPO_ROOT && exec python -m scribe_mcp.server'
 ```
+
+Notes:
+- We intentionally **do not** bake `SCRIBE_ROOT` into the MCP config, because Scribe is used across many repos. Set `SCRIBE_ROOT` per repo (e.g., in your shell, direnv, or project scripts) to point at the repository whose `docs/dev_plans` you’re working inside.
+- The same `bash -lc "cd REPO_ROOT && python -m scribe_mcp.server"` pattern works for any MCP client that expects a stdio server command.
 
 ---
 
@@ -158,6 +177,52 @@ You can run Scribe from any codebase (not just `MCP_SPINE`) by pointing it at th
    - Optional: `SCRIBE_STORAGE_BACKEND=postgres` and `SCRIBE_DB_URL=postgresql://...` if you want Postgres.
 2. Ensure `PYTHONPATH` includes the parent of `scribe_mcp` so imports work when launched from elsewhere.
 3. Run `python -m scribe_mcp.server` (or your MCP launch command) and call `set_project` for each project name you want to track.
+
+---
+
+## 🧠 Project Registry & Lifecycle (High-Level)
+
+Scribe includes a **SQLite-backed Project Registry** that tracks every project’s lifecycle and documentation state:
+
+- **Lifecycle states**: `planning`, `in_progress`, `blocked`, `complete`, `archived`, `abandoned`.
+- **Core hooks**:
+  - `set_project` – bootstraps docs (`ARCHITECTURE_GUIDE`, `PHASE_PLAN`, `CHECKLIST`, `PROGRESS_LOG`) and ensures a registry row exists.
+  - `append_entry` – writes progress logs, updates activity metrics, and can auto‑promote `planning` → `in_progress` once docs + first entry exist.
+  - `manage_docs` – applies atomic doc updates and records baseline/current hashes and doc‑hygiene flags in the registry.
+  - `list_projects` – surfaces registry data (status, timestamps, counts, tags, `meta.activity`, `meta.docs.flags`) with filters like `status`, `tags`, and `order_by`.
+
+At a glance, you can:
+- See which projects are fresh, stale, or long inactive.
+- Detect when architecture/phase/checklist docs are still at template state.
+- Spot drift between implementation logs and documentation.
+
+For full technical details, see `docs/whitepapers/scribe_mcp_whitepaper.md`.
+
+---
+
+## 📜 License & Commercial Use
+
+Scribe MCP is **source-available** and free to use for:
+
+- Individual developers
+- Open-source contributors
+- Researchers and educational use
+- Small teams and small businesses that:
+  - Have **fewer than 25 employees**, and
+  - Generate **less than $1,000,000 USD in annual revenue**, and
+  - Are **not** selling, hosting, or packaging Scribe MCP (or derivatives) as part of a paid product or service.
+
+You **may not** use Scribe MCP under the community license if:
+
+- Your organization exceeds the employee or revenue limits above, or
+- You embed Scribe MCP into a paid SaaS, internal platform, or commercial agent/orchestration product.
+
+For enterprise or large-scale commercial use, contact **licensing@cortalabs.com** to obtain a commercial license.
+
+Details:
+
+- Current code is licensed under the **Scribe MCP License (Community + Small Business License)** in `LICENSE`.
+- Earlier snapshots were MIT-licensed; see `LICENSE_HISTORY.md` for historical licensing context.
 
 Notes:
 - `.env` is auto-loaded on startup when present (via python-dotenv); shell exports/direnv still work the same.
@@ -182,8 +247,10 @@ Notes:
 ### 🚀 Template Features
 - **🔒 Security Sandboxing** - Jinja2 templates run in restricted environments
 - **📝 Template Inheritance** - Create custom template families
-- **🎯 Smart Discovery** - Project → Repository → Built-in template hierarchy
+- **🎯 Smart Discovery** - Project → Repository → Built-in template hierarchy (precedence: `.scribe/templates` → repo custom → project templates → packs → built-ins)
 - **⚡ Atomic Generation** - Bulletproof template creation with integrity verification
+
+For a deeper dive into available variables and expected metadata per template, see `docs/TEMPLATE_VARIABLES.md`.
 
 ### Example: Generate Architecture Guide
 ```bash
@@ -498,12 +565,6 @@ python -m scribe_mcp.scripts.scribe "Added new feature: description" --status su
 - **📈 Monitoring** - Performance tracking and alerting
 - **🔄 Backup & Recovery** - Data protection strategies
 - **🌐 Multi-tenant** - Organizational deployment patterns
-
----
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 

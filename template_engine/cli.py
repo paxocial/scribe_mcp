@@ -57,6 +57,11 @@ def main():
         help="Only validate template syntax, don't render"
     )
     parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Enable fail-hard mode (no legacy fallback on render errors)"
+    )
+    parser.add_argument(
         "--list-templates",
         action="store_true",
         help="List available templates and exit"
@@ -137,10 +142,11 @@ def main():
                     print(f"  - {error}")
                 sys.exit(1)
         else:
-            # Render template
+            # Render template (with optional strict/fail-hard mode)
             result = engine.render_template(
                 template_name=args.template,
                 metadata=metadata,
+                strict=args.strict,
                 fallback=not args.no_fallback
             )
             print(result)

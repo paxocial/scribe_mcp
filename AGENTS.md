@@ -457,15 +457,37 @@ Run predefined parameterized queries against the Scribe database.
 }
 ```
 
+## 🧾 Tool Argument Cheat Sheet (Runtime Signatures)
+
+This table summarizes the **actual MCP parameters** Scribe tools accept at runtime. Use this when constructing payloads or when validating third‑party integrations.
+
+- `set_project(name, root=None, progress_log=None, author=None, overwrite_docs=False, defaults=None)`
+- `get_project()`
+- `delete_project(name, mode="archive", confirm=False, force=False, archive_path=None, agent_id=None)`
+- `append_entry(message="", status=None, emoji=None, agent=None, meta=None, timestamp_utc=None, items=None, items_list=None, auto_split=True, split_delimiter="\n", stagger_seconds=1, agent_id=None, log_type="progress", config=None)`
+- `read_recent(project=None, n=None, limit=None, filter=None, page=1, page_size=50, compact=False, fields=None, include_metadata=True)`
+- `query_entries(project=None, start=None, end=None, message=None, message_mode=None, case_sensitive=False, emoji=None, status=None, agents=None, meta_filters=None, limit=None, page=1, page_size=50, compact=False, fields=None, include_metadata=True, search_scope=None, document_types=None, include_outdated=False, verify_code_references=False, time_range=None, relevance_threshold=None, max_results=None, config=None)`
+- `manage_docs(action, doc, section=None, content=None, template=None, metadata=None, dry_run=False, doc_name=None, target_dir=None)`
+- `list_projects(limit=5, filter=None, compact=False, fields=None, include_test=False, page=1, page_size=None, status=None, tags=None, order_by=None, direction="desc")`
+- `generate_doc_templates(project_name, author=None, overwrite=False, documents=None, base_dir=None)`
+- `rotate_log(suffix=None, custom_metadata=None, confirm=False, dry_run=False, dry_run_mode="estimate", log_type=None, log_types=None, rotate_all=False, auto_threshold=False, threshold_entries=None, config=None)`
+- `vector_search(project=None, query="", limit=None)`
+
+Registry-aware behavior:
+- `set_project` → ensures `scribe_projects` row and dev_plan rows for core docs; updates `last_access_at`.
+- `append_entry` (progress logs) → updates `last_entry_at` and may auto‑promote `status` from `planning`→`in_progress` when core docs + first entry exist.
+- `manage_docs` → updates `meta.docs` in the registry with baseline/current hashes and doc‑hygiene flags.
+- `list_projects` → surfaces `meta.activity` (age, recency, staleness_level, activity_score) and `meta.docs.flags` (e.g., `docs_ready_for_work`, `doc_drift_suspected`).
+
 ## 🛠️ CLI Companion (Optional)
-`python scripts/scribe.py` mirrors the MCP tools for shell workflows:
+`python scripts/scribe.py` mirrors a subset of MCP tools for shell workflows:
 - `--list-projects`
 - `--project <name>` or `--config <path>`
 - `append "Message" --status success --meta key=value`
 - `read --n 20`
 - `rotate --suffix YYYY-MM-DD`
 
-Always prefer tool calls from agents; the CLI is for human operators.
+Always prefer MCP tool calls from agents; the CLI is for human operators and batch jobs.
 
 ### 🔍 Scribe Whitepaper & Probe (Tool Testing Contract)
 - Full architecture and operational details live in `docs/whitepapers/scribe_mcp_whitepaper.md`. Read this when designing or modifying Scribe internals or workflows.

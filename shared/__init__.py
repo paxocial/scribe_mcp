@@ -13,6 +13,7 @@ from .logging_utils import (
     resolve_logging_context,
 )
 from .base_logging_tool import LoggingToolMixin
+from .project_registry import ProjectInfo, ProjectRegistry
 
 __all__ = [
     "LoggingContext",
@@ -26,4 +27,6 @@ __all__ = [
     "normalize_meta_filters",
     "resolve_log_definition",
     "resolve_logging_context",
+    "ProjectInfo",
+    "ProjectRegistry",
 ]

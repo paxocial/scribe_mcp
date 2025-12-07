@@ -17,6 +17,8 @@ from scribe_mcp.tools.project_utils import (
 from scribe_mcp.tools.base.parameter_normalizer import normalize_dict_param, normalize_list_param
 from scribe_mcp.shared.logging_utils import LoggingContext, ProjectResolutionError
 from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
+from scribe_mcp.shared.project_registry import ProjectRegistry
+from scribe_mcp.shared.project_registry import ProjectRegistry
 
 
 class _SetProjectHelper(LoggingToolMixin):
@@ -25,6 +27,8 @@ class _SetProjectHelper(LoggingToolMixin):
 
 
 _SET_PROJECT_HELPER = _SetProjectHelper()
+_PROJECT_REGISTRY = ProjectRegistry()
+_PROJECT_REGISTRY = ProjectRegistry()
 
 
 @app.tool()
@@ -159,6 +163,9 @@ async def set_project(
         "docs": docs,
         "defaults": defaults,
         "author": author or defaults.get("agent") or "Scribe",
+        # Optional metadata for richer project views
+        "description": description,
+        "tags": tags or [],
     }
 
     # Create/upsert project in database first
@@ -170,6 +177,58 @@ async def set_project(
             repo_root=str(resolved_root),
             progress_log_path=str(resolved_log),
         )
+
+        # Best-effort Project Registry touch for this project (SQLite-first).
+        try:
+            _PROJECT_REGISTRY.ensure_project(
+                project_record,
+                description=description,
+                tags=tags,
+                meta={"source": "set_project"},
+            )
+            _PROJECT_REGISTRY.touch_access(project_record.name)
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"⚠️  ProjectRegistry ensure/touch_access failed in set_project: {exc}")
+
+        # Populate dev_plans table for core docs so lifecycle rules can see them.
+        try:
+            if hasattr(backend, "upsert_dev_plan") and project_record:
+                from pathlib import Path as _Path
+
+                core_docs = {
+                    "architecture": docs.get("architecture"),
+                    "phase_plan": docs.get("phase_plan"),
+                    "checklist": docs.get("checklist"),
+                    "progress_log": docs.get("progress_log"),
+                }
+                for plan_type, path_str in core_docs.items():
+                    if not path_str:
+                        continue
+                    path_obj = _Path(path_str)
+                    if not path_obj.exists():
+                        continue
+                    await backend.upsert_dev_plan(  # type: ignore[attr-defined]
+                        project_id=project_record.id,
+                        project_name=name,
+                        plan_type=plan_type,
+                        file_path=str(path_obj),
+                        version="1.0",
+                        metadata={"source": "set_project"},
+                    )
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"⚠️  dev_plans upsert failed in set_project: {exc}")
+
+        # Best-effort Project Registry touch for this project (SQLite-first).
+        try:
+            _PROJECT_REGISTRY.ensure_project(
+                project_record,
+                description=description,
+                tags=tags,
+                meta={"source": "set_project"},
+            )
+            _PROJECT_REGISTRY.touch_access(project_record.name)
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"⚠️  ProjectRegistry ensure/touch_access failed in set_project: {exc}")
 
     # Use AgentContextManager for agent-scoped project context
     agent_manager = server_module.get_agent_context_manager()

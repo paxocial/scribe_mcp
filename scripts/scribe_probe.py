@@ -40,6 +40,7 @@ from scribe_mcp.tools.read_recent import read_recent
 from scribe_mcp.tools.rotate_log import rotate_log
 from scribe_mcp.tools.set_project import set_project
 from scribe_mcp.tools.vector_search import vector_search
+from scribe_mcp.shared.project_registry import ProjectRegistry
 
 
 # Optional rich formatting
@@ -54,6 +55,51 @@ except Exception:  # pragma: no cover - rich might be unavailable
 ToolFn = Callable[..., Any]
 
 
+def _registry_sanity_probe(limit: Optional[int] = None) -> Dict[str, Any]:
+    """Lightweight registry health check using ProjectRegistry (probe-only, not an MCP tool)."""
+    registry = ProjectRegistry()
+    projects = registry.list_projects(limit=limit or 200)
+    warnings: list[Dict[str, Any]] = []
+
+    for info in projects:
+        meta = info.meta or {}
+        docs = meta.get("docs") or {}
+        flags = docs.get("flags") or {}
+        activity = meta.get("activity") or {}
+
+        project_warnings: list[str] = []
+
+        if info.total_files == 0:
+            project_warnings.append("no_dev_plans")
+
+        if info.status in ("in_progress", "complete") and not flags.get("docs_ready_for_work", False):
+            project_warnings.append("docs_not_ready_for_work")
+
+        if info.status == "complete" and info.total_entries == 0:
+            project_warnings.append("complete_but_no_entries")
+
+        dsle = activity.get("days_since_last_entry")
+        dsla = activity.get("days_since_last_access")
+        if isinstance(dsle, (int, float)) and isinstance(dsla, (int, float)):
+            if dsle > 14 and dsla > 14:
+                project_warnings.append("long_inactive_project")
+
+        baseline_hashes = docs.get("baseline_hashes") or {}
+        if docs and not baseline_hashes:
+            project_warnings.append("docs_missing_baseline_hashes")
+
+        if project_warnings:
+            warnings.append(
+                {
+                    "project": info.project_name,
+                    "status": info.status,
+                    "warnings": project_warnings,
+                }
+            )
+
+    return {"ok": True, "warnings": warnings}
+
+
 TOOL_RUNNERS: dict[str, ToolFn] = {
     "set_project": set_project,
     "get_project": get_project,
@@ -66,6 +112,8 @@ TOOL_RUNNERS: dict[str, ToolFn] = {
     "generate_doc_templates": generate_doc_templates,
     "delete_project": delete_project,
     "vector_search": vector_search,
+    # Probe-only helper (not exposed as an MCP tool)
+    "registry_sanity": _registry_sanity_probe,
 }
 
 
@@ -125,7 +173,6 @@ def _build_payload(tool: str, args: "ProbeArgs") -> Dict[str, Any]:
             "agent": args.agent,
             "meta": meta,
             "log_type": args.log_type,
-            "project": args.project,
         }
         return payload
 
@@ -145,7 +192,6 @@ def _build_payload(tool: str, args: "ProbeArgs") -> Dict[str, Any]:
 
     if tool == "read_recent":
         return {
-            "project": args.project,
             "n": args.limit,
             "compact": args.compact,
             "include_metadata": not args.compact,
@@ -153,7 +199,6 @@ def _build_payload(tool: str, args: "ProbeArgs") -> Dict[str, Any]:
 
     if tool == "rotate_log":
         return {
-            "project": args.project,
             "log_type": args.log_type or "progress",
             "confirm": args.confirm_rotate,
             "dry_run": args.dry_run,
@@ -171,7 +216,6 @@ def _build_payload(tool: str, args: "ProbeArgs") -> Dict[str, Any]:
             "dry_run": args.dry_run,
             "doc_name": args.doc_name,
             "target_dir": args.target_dir,
-            "project": args.project,
         }
 
     if tool == "generate_doc_templates":
@@ -191,7 +235,18 @@ def _build_payload(tool: str, args: "ProbeArgs") -> Dict[str, Any]:
         return {}
 
     if tool == "list_projects":
-        return {}
+        status_list = _parse_list(getattr(args, "status_list", None))
+        tags_list = _parse_list(getattr(args, "tags_list", None))
+        return {
+            "limit": args.limit,
+            "filter": args.message,
+            "compact": args.compact,
+            "fields": _parse_list(getattr(args, "fields", None)),
+            "status": status_list or None,
+            "tags": tags_list or None,
+            "order_by": getattr(args, "order_by", None),
+            "direction": getattr(args, "direction", "desc"),
+        }
 
     return {}
 
@@ -241,6 +296,12 @@ class ProbeArgs:
     root: Optional[str]
     defaults: Optional[Dict[str, Any]]
     payload: Optional[Dict[str, Any]]
+    # list_projects-specific
+    fields: Optional[str]
+    status_list: Optional[str]
+    tags_list: Optional[str]
+    order_by: Optional[str]
+    direction: str
 
 
 def parse_args(argv: list[str]) -> ProbeArgs:
@@ -279,6 +340,11 @@ def parse_args(argv: list[str]) -> ProbeArgs:
     parser.add_argument("--root", help="Root override for set_project.")
     parser.add_argument("--defaults-json", help="JSON string for set_project defaults.")
     parser.add_argument("--payload-file", help="JSON file with explicit payload (applies to all selected tools).")
+    parser.add_argument("--fields", help="Comma-separated fields for list_projects.")
+    parser.add_argument("--status-list", help="Comma-separated statuses for list_projects (planning,in_progress,…).")
+    parser.add_argument("--tags-list", help="Comma-separated tags filter for list_projects.")
+    parser.add_argument("--order-by", help="Ordering field for list_projects (created_at,last_entry_at,last_access_at,total_entries).")
+    parser.add_argument("--direction", default="desc", help="Ordering direction for list_projects (asc|desc).")
 
     args_ns = parser.parse_args(argv)
     defaults = _json_or_str(args_ns.defaults_json)
@@ -312,6 +378,11 @@ def parse_args(argv: list[str]) -> ProbeArgs:
         root=args_ns.root,
         defaults=defaults,
         payload=payload,
+        fields=args_ns.fields,
+        status_list=args_ns.status_list,
+        tags_list=args_ns.tags_list,
+        order_by=args_ns.order_by,
+        direction=args_ns.direction,
     )
 
 

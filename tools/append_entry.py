@@ -39,6 +39,7 @@ from scribe_mcp.utils.parameter_validator import ToolValidator, BulletproofParam
 from scribe_mcp.utils.config_manager import ConfigManager, resolve_fallback_chain, BulletproofFallbackManager
 from scribe_mcp.utils.error_handler import ErrorHandler, ExceptionHealer
 from scribe_mcp.tools.config.append_entry_config import AppendEntryConfig
+from scribe_mcp.shared.project_registry import ProjectRegistry
 
 _RATE_TRACKER: Dict[str, deque[float]] = defaultdict(deque)
 _RATE_LOCKS: Dict[str, asyncio.Lock] = {}
@@ -57,6 +58,7 @@ _PARALLEL_PROCESSOR = ParallelBulkProcessor()
 _PARAMETER_CORRECTOR = BulletproofParameterCorrector()
 _EXCEPTION_HEALER = ExceptionHealer()
 _FALLBACK_MANAGER = BulletproofFallbackManager()
+_PROJECT_REGISTRY = ProjectRegistry()
 
 
 def _sanitize_message(message: str) -> str:
@@ -502,11 +504,52 @@ async def _process_single_entry(
                 # Ultimate fallback
                 raise write_error
 
+        # Mirror entry into database-backed storage when available, without
+        # impacting the primary file append path.
+        backend = server_module.storage_backend
+        if backend:
+            try:
+                timeout = settings.storage_timeout_seconds
+                # Ensure project row exists
+                async with asyncio.timeout(timeout):
+                    record = await backend.fetch_project(project["name"])
+                if not record:
+                    async with asyncio.timeout(timeout):
+                        record = await backend.upsert_project(
+                            name=project["name"],
+                            repo_root=project.get("root", str(Path("."))),
+                            progress_log_path=str(log_path),
+                        )
+
+                # Prepare and insert mirrored entry
+                sha_value = hashlib.sha256((line or "").encode("utf-8")).hexdigest()
+                ts_dt = timestamp_dt or utcnow()
+                async with asyncio.timeout(timeout):
+                    await backend.insert_entry(
+                        entry_id=entry_id,
+                        project=record,
+                        ts=ts_dt,
+                        emoji=resolved_emoji,
+                        agent=resolved_agent,
+                        message=message,
+                        meta=meta_payload,
+                        raw_line=line or "",
+                        sha256=sha_value,
+                    )
+            except Exception:
+                # Database mirror failures should never block logging.
+                pass
+
         # Update project state with exception handling
         try:
             await server_module.state_manager.update_project_activity(
                 project["name"], entry_id, message, len(line)
             )
+            # Touch Project Registry entry for this project (best-effort).
+            try:
+                _PROJECT_REGISTRY.touch_entry(project["name"], log_type=final_config.log_type)
+            except Exception:
+                pass
         except Exception as state_error:
             # Log state error but don't fail the operation
             pass
@@ -1739,6 +1782,12 @@ async def _append_bulk_entries(
             await append_line(log_path, line)
             written_lines.append(line)
             paths_used.append(str(log_path))
+
+            # Touch Project Registry entry (best-effort, without blocking bulk flow).
+            try:
+                _PROJECT_REGISTRY.touch_entry(project["name"], log_type=entry_log_type)
+            except Exception:
+                pass
 
             # Prepare database entry for batch processing
             if backend:

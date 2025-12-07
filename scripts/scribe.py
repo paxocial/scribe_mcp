@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Utility for appending structured progress log entries."""
+"""Utility for appending structured progress log entries (MCP-aligned).
+
+This CLI is a thin wrapper over the core MCP tools:
+- set_project: ensure the project is registered and docs exist
+- append_entry: write entries with the same rules agents use
+
+It exists primarily as a convenience for humans; agents should prefer the
+MCP interface directly.
+"""
 
 from __future__ import annotations
 
@@ -13,9 +21,18 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+REPO_ROOT = ROOT_DIR.parent
 
+# Ensure Scribe sees this repo as its root and keeps state under the repo
+# instead of ~/.scribe when the CLI is used.
+os.environ.setdefault("SCRIBE_ROOT", str(ROOT_DIR))
+os.environ.setdefault("SCRIBE_STATE_PATH", str(ROOT_DIR / "tmp_state_cli.json"))
+
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scribe_mcp.tools.set_project import set_project
+from scribe_mcp.tools.append_entry import append_entry
 from scribe_mcp.tools.project_utils import slugify_project_name
 from scribe_mcp.config.log_config import get_log_definition, resolve_log_path
 
@@ -82,100 +99,60 @@ def format_entry(
     return entry
 
 
-def append_log(path: Path, entry: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(entry)
-        if not entry.endswith("\n"):
-            handle.write("\n")
-
-
-def log_progress(
+async def log_via_tools(
     message: str,
     *,
-    emoji: Optional[str] = None,
-    status: Optional[str] = None,
-    agent: Optional[str] = None,
-    meta: Optional[Mapping[str, Any]] = None,
-    config_path: Optional[Path] = None,
-    config_data: Optional[Dict[str, Any]] = None,
-    timestamp: Optional[str] = None,
-    dry_run: bool = False,
+    emoji: Optional[str],
+    status: Optional[str],
+    agent: Optional[str],
+    meta: Mapping[str, Any],
+    project_name: str,
+    project_config: Dict[str, Any],
+    timestamp: Optional[str],
     log_type: str = "progress",
+    dry_run: bool = False,
 ) -> str:
-    if config_data is None:
-        if not config_path:
-            raise ValueError("Either config_path or config_data must be provided.")
-        config = load_config(config_path)
-    else:
-        config = config_data
+    """Use set_project + append_entry so CLI matches MCP behavior."""
 
-    progress_log = config.get("progress_log")
-    if not progress_log:
-        raise ValueError("Config file is missing 'progress_log'.")
-
-    project_name = config.get("name") or config.get("project_name")
-    defaults = config.get("defaults") or {}
-    default_emoji = defaults.get("emoji", config.get("default_emoji", "📝"))
-    default_agent = defaults.get("agent", config.get("default_agent"))
-
-    resolved_emoji = emoji
-    if not resolved_emoji and status:
-        resolved_emoji = STATUS_EMOJI.get(status)
-    if not resolved_emoji:
-        resolved_emoji = default_emoji
-    if not resolved_emoji:
-        raise ValueError("Emoji is required; provide emoji/status or set default_emoji.")
-
-    resolved_agent = agent or default_agent
-
-    meta_dict = {}
-    if meta:
-        meta_dict = {str(key): str(value) for key, value in meta.items()}
-    meta_dict.setdefault("log_type", log_type)
-
-    log_definition = get_log_definition(log_type)
-    missing = [
-        field for field in log_definition.get("metadata_requirements", []) or []
-        if field not in meta_dict
-    ]
-    if missing:
-        raise ValueError(f"Missing metadata for log '{log_type}': {', '.join(missing)}")
-
-    meta_pairs: Tuple[Tuple[str, str], ...] = tuple(meta_dict.items())
-
-    entry = format_entry(
-        message=message,
-        emoji=resolved_emoji,
-        agent=resolved_agent,
-        project_name=project_name,
-        meta=meta_pairs,
-        timestamp=timestamp,
+    # Ensure project is registered and docs exist.
+    await set_project(
+        name=project_name,
+        root=project_config.get("root"),
+        progress_log=project_config.get("progress_log"),
+        defaults=project_config.get("defaults") or {},
     )
 
-    root_dir = config.get("root")
-    if root_dir:
-        root_path = Path(root_dir)
-        if not root_path.is_absolute():
-            root_path = (ROOT_DIR / root_path).resolve()
-        else:
-            root_path = root_path.resolve()
-    else:
-        root_path = ROOT_DIR
+    # Compose metadata dict for append_entry.
+    meta_dict = {str(k): str(v) for k, v in meta.items()}
 
-    project_payload = {
-        "name": project_name or slugify_project_name(progress_log),
-        "root": str(root_path),
-        "progress_log": progress_log,
-        "docs_dir": config.get("docs_dir"),
-    }
-    log_path = resolve_log_path(project_payload, log_definition)
+    # Use append_entry tool; let it handle emoji/status mapping and DB mirroring.
+    result = await append_entry(
+        message=message,
+        status=status,
+        emoji=emoji,
+        agent=agent,
+        meta=meta_dict,
+        timestamp_utc=timestamp,
+        log_type=log_type,
+        auto_split=False,
+    )
 
-    if dry_run:
-        return entry
+    if not result.get("ok", False):
+        raise SystemExit(result.get("error", "append_entry failed"))
 
-    append_log(log_path, entry)
-    return entry
+    # For CLI feedback, synthesize a human-readable line similar to format_entry.
+    resolved_emoji = emoji or STATUS_EMOJI.get(status or "", "") or "📝"
+    entry_meta = tuple(meta_dict.items())
+    display = format_entry(
+        message=message,
+        emoji=resolved_emoji,
+        agent=agent,
+        project_name=project_name,
+        meta=entry_meta,
+        timestamp=timestamp,
+    )
+    # In dry-run mode we don't care whether it actually wrote.
+    return display
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -282,21 +259,23 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     meta = parse_meta(args.meta)
 
-    try:
-        entry = log_progress(
+    # Use MCP-aligned tools to perform the write.
+    import asyncio
+    project_name = config_data.get("name") or slugify_project_name(config_data.get("progress_log", "project"))
+    entry = asyncio.run(
+        log_via_tools(
             message=args.message,
             emoji=args.emoji,
             status=args.status,
             agent=args.agent,
             meta=dict(meta),
-            config_path=config_path,
-            config_data=config_data,
+            project_name=project_name,
+            project_config=config_data,
             timestamp=args.timestamp,
-            dry_run=args.dry_run,
             log_type=args.log_type,
+            dry_run=args.dry_run,
         )
-    except ValueError as exc:
-        raise SystemExit(str(exc)) from exc
+    )
 
     if args.dry_run:
         print(entry)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from scribe_mcp import server as server_module
@@ -11,10 +12,29 @@ from scribe_mcp.utils.tokens import token_estimator
 from scribe_mcp.utils.context_safety import ContextManager
 from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
 from scribe_mcp.shared.logging_utils import LoggingContext, ProjectResolutionError
+from scribe_mcp.shared.project_registry import ProjectRegistry
 
 
 MINIMAL_FIELDS = ("name", "root", "progress_log")
-COMPACT_FIELD_MAP = {"name": "n", "root": "r", "progress_log": "p", "docs": "d", "defaults": "df"}
+COMPACT_FIELD_MAP = {
+    "name": "n",
+    "root": "r",
+    "progress_log": "p",
+    "docs": "d",
+    "defaults": "df",
+    # Registry-related fields
+    "status": "s",
+    "created_at": "c",
+    "last_entry_at": "le",
+    "last_access_at": "la",
+    "last_status_change": "ls",
+    "total_entries": "te",
+    "total_files": "tf",
+    "total_phases": "tp",
+    "description": "desc",
+    "tags": "tg",
+    "meta": "m",
+}
 
 
 class _ListProjectsHelper(LoggingToolMixin):
@@ -23,6 +43,7 @@ class _ListProjectsHelper(LoggingToolMixin):
 
 
 _LIST_PROJECTS_HELPER = _ListProjectsHelper()
+_PROJECT_REGISTRY = ProjectRegistry()
 
 
 @app.tool()
@@ -34,6 +55,10 @@ async def list_projects(
     include_test: bool = False,  # New parameter to control test project visibility
     page: int = 1,  # New pagination parameter
     page_size: Optional[int] = None,  # New pagination size override
+    status: Optional[List[str]] = None,
+    tags: Optional[List[str]] = None,
+    order_by: Optional[str] = None,
+    direction: str = "desc",
 ) -> Dict[str, Any]:
     """Return projects registered in the database or state cache with intelligent filtering.
 
@@ -45,6 +70,10 @@ async def list_projects(
         include_test: Include test/temp projects (default: False)
         page: Page number for pagination (default: 1)
         page_size: Number of items per page (default: 5 or limit if specified)
+        status: Optional list of lifecycle statuses to include (e.g., ['planning','in_progress'])
+        tags: Optional list of tags; projects matching any tag are included
+        order_by: Optional sort field: created_at|last_entry_at|last_access_at|total_entries
+        direction: Sort direction ('asc' or 'desc') when order_by is provided
 
     Returns:
         Projects list with intelligent filtering, pagination, and context safety
@@ -90,6 +119,10 @@ async def list_projects(
             existing["docs"] = data["docs"]
         if data.get("defaults"):
             existing["defaults"] = data["defaults"]
+        if data.get("description"):
+            existing["description"] = data["description"]
+        if data.get("tags"):
+            existing["tags"] = data["tags"]
         projects_map[name] = existing
 
     active_project, current_name, recent = await load_active_project(server_module.state_manager)
@@ -100,9 +133,38 @@ async def list_projects(
             "progress_log": active_project.get("progress_log"),
             "docs": active_project.get("docs"),
             "defaults": active_project.get("defaults"),
+            "description": active_project.get("description"),
+            "tags": active_project.get("tags"),
         }
 
-    # Convert to list and apply name filter if provided
+    # Enrich with Project Registry information (best-effort).
+    for name, data in list(projects_map.items()):
+        try:
+            info = _PROJECT_REGISTRY.get_project(name)
+        except Exception:
+            info = None
+        if not info:
+            continue
+
+        # Only set fields that aren't already present from state.
+        data.setdefault("description", info.description)
+        data.setdefault("status", info.status)
+        data.setdefault("created_at", info.created_at.isoformat() if info.created_at else None)
+        data.setdefault("last_entry_at", info.last_entry_at.isoformat() if info.last_entry_at else None)
+        data.setdefault("last_access_at", info.last_access_at.isoformat() if info.last_access_at else None)
+        data.setdefault(
+            "last_status_change",
+            info.last_status_change.isoformat() if info.last_status_change else None,
+        )
+        data.setdefault("total_entries", info.total_entries)
+        data.setdefault("total_files", info.total_files)
+        data.setdefault("total_phases", info.total_phases)
+        if info.meta and "meta" not in data:
+            data["meta"] = info.meta
+        if info.tags and "tags" not in data:
+            data["tags"] = info.tags
+
+    # Convert to list and apply name/status/tag filters if provided
     projects_list = list(projects_map.values())
     if filter:
         filter_lower = filter.lower()
@@ -111,8 +173,73 @@ async def list_projects(
             if filter_lower in project.get("name", "").lower()
         ]
 
-    # Sort by name for stable ordering
-    projects_list.sort(key=lambda item: item["name"].lower())
+    if status:
+        allowed_status = {s for s in status if isinstance(s, str)}
+
+        def _effective_status(project: Dict[str, Any]) -> str:
+            return (project.get("status") or "planning").lower()
+
+        projects_list = [
+            project
+            for project in projects_list
+            if _effective_status(project) in allowed_status
+        ]
+
+    if tags:
+        wanted_tags = {t for t in tags if isinstance(t, str)}
+
+        def _project_tags(project: Dict[str, Any]) -> set[str]:
+            raw = project.get("tags") or []
+            if isinstance(raw, str):
+                return {raw}
+            try:
+                return {t for t in raw if isinstance(t, str)}
+            except TypeError:
+                return set()
+
+        projects_list = [
+            project
+            for project in projects_list
+            if _project_tags(project) & wanted_tags
+        ]
+
+    # Ordering: default by name; optional registry-aware sort when order_by is provided.
+    if order_by:
+        direction_norm = direction.lower()
+        reverse = direction_norm != "asc"
+
+        def _parse_ts(value: Optional[str]) -> datetime:
+            if not value:
+                # Use minimal datetime to push missing values to one end
+                return datetime.min.replace(tzinfo=timezone.utc)
+            try:
+                dt = datetime.fromisoformat(value)
+                if dt.tzinfo is None:
+                    return dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(timezone.utc)
+            except Exception:
+                # Fallback: try parsing legacy SQLite timestamps without offsets.
+                try:
+                    dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+                    return dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    return datetime.min.replace(tzinfo=timezone.utc)
+
+        if order_by in ("created_at", "last_entry_at", "last_access_at"):
+            projects_list.sort(
+                key=lambda item: _parse_ts(item.get(order_by)), reverse=reverse
+            )
+        elif order_by == "total_entries":
+            projects_list.sort(
+                key=lambda item: int(item.get("total_entries") or 0),
+                reverse=reverse,
+            )
+        else:
+            # Fallback: keep name-based ordering if unsupported field requested.
+            projects_list.sort(key=lambda item: item["name"].lower())
+    else:
+        # Sort by name for stable ordering when no explicit order_by is given.
+        projects_list.sort(key=lambda item: item["name"].lower())
 
     # Initialize context manager for intelligent filtering and pagination
     context_manager = ContextManager()

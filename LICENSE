@@ -1,33 +1,46 @@
-SPDX-License-Identifier: MIT
-Copyright (c) 2025 Paxocial / Corta Labs
+## Scribe MCP License (Community + Small Business License)
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the “Software”), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+**Version 1.0 — December 2025**
+Copyright © 2025 CortaLabs
 
-1. The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
+### 1. **Permissions**
 
-2. The Software is provided “AS IS”, WITHOUT WARRANTY OF ANY KIND, express or
-   implied, including but not limited to the warranties of merchantability,
-   fitness for a particular purpose, and noninfringement. In no event shall
-   the author or copyright holder be liable for any claim, damages, or other
-   liability, whether in an action of contract, tort, or otherwise, arising
-   from, out of, or in connection with the Software or the use or other
-   dealings in the Software.
+You are free to:
 
-3. You acknowledge that you use this Software entirely at your own risk.
-   No support, maintenance, or guarantee of fitness for *anything* is provided.
+* Use, modify, and distribute this software for **personal**, **research**, **educational**, **open-source**, or **non-commercial** purposes.
+* Use this software **commercially** if your organization meets **all** the following:
 
-4. Attribution is appreciated but not required. If you do modify or
-   redistribute this Software, please don’t make us look bad.
+  * Fewer than **25 employees**, and
+  * Less than **$1,000,000 USD annual revenue**, and
+  * Your use does **not** involve selling, hosting, or packaging Scribe MCP or derivative works as part of a paid product or service.
 
----
+### 2. **Restrictions**
 
-### TL;DR (Unofficial Summary)
+You **may not**:
 
-Do whatever the hell you want — fork it, break it, ship it, teach it kung fu.  
-Just don’t sue anyone if it explodes or becomes self-aware.
+* Use this software as part of a **commercial service or product** if your organization exceeds the employee or revenue limits listed above.
+* Sell, license, or otherwise monetize any version of Scribe MCP or derivative works without a separate commercial agreement.
+* Remove or alter licensing notices.
+
+### 3. **Enterprise Licensing**
+
+If your organization:
+
+* exceeds the small-business limits, or
+* intends to use Scribe MCP in a paid SaaS/product, or
+* requires redistribution rights, proprietary embedding, or long-term support,
+
+then you must obtain a **commercial license** from:
+
+```
+CortaLabs — licensing@cortalabs.com
+```
+
+### 4. **No Warranty**
+
+The software is provided “as-is” without warranty of any kind.
+
+### 5. **License Compatibility**
+
+This license is **source-available** but **not OSI-open-source**.
+You may **fork**, **modify**, and **extend** Scribe MCP, but you may not remove the noncommercial restrictions for others.

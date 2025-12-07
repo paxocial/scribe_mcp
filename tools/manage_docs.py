@@ -15,13 +15,15 @@ from scribe_mcp.doc_management.manager import apply_doc_change, DocumentOperatio
 from scribe_mcp.tools.append_entry import append_entry
 from scribe_mcp.shared.logging_utils import (
     LoggingContext,
-   ProjectResolutionError,
-   coerce_metadata_mapping,
+    ProjectResolutionError,
+    coerce_metadata_mapping,
 )
 from scribe_mcp.utils.parameter_validator import BulletproofParameterCorrector
 from scribe_mcp.utils.error_handler import HealingErrorHandler
 from scribe_mcp.utils.config_manager import ConfigManager
 from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
+from scribe_mcp.shared.project_registry import ProjectRegistry
+from scribe_mcp.shared.project_registry import ProjectRegistry
 
 
 class _ManageDocsHelper(LoggingToolMixin):
@@ -33,6 +35,8 @@ class _ManageDocsHelper(LoggingToolMixin):
 
 
 _MANAGE_DOCS_HELPER = _ManageDocsHelper()
+_PROJECT_REGISTRY = ProjectRegistry()
+_PROJECT_REGISTRY = ProjectRegistry()
 
 
 def _normalize_metadata_with_healing(metadata: Optional[Dict[str, Any] | str]) -> tuple[Dict[str, Any], bool, List[str]]:
@@ -77,10 +81,18 @@ def _heal_manage_docs_parameters(
     healing_messages = []
     healing_applied = False
 
-    # Define valid actions for enum correction
+    # Define valid actions for enum correction (include batch and list_sections
+    # so they are preserved instead of being auto-corrected to another verb).
     valid_actions = {
-        "replace_section", "append", "status_update", "create_research_doc",
-        "create_bug_report", "create_review_report", "create_agent_report_card"
+        "replace_section",
+        "append",
+        "status_update",
+        "batch",
+        "list_sections",
+        "create_research_doc",
+        "create_bug_report",
+        "create_review_report",
+        "create_agent_report_card",
     }
 
     # Define valid docs for enum correction
@@ -572,6 +584,20 @@ async def manage_docs(
             )
         except Exception as exc:
             print(f"⚠️  Failed to record doc change in storage: {exc}")
+        else:
+            # Update Project Registry doc metrics (best-effort, SQLite-first).
+            try:
+                project_name = project.get("name", "")
+                if project_name:
+                    _PROJECT_REGISTRY.record_doc_update(
+                        project_name,
+                        doc=doc,
+                        action=action,
+                        before_hash=change.before_hash,
+                        after_hash=change.after_hash,
+                    )
+            except Exception:
+                pass
 
     log_error = None
     if not dry_run:

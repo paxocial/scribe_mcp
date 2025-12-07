@@ -71,6 +71,7 @@ Scribe extends the traditional "append-only progress log" into a full documentat
 - **Intelligent Reminder Governance** with dynamic scoring, drift detection, and workflow enforcement
 - **Comprehensive Search & Analytics** with exact/substring/regex matching and temporal filtering
 - **Production-Ready Operations** including atomic writes, file locking, cross-platform compatibility, and preflight backups
+- **Project Registry & Lifecycle Tracking** via a SQLite-backed registry (`scribe_projects`) that exposes status, timestamps, counters, activity metrics, and doc hygiene state for every project
 
 **Recent Major Enhancements:**
 - **Enhanced Log Rotation** with hash chains, sequence numbers, and integrity verification
@@ -327,6 +328,131 @@ The Modern Tool Architecture provides a unified foundation for all Scribe MCP to
 **System Health:**
 - `health_check`: System health verification and connectivity testing
 - Enhanced error handling, graceful degradation, and comprehensive status reporting
+
+### Project Registry & Lifecycle (`shared/project_registry.py`, `tools/list_projects.py`)
+
+Scribe includes a **SQLite-backed Project Registry** that turns projects into first-class, queryable entities:
+
+- **Registry Table (`scribe_projects`, SQLite-first)**:
+  - Fields (conceptual): `id`, `name`, `description`, `status`, `created_at`, `last_entry_at`, `last_access_at`, `last_status_change`, `tags`, `meta`.
+  - Lifecycle states: `planning | in_progress | blocked | complete | archived | abandoned`.
+  - Backed by the existing `SQLiteStorage` and automatically extended via `_ensure_schema` (no destructive migrations).
+- **Integration Hooks**:
+  - `set_project`:
+    - Ensures a `scribe_projects` row exists for each logical project.
+    - Populates dev_plan rows for core docs (`architecture`, `phase_plan`, `checklist`, `progress_log`).
+    - Updates `last_access_at` on each selection.
+  - `append_entry`:
+    - For `log_type="progress"`, calls `ProjectRegistry.touch_entry`, which updates `last_entry_at` and can auto‑promote `status` from `planning` → `in_progress` once core docs exist and at least one progress entry has been written.
+  - `manage_docs`:
+    - Calls `ProjectRegistry.record_doc_update` after successful doc writes, recording:
+      - `meta.docs.last_update_at`, `last_doc_type`, `last_action`, `update_count`.
+      - `baseline_hashes[doc]` and `current_hashes[doc]` per doc type.
+      - Derived flags like `architecture_touched`, `phase_plan_modified`, `docs_started`, `docs_ready_for_work`.
+- **Runtime Meta Enrichment (`get_project` / `list_projects`)**:
+  - `meta.activity` (computed at read time, not stored):
+    - `project_age_days`
+    - `days_since_last_entry`
+    - `days_since_last_access`
+    - `staleness_level` (`fresh|warming|stale|frozen`)
+    - `activity_score` — scalar score combining recency, entry rate, doc readiness, and optional `meta.project.priority`.
+  - `meta.project`:
+    - Container for project-level metadata (e.g., `owner`, `priority`, `domain`, `work_blockers`).
+
+### Dev Plan Doc Flow (End-to-End Sequence)
+
+Scribe’s dev-plan pipeline follows a fixed, auditable sequence that ties MCP tools, templates, and the registry together:
+
+```mermaid
+sequenceDiagram
+    participant Client as MCP Client / Agent
+    participant Scribe as Scribe MCP Server
+    participant Registry as Project Registry (SQLite)
+    participant FS as Dev Plan Docs (ARCH/PHASE/CHECKLIST/LOG)
+
+    Client->>Scribe: set_project(project_name)
+    Scribe->>Registry: ensure_project + touch_access
+    Scribe->>FS: generate_doc_templates (ARCHITECTURE_GUIDE, PHASE_PLAN, CHECKLIST, PROGRESS_LOG)
+    FS-->>Registry: baseline hashes recorded via record_doc_update
+
+    Client->>Scribe: manage_docs.append / replace_section / status_update
+    Scribe->>FS: Atomic write with diff + verification
+    Scribe->>Registry: record_doc_update(doc, action, before_hash, after_hash)
+    Scribe->>FS: append_entry(log_type="doc_updates")
+
+    Client->>Scribe: append_entry(log_type="progress")
+    Scribe->>FS: Append progress line
+    Scribe->>Registry: touch_entry(project_name, log_type="progress")
+
+    Client->>Scribe: list_projects / get_project
+    Scribe->>Registry: enrich with meta.activity + meta.docs + meta.project
+    Registry-->>Client: status, timestamps, activity_score, doc hygiene flags
+```
+
+This flow is the canonical reference for how `set_project`, `generate_doc_templates`, `manage_docs`, and `append_entry` interact with the Project Registry and dev_plan documents. For template-level context details, see `docs/TEMPLATE_VARIABLES.md`.
+
+### Licensing & Distribution
+
+Scribe MCP is distributed as **source-available infrastructure** under the **Scribe MCP License (Community + Small Business License)**:
+
+- Free for:
+  - Individual developers and open-source contributors
+  - Researchers and educational use
+  - Small teams and small businesses (under 25 employees and under \$1M USD annual revenue) **not** selling or hosting Scribe MCP as a paid product or service.
+- Commercial license required for:
+  - Larger organizations
+  - Any SaaS, platform, or internal tooling where Scribe MCP (or derivatives) powers a paid offering.
+
+See `LICENSE` for the full legal text and `LICENSE_HISTORY.md` for details on earlier MIT-licensed snapshots. For enterprise licensing, contact **licensing@cortalabs.com**.
+  - `meta.docs.flags`:
+    - Per-doc flags: `architecture_touched`, `architecture_modified`, etc.
+    - Aggregate flags: `docs_started`, `docs_ready_for_work`, `doc_drift_suspected`.
+    - Drift metrics: `doc_drift_days_since_update`, `drift_score` (scalar representing how out-of-date docs are versus the log).
+
+**Enhanced `list_projects` Tool Surface**
+
+- Arguments:
+  - `limit: Optional[int] = 5`
+  - `filter: Optional[str] = None` (name substring)
+  - `compact: bool = False`
+  - `fields: Optional[List[str]] = None`
+  - `include_test: bool = False`
+  - `page: int = 1`
+  - `page_size: Optional[int] = None`
+  - `status: Optional[List[str]] = None` (lifecycle filter)
+  - `tags: Optional[List[str]] = None` (contains-any tag filter)
+  - `order_by: Optional[str] = None` (`created_at|last_entry_at|last_access_at|total_entries`)
+  - `direction: str = "desc"` (`asc|desc`)
+- Behavior:
+  - Merges storage-backed projects and state-managed projects.
+  - Enriches each with Project Registry data, including `meta.activity` and `meta.docs`.
+  - Applies name, status, and tag filters.
+  - Normalizes timestamps to UTC-aware datetimes when ordering to avoid naive/aware comparison errors.
+  - Supports both compact and full-field responses via `fields` + `COMPACT_FIELD_MAP`.
+
+**Doc Hygiene & Drift Governance**
+
+The registry’s doc-aware meta enables concrete doc-hygiene enforcement:
+
+- Core concepts:
+  - **Template vs. Real Docs**:
+    - `baseline_hashes[doc]` captures the first non-empty hash of a template before a real edit.
+    - `current_hashes[doc]` tracks the latest applied content.
+    - `*_touched` and `*_modified` flags are derived automatically.
+  - **Readiness**:
+    - `docs_started` — at least one core doc has been touched.
+    - `docs_ready_for_work` — architecture, phase plan, and checklist have all been touched.
+  - **Drift**:
+    - `doc_drift_suspected` — raised when:
+      - Status is `in_progress` or `complete`, and
+      - Docs are not ready, or
+      - `last_entry_at` substantially post-dates `last_update_at`.
+    - `doc_drift_days_since_update` — numeric delta in days.
+    - `drift_score` — scalar used to rank how badly a project’s docs lag its logs.
+
+These signals are exposed via `list_projects(fields=["name","status","meta"])` so orchestrators and future agents can decide:
+- Which projects to prioritize.
+- Which projects require doc hygiene sweeps before additional work.
 
 ### Enterprise Utilities (`utils/`)
 **Production-Grade Infrastructure Components**

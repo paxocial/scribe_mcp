@@ -347,6 +347,41 @@ Ensure repository-wide milestones are properly logged:
 
 ---
 
+## 🧾 Scribe MCP Tool Surface (Coordinator View)
+
+When orchestrating Scribe from Claude Code, assume the following **primary tools and arguments** (full details in AGENTS.md and the Scribe whitepaper):
+
+- `set_project(name, root=None, progress_log=None, author=None, overwrite_docs=False, defaults=None)`
+  - Always call once at the start of a run for the chosen project.
+  - Bootstraps dev_plan docs and ensures the project exists in the SQLite-backed registry (`scribe_projects`).
+
+- `append_entry(message="", status=None, emoji=None, agent=None, meta=None, timestamp_utc=None, items=None, items_list=None, auto_split=True, split_delimiter="\n", stagger_seconds=1, agent_id=None, log_type="progress", config=None)`
+  - Use from *every* stage to keep a complete audit trail.
+  - `log_type="progress"` for normal orchestration, `"doc_updates"` for manage_docs calls, `"security"`/`"bugs"` for specialized logs.
+
+- `manage_docs(action, doc, section=None, content=None, template=None, metadata=None, dry_run=False, doc_name=None, target_dir=None)`
+  - Stage 1–2 agents (research/architecture) must use this instead of editing dev_plan docs directly.
+  - This updates:
+    - Files on disk (atomically).
+    - Storage (`doc_changes` table).
+    - The Project Registry (`meta.docs` baseline/current hashes and flags).
+
+- `list_projects(limit=5, filter=None, compact=False, fields=None, include_test=False, page=1, page_size=None, status=None, tags=None, order_by=None, direction="desc")`
+  - Coordinators can:
+    - Find stale projects: `order_by="last_entry_at", direction="asc"`.
+    - Filter by lifecycle: `status=["planning","in_progress"]`.
+    - Inspect registry meta: `fields=["name","status","meta"]` to see:
+      - `meta.activity` (project_age_days, days_since_last_entry/access, staleness_level, activity_score).
+      - `meta.docs.flags` (e.g., `docs_ready_for_work`, `doc_drift_suspected`).
+
+- `read_recent` and `query_entries`
+  - `read_recent(...)` for quick tails on the current project’s logs.
+  - `query_entries(...)` for cross-project search with `search_scope`, `document_types`, and `relevance_threshold` as needed.
+
+> Coordinators should treat the Project Registry + list_projects as the **mission registry** for selecting which project to work on next, and `manage_docs + append_entry` as the canonical way to keep documentation and logs in sync with reality.
+
+---
+
 This Protocol ensures that all development within Scribe MCP is **auditable, reproducible, and traceable** from idea to implementation.
 
 

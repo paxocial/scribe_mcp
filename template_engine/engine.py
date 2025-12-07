@@ -277,6 +277,7 @@ class Jinja2TemplateEngine:
     def _add_custom_globals(self, env: Environment) -> None:
         """Add custom global functions and variables."""
         project_root = self.project_root.resolve()
+        allowed_extensions = {".md", ".markdown", ".txt", ".json"}
 
         def include_file(path: str) -> str:
             """Include file content safely, locked to project directory."""
@@ -287,6 +288,10 @@ class Jinja2TemplateEngine:
                 # Security check: ensure the resolved path is still within project_root
                 if project_root not in target_path.parents and target_path != project_root:
                     return f"[Security: path '{path}' outside project directory]"
+
+                # Restrict included files to a small, safe set of extensions
+                if target_path.suffix.lower() not in allowed_extensions:
+                    return f"[Security: unsupported file extension '{target_path.suffix}' for include_file]"
 
                 if not target_path.exists():
                     return f"[File not found: {path}]"
@@ -405,7 +410,8 @@ class Jinja2TemplateEngine:
         Args:
             template_name: Name of the template file
             metadata: Additional variables for template rendering
-            strict: Whether to raise errors for undefined variables
+            strict: When True, operate in \"fail-hard\" mode and do not attempt legacy fallback.
+                    When False, use best-effort rendering (including optional legacy fallback when enabled).
 
         Returns:
             Rendered template content
@@ -431,7 +437,9 @@ class Jinja2TemplateEngine:
         except TemplateNotFound as e:
             raise TemplateNotFoundError(f"Template '{template_name}' not found in template directories: {self.template_dirs}")
         except (TemplateSyntaxError, TemplateRuntimeError) as e:
-            if fallback:
+            # In strict mode, bypass legacy fallback and raise immediately.
+            use_fallback = fallback and not strict
+            if use_fallback:
                 template_logger.warning(f"Jinja2 rendering failed for '{template_name}', attempting legacy fallback: {e}")
                 try:
                     # Try to get template source and use legacy rendering
@@ -478,7 +486,9 @@ class Jinja2TemplateEngine:
             return result
 
         except (TemplateSyntaxError, TemplateRuntimeError) as e:
-            if fallback:
+            # In strict mode, bypass legacy fallback and raise immediately.
+            use_fallback = fallback and not strict
+            if use_fallback:
                 template_logger.warning(f"Jinja2 rendering failed for template string, attempting legacy fallback: {e}")
                 try:
                     context = self._build_context(metadata)

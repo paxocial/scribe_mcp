@@ -474,8 +474,32 @@ async def _render_content(
             raise DocumentOperationError(f"Unexpected template error: {e}")
 
     if isinstance(content, str) and content:
-        # Preserve author-provided formatting exactly (no stripping or newline collapse)
+        # Preserve author-provided formatting, but allow inline Jinja rendering when present.
         normalized = content.replace("\r\n", "\n")
+        if "{{" in normalized or "{%" in normalized or "{#" in normalized:
+            try:
+                from scribe_mcp.template_engine import Jinja2TemplateEngine, TemplateEngineError
+
+                engine = Jinja2TemplateEngine(
+                    project_root=Path(project.get("root", "")),
+                    project_name=project.get("name", ""),
+                    security_mode="sandbox",
+                )
+                enhanced_metadata = metadata.copy() if metadata else {}
+                enhanced_metadata.setdefault(
+                    "timestamp", utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+                )
+                rendered_inline = engine.render_string(
+                    normalized,
+                    metadata=enhanced_metadata,
+                    strict=False,
+                    fallback=True,
+                )
+                return rendered_inline
+            except Exception as e:  # pragma: no cover - defensive
+                doc_logger.error(f"Inline Jinja rendering failed, returning raw content: {e}")
+                return normalized
+
         return normalized
 
     raise ValueError("Either content or template must be provided.")
@@ -785,6 +809,14 @@ def _validate_and_correct_inputs(
         if not sanitized_section:
             sanitized_section = "main_content"
         corrected_section = sanitized_section
+
+    # For actions that do NOT require an explicit section (e.g. append, batch,
+    # list_sections), treat missing/None sections as truly absent rather than
+    # letting the generic corrector turn them into fallback strings like
+    # "No message provided", which would create bogus anchors.
+    if corrected_action not in {"replace_section", "status_update"}:
+        if section is None:
+            corrected_section = None
 
     # Content/template handling (preserve caller formatting for content)
     if content is not None:
