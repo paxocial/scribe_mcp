@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -44,13 +45,34 @@ def test_clean_meta_value_replaces_newlines_and_pipes():
 
 
 @pytest.mark.asyncio
-async def test_set_project_rejects_path_traversal():
+async def test_set_project_rejects_log_outside_root(tmp_path: Path):
+    safe_root = tmp_path / "safe_root"
+    outside_log = tmp_path / "elsewhere" / "PROGRESS_LOG.md"
     result = await set_project.set_project(
         name="malicious",
-        root="../../etc",
+        root=str(safe_root),
+        progress_log=str(outside_log),
     )
     assert not result["ok"]
-    assert "within the repository root" in result["error"]
+    assert "Progress log must be within the project root." in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_set_project_allows_external_root(tmp_path: Path):
+    external_root = tmp_path / "external_repo"
+    result = await set_project.set_project(
+        name="external_project",
+        root=str(external_root),
+    )
+
+    try:
+        assert result["ok"]
+        assert Path(result["project"]["root"]).resolve() == external_root.resolve()
+        expected_docs = external_root / "docs" / "dev_plans" / "external_project"
+        assert Path(result["project"]["progress_log"]).resolve() == (expected_docs / "PROGRESS_LOG.md").resolve()
+    finally:
+        if external_root.exists():
+            shutil.rmtree(external_root)
 
 
 @pytest.mark.asyncio

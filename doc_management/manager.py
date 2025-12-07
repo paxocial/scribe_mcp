@@ -473,30 +473,10 @@ async def _render_content(
             doc_logger.error(f"Unexpected error rendering template '{template_name}': {e}")
             raise DocumentOperationError(f"Unexpected template error: {e}")
 
-    if isinstance(content, str) and content.strip():
-        # For direct content, still allow Jinja2 processing for variables
-        try:
-            from scribe_mcp.template_engine import Jinja2TemplateEngine, TemplateEngineError
-
-            engine = Jinja2TemplateEngine(
-                project_root=Path(project.get("root", "")),
-                project_name=project.get("name", ""),
-                security_mode="sandbox"
-            )
-
-            enhanced_metadata = metadata.copy() if metadata else {}
-            enhanced_metadata.update({
-                "timestamp": utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
-            })
-
-            rendered = engine.render_string(content.strip(), metadata=enhanced_metadata)
-            doc_logger.debug(f"Successfully rendered content string using Jinja2 engine")
-            return rendered
-
-        except (TemplateEngineError, ImportError):
-            # Fallback to original content if Jinja2 processing fails
-            doc_logger.warning(f"Jinja2 processing failed, using raw content")
-            return content.strip()
+    if isinstance(content, str) and content:
+        # Preserve author-provided formatting exactly (no stripping or newline collapse)
+        normalized = content.replace("\r\n", "\n")
+        return normalized
 
     raise ValueError("Either content or template must be provided.")
 
@@ -805,6 +785,10 @@ def _validate_and_correct_inputs(
         if not sanitized_section:
             sanitized_section = "main_content"
         corrected_section = sanitized_section
+
+    # Content/template handling (preserve caller formatting for content)
+    if content is not None:
+        corrected_content = str(content).replace("\r\n", "\n")
 
     # Content/template handling
     if corrected_action == "status_update":

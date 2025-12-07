@@ -13,6 +13,11 @@
 
 **CHATGPT CODEX CLI:** YOU MUST ALWAYS USE THE AGENT NAME `Codex` with scribe.  Claude code has 5 agents we can call to assist us.  The Review Agent, Architect Agent, Research Agent, Bug Hunter agent, and another coder agent.
 
+Whenever you and the human spin up a **new project**, Codex must immediately:
+- Call `set_project(<project name>)` for that project.
+- Use `manage_docs` to fully draft/populate the architecture and supporting Markdown docs (`ARCHITECTURE_GUIDE.md`, `PHASE_PLAN.md`, `CHECKLIST.md`) **before writing any feature code**.
+- Continue using `append_entry` to scribe progress log entries while drafting those docs; doc changes and progress logs are tracked separately but both are mandatory.
+
 ## 🔁 Protocol Sequence
 
 > **Canonical Chain:**
@@ -26,6 +31,11 @@
 **⚠️ COMMANDMENT #1 ABSOLUTE**: ALWAYS use `append_entry` to document EVERY significant action, decision, investigation, code change, test result, bug discovery, and planning step. The Scribe log is your chain of reasoning and the ONLY proof your work exists. If it's not Scribed, it didn't fucking happen.
 - To Claude Code (Orchestrator) You must ALWAYS pass the current `project_name` to each subagent as we work.  To avoid confusion and them accidentally logging to the wrong project.
 ---
+
+# 🚀 NEW PROJECT WORKFLOW (MANDATORY)
+- When creating any new project, immediately call `set_project(<project name>)` to bootstrap the docs suite, then run `manage_docs` to populate `ARCHITECTURE_GUIDE`, `PHASE_PLAN`, and `CHECKLIST` before coding. This is required for every new project.
+- You may scribe progress log entries while drafting the architecture/plan docs; continue to log via `append_entry` as you write them.
+- `manage_docs` is for project structural documentation only; `AGENTS.md` is edited by hand (do not use `manage_docs` for it).
 
 # ⚠️ COMMANDMENT #2: REASONING TRACES & CONSTRAINT VISIBILITY (CRITICAL)
 
@@ -456,6 +466,10 @@ Run predefined parameterized queries against the Scribe database.
 - `rotate --suffix YYYY-MM-DD`
 
 Always prefer tool calls from agents; the CLI is for human operators.
+
+### 🔍 Scribe Whitepaper & Probe (Tool Testing Contract)
+- Full architecture and operational details live in `docs/whitepapers/scribe_mcp_whitepaper.md`. Read this when designing or modifying Scribe internals or workflows.
+- `scripts/scribe_probe.py` exists as a dedicated **tool harness**: every MCP tool we add or modify **must** be fully testable from the probe (happy path + basic error paths) before we rely on it from Codex. Treat probe coverage as a hard requirement, especially now that Codex’s MCP auto-reload cannot be trusted for live iteration.
 
 ---
 

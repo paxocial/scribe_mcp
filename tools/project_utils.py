@@ -193,15 +193,13 @@ def _normalise_project_data(data: Dict[str, Any], base_dir: Path) -> Optional[Di
 
     root_value = data.get("root")
     if root_value:
-        root_path = Path(root_value)
+        root_path = Path(root_value).expanduser()
         if not root_path.is_absolute():
             root_path = (settings.project_root / root_path).resolve()
         else:
             root_path = root_path.resolve()
     else:
         root_path = settings.project_root
-    if not _is_within(root_path, settings.project_root):
-        return None
 
     docs_value = data.get("docs_dir")
     if docs_value:

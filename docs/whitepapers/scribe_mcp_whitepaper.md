@@ -129,6 +129,14 @@ MCP_SPINE/
             └── custom/                  # User-defined templates
 ```
 
+### Environment Configuration & External Repos
+- **SCRIBE_ROOT**: Absolute path to the project root where `docs/dev_plans/<project>/...` lives. Set this when running Scribe against any repo outside `MCP_SPINE`.
+- **SCRIBE_STATE_PATH**: Writable JSON state file (per-user or per-repo). Defaults to `~/.scribe/state.json`; override for isolated test runs.
+- **Optional storage envs**: `SCRIBE_STORAGE_BACKEND` (`sqlite` | `postgres`) and `SCRIBE_DB_URL` for Postgres deployments.
+- **PYTHONPATH**: Include the parent of `scribe_mcp` when launching from other repos so imports resolve.
+- **.env loading**: Scribe now best-effort auto-loads `.env` via `python-dotenv` on startup; shell/process manager exports still work as usual.
+- **Overlap detection**: Root overlaps are tolerated when progress logs/docs differ (e.g., many dev_plan folders under one repo). Actual collisions on `progress_log` or `docs_dir` remain guarded.
+
 ### MCP Server Core (`MCP_SPINE/scribe_mcp/server.py`)
 - Boots a stdio-based MCP server using the official `mcp` Python SDK when available (falls back to a permissive stub if the SDK is missing for local testing).
 - Registers all tools under a single `Server` instance. During import it dynamically adds `@app.tool` support if the SDK version lacks the helper decorators (maintaining compatibility with older SDKs).

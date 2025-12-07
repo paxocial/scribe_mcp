@@ -239,14 +239,12 @@ def _resolve_root(root: Optional[str]) -> Path:
     if not root:
         return base
 
-    root_path = Path(root)
+    root_path = Path(root).expanduser()
     if not root_path.is_absolute():
+        # Preserve relative-path compatibility while allowing roots outside the server repo
         root_path = (base / root_path).resolve()
-
-    try:
-        root_path.relative_to(base)
-    except ValueError as exc:
-        raise ValueError("Project root must reside within the repository root.") from exc
+    else:
+        root_path = root_path.resolve()
 
     return root_path
 
@@ -395,11 +393,6 @@ async def _validate_project_paths(
                 "ok": False,
                 "error": f"Docs directory '{docs_resolved}' already belongs to project '{other_name}'.",
             }
-        if _overlaps(root_resolved, paths["root"]):
-            warnings.append(
-                f"Project '{other_name}' shares overlapping root '{paths['root']}'."
-            )
-
     root_parent = _first_existing_parent(root_resolved)
     if not os.access(root_parent, os.W_OK):
         return {
@@ -432,14 +425,14 @@ async def _gather_known_projects(skip: Optional[str]) -> Dict[str, Dict[str, Pat
         if project_name == skip:
             continue
         paths = _extract_paths(data)
-        if paths:
+        if paths and not _is_temp_path(paths["root"]):
             collected[project_name] = paths
 
     for project_name, data in list_project_configs().items():
         if project_name == skip or project_name in collected:
             continue
         paths = _extract_paths(data)
-        if paths:
+        if paths and not _is_temp_path(paths["root"]):
             collected[project_name] = paths
     return collected
 
@@ -467,6 +460,12 @@ def _extract_paths(data: Dict[str, Any]) -> Optional[Dict[str, Path]]:
         "docs_dir": docs_dir,
         "progress_log": log,
     }
+
+
+def _is_temp_path(path: Path) -> bool:
+    """Filter out ephemeral tmp test projects to reduce noisy overlaps."""
+    parts = {p.lower() for p in path.parts}
+    return any(part.startswith("tmp_tests") or part == "tmp_tests" for part in parts)
 
 
 def _overlaps(left: Path, right: Path) -> bool:

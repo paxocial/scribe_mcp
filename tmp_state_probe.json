@@ -1,0 +1,51 @@
+{
+  "current_project": "mcp_connection_test",
+  "projects": {
+    "mcp_connection_test": {
+      "name": "mcp_connection_test",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/docs/dev_plans/mcp_connection_test/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/docs/dev_plans/mcp_connection_test",
+      "docs": {
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/docs/dev_plans/mcp_connection_test/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/docs/dev_plans/mcp_connection_test/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/docs/dev_plans/mcp_connection_test/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/docs/dev_plans/mcp_connection_test/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "agent": "Scribe"
+      },
+      "author": "Scribe"
+    }
+  },
+  "recent_projects": [
+    "mcp_connection_test"
+  ],
+  "recent_tools": [
+    {
+      "name": "generate_doc_templates",
+      "ts": "2025-12-07 09:36:44 UTC"
+    },
+    {
+      "name": "manage_docs",
+      "ts": "2025-12-07 09:25:48 UTC"
+    },
+    {
+      "name": "set_project",
+      "ts": "2025-12-07 09:23:14 UTC"
+    },
+    {
+      "name": "read_recent",
+      "ts": "2025-12-07 09:18:16 UTC"
+    },
+    {
+      "name": "query_entries",
+      "ts": "2025-12-07 09:06:37 UTC"
+    }
+  ],
+  "last_activity_at": "2025-12-07 09:36:44 UTC",
+  "session_started_at": "2025-12-07 09:04:02 UTC",
+  "version": 7,
+  "last_updated_by": "Scribe",
+  "operation_timestamp": "2025-12-07 09:23:14 UTC"
+}

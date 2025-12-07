@@ -148,6 +148,23 @@ codex mcp add scribe \
 
 ---
 
+## 🌐 Using Scribe Outside This Repo
+
+You can run Scribe from any codebase (not just `MCP_SPINE`) by pointing it at that project’s root:
+
+1. Set env vars before starting the server/tools:
+   - `SCRIBE_ROOT=/abs/path/to/your/repo` (where `docs/dev_plans/...` should live)
+   - `SCRIBE_STATE_PATH=/abs/path/to/state.json` (per-user or per-repo; must be writable)
+   - Optional: `SCRIBE_STORAGE_BACKEND=postgres` and `SCRIBE_DB_URL=postgresql://...` if you want Postgres.
+2. Ensure `PYTHONPATH` includes the parent of `scribe_mcp` so imports work when launched from elsewhere.
+3. Run `python -m scribe_mcp.server` (or your MCP launch command) and call `set_project` for each project name you want to track.
+
+Notes:
+- `.env` is auto-loaded on startup when present (via python-dotenv); shell exports/direnv still work the same.
+- Overlap checks only block true path collisions (same progress_log/docs_dir). Sharing one repo root with many dev_plan folders is supported.
+
+---
+
 ## 🎨 Template System Showcase
 
 **Scribe includes 13+ specialized templates** that auto-generate professional documentation:

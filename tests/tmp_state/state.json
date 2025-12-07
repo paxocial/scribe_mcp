@@ -1,5 +1,5 @@
 {
-  "current_project": "enhanced-rotation-test",
+  "current_project": "external_project",
   "projects": {
     "enhanced-rotation-test": {
       "name": "enhanced-rotation-test",
@@ -242,16 +242,40 @@
         "agent": "Scribe"
       },
       "author": "Scribe"
+    },
+    "external_project": {
+      "name": "external_project",
+      "root": "/tmp/pytest-of-austin/pytest-0/test_set_project_allows_extern0/external_repo",
+      "progress_log": "/tmp/pytest-of-austin/pytest-0/test_set_project_allows_extern0/external_repo/docs/dev_plans/external_project/PROGRESS_LOG.md",
+      "docs_dir": "/tmp/pytest-of-austin/pytest-0/test_set_project_allows_extern0/external_repo/docs/dev_plans/external_project",
+      "docs": {
+        "architecture": "/tmp/pytest-of-austin/pytest-0/test_set_project_allows_extern0/external_repo/docs/dev_plans/external_project/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/tmp/pytest-of-austin/pytest-0/test_set_project_allows_extern0/external_repo/docs/dev_plans/external_project/PHASE_PLAN.md",
+        "checklist": "/tmp/pytest-of-austin/pytest-0/test_set_project_allows_extern0/external_repo/docs/dev_plans/external_project/CHECKLIST.md",
+        "progress_log": "/tmp/pytest-of-austin/pytest-0/test_set_project_allows_extern0/external_repo/docs/dev_plans/external_project/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "agent": "Scribe"
+      },
+      "author": "Scribe"
     }
   },
   "recent_projects": [
+    "external_project",
     "enhanced-rotation-test",
     "performance-test",
     "error-test",
-    "history-test-166dbd4a",
-    "integrity-test"
+    "history-test-166dbd4a"
   ],
   "recent_tools": [
+    {
+      "name": "generate_doc_templates",
+      "ts": "2025-12-07 10:00:54 UTC"
+    },
+    {
+      "name": "set_project",
+      "ts": "2025-12-07 10:00:54 UTC"
+    },
     {
       "name": "vector_index_status",
       "ts": "2025-11-06 20:59:56 UTC"
@@ -265,15 +289,7 @@
       "ts": "2025-11-06 20:59:56 UTC"
     },
     {
-      "name": "set_project",
-      "ts": "2025-11-06 20:59:09 UTC"
-    },
-    {
       "name": "append_entry",
-      "ts": "2025-11-06 20:59:08 UTC"
-    },
-    {
-      "name": "generate_doc_templates",
       "ts": "2025-11-06 20:59:08 UTC"
     },
     {
@@ -293,9 +309,9 @@
       "ts": "2025-10-31 23:38:34 UTC"
     }
   ],
-  "last_activity_at": "2025-11-06 20:59:56 UTC",
-  "session_started_at": "2025-11-06 20:39:01 UTC",
-  "version": 77,
+  "last_activity_at": "2025-12-07 10:00:54 UTC",
+  "session_started_at": "2025-12-07 10:00:54 UTC",
+  "version": 78,
   "last_updated_by": "Scribe",
-  "operation_timestamp": "2025-11-06 20:59:08 UTC"
+  "operation_timestamp": "2025-12-07 10:00:54 UTC"
 }

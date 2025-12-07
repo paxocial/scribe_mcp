@@ -8,6 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+try:  # Prefer optional dotenv loading to keep env setup simple outside the repo
+    from dotenv import load_dotenv  # type: ignore
+
+    load_dotenv()  # best-effort; safe no-op if .env missing
+except Exception:
+    pass
+
 
 def _load_env_json(name: str) -> Dict[str, Any]:
     """Return JSON data from the environment when available."""

@@ -44,6 +44,7 @@ async def generate_doc_templates(
     project_name: str,
     author: str | None = None,
     overwrite: bool = False,
+    force: bool = False,
     documents: Iterable[str] | None = None,
     base_dir: str | None = None,
     custom_context: Any = None,
@@ -51,7 +52,13 @@ async def generate_doc_templates(
     include_template_metadata: bool = False,
     validate_only: bool = False,
 ) -> Dict[str, Any]:
-    """Render the standard documentation templates for a project."""
+    """Render the standard documentation templates for a project.
+
+    Notes:
+    - Overwrites are blocked by default; set force=True (or legacy overwrite=True) to regenerate.
+    - Existing progress logs are always preserved even when force is set.
+    - Use documents=[...] to regenerate a single doc instead of all.
+    """
     state_snapshot = await server_module.state_manager.record_tool("generate_doc_templates")
     try:
         logging_context = await _GENERATE_DOC_TEMPLATES_HELPER.prepare_context(
@@ -122,8 +129,12 @@ async def generate_doc_templates(
 
     selected = _select_documents(documents)
 
+    # Treat legacy overwrite as opt-in force, but gate overwrites behind force for safety.
+    force_overwrite = bool(force or overwrite)
+
     written: List[str] = []
     skipped: List[str] = []
+    protected: List[str] = []
     template_metadata: Dict[str, Any] = {}
     validation_results: Dict[str, Any] = {}
     template_directories_info: List[Dict[str, str]] = []
@@ -192,8 +203,14 @@ async def generate_doc_templates(
                 return _GENERATE_DOC_TEMPLATES_HELPER.apply_context_payload(error_payload, logging_context)
             rendered = _render_template(template_body, render_context)
         path = output_dir / filename
-        if overwrite or not path.exists():
-            await asyncio.to_thread(_write_template, path, rendered, overwrite)
+
+        # Always protect existing progress log (never overwrite)
+        if key == "progress_log" and path.exists():
+            protected.append(str(path))
+            continue
+
+        if force_overwrite or not path.exists():
+            await asyncio.to_thread(_write_template, path, rendered, force_overwrite)
             written.append(str(path))
         else:
             skipped.append(str(path))
@@ -216,7 +233,9 @@ async def generate_doc_templates(
         "ok": True,
         "files": written,
         "skipped": skipped,
+        "protected": protected,
         "directory": str(output_dir),
+        "force_overwrite": force_overwrite,
     }
     if validation_results:
         response["validation"] = validation_results
@@ -253,10 +272,43 @@ def _write_template(path: Path, content: str, overwrite: bool) -> None:
 
 
 def _select_documents(documents: Iterable[str] | None) -> List[str]:
-    if not documents:
+    """
+    Normalize requested documents.
+
+    Accepts:
+    - None -> all documents
+    - Iterable[str]
+    - JSON string list (e.g., '[\"architecture\",\"checklist\"]')
+    - Comma-separated string (e.g., 'architecture,checklist')
+    """
+    if documents is None:
         return [key for key, _ in OUTPUT_FILENAMES]
-    normalized = {doc.lower() for doc in documents}
+
+    # Convert string payloads from MCP into a list
+    if isinstance(documents, str):
+        raw = documents.strip()
+        parsed: Iterable[str] | None = None
+        # Try JSON array
+        if raw.startswith("[") and raw.endswith("]"):
+            try:
+                import json
+
+                data = json.loads(raw)
+                if isinstance(data, list):
+                    parsed = data
+            except Exception:
+                parsed = None
+        # Fallback to comma-separated
+        if parsed is None:
+            parsed = [part.strip() for part in raw.split(",") if part.strip()]
+        documents = parsed
+
+    normalized = {str(doc).strip().lower() for doc in documents or []}
     valid = [key for key, _ in OUTPUT_FILENAMES if key in normalized]
+
+    # If nothing matched, default to all to avoid silent no-op
+    if not valid:
+        return [key for key, _ in OUTPUT_FILENAMES]
     return valid
 
 
@@ -266,8 +318,16 @@ MetadataBuilder = Callable[[str, Dict[str, str]], Dict[str, Any]]
 def _metadata_for(doc_key: str, project_name: str, context: Dict[str, str]) -> Dict[str, Any]:
     builder = METADATA_BUILDERS.get(doc_key)
     if builder:
-        return builder(project_name, context)
-    return {}
+        meta = builder(project_name, context)
+    else:
+        meta = {}
+
+    # Carry through author/time from render context so regenerated docs reflect caller metadata.
+    if "author" in context:
+        meta.setdefault("author", context["author"])
+    if "date_utc" in context:
+        meta.setdefault("last_updated", context["date_utc"])
+    return meta
 
 
 def _architecture_metadata(project_name: str, context: Dict[str, str]) -> Dict[str, Any]:

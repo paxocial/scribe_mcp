@@ -154,29 +154,30 @@ def _validate_search_parameters(
                 healing_applied = True
 
         # Heal range parameters
-        healed_limit = _PARAMETER_CORRECTOR.correct_numeric_parameter(
-            limit, min_value=1, max_value=1000, field_name="limit"
-        )
-        if healed_limit != limit:
-            healed_params["limit"] = healed_limit
-            healing_applied = True
+        if limit is not None:
+            healed_limit = _PARAMETER_CORRECTOR.correct_numeric_parameter(
+                limit, min_val=1, max_val=1000, field_name="limit"
+            )
+            if healed_limit != limit:
+                healed_params["limit"] = healed_limit
+                healing_applied = True
 
         healed_page = _PARAMETER_CORRECTOR.correct_numeric_parameter(
-            page, min_value=1, max_value=10000, field_name="page"
+            page, min_val=1, max_val=10000, field_name="page"
         )
         if healed_page != page:
             healed_params["page"] = healed_page
             healing_applied = True
 
         healed_page_size = _PARAMETER_CORRECTOR.correct_numeric_parameter(
-            page_size, min_value=1, max_value=1000, field_name="page_size"
+            page_size, min_val=1, max_val=1000, field_name="page_size"
         )
         if healed_page_size != page_size:
             healed_params["page_size"] = healed_page_size
             healing_applied = True
 
         healed_relevance_threshold = _PARAMETER_CORRECTOR.correct_numeric_parameter(
-            relevance_threshold, min_value=0.0, max_value=1.0, field_name="relevance_threshold"
+            relevance_threshold, min_val=0.0, max_val=1.0, field_name="relevance_threshold"
         )
         if healed_relevance_threshold != relevance_threshold:
             healed_params["relevance_threshold"] = healed_relevance_threshold
@@ -212,13 +213,6 @@ def _validate_search_parameters(
             if healed_time_range != time_range:
                 healed_params["time_range"] = healed_time_range
                 healing_applied = True
-
-        # Apply fallbacks for corrected parameters
-        if healing_applied:
-            fallback_params = _FALLBACK_MANAGER.resolve_parameter_fallback(
-                "query_entries", healed_params, context="parameter_validation"
-            )
-            healed_params.update(fallback_params)
 
         # Update parameters with healed values
         final_project = healed_params.get("project", project)
@@ -327,36 +321,33 @@ def _validate_search_parameters(
         )
 
         if healed_exception["success"]:
-            # Use healed values from exception recovery
-            fallback_params = _FALLBACK_MANAGER.resolve_parameter_fallback(
-                "query_entries", healed_exception["healed_values"], context="exception_healing"
-            )
+            healed_values = healed_exception.get("healed_values", {})
 
             # Create safe fallback configuration
             safe_config = QueryEntriesConfig.from_legacy_params(
-                project=fallback_params.get("project", project),
-                start=fallback_params.get("start", start),
-                end=fallback_params.get("end", end),
-                message=fallback_params.get("message", message),
-                message_mode=fallback_params.get("message_mode", message_mode),
+                project=healed_values.get("project", project),
+                start=healed_values.get("start", start),
+                end=healed_values.get("end", end),
+                message=healed_values.get("message", message),
+                message_mode=healed_values.get("message_mode", message_mode),
                 case_sensitive=case_sensitive,
-                emoji=fallback_params.get("emoji", emoji),
-                status=fallback_params.get("status", status),
-                agents=fallback_params.get("agents", agents),
+                emoji=healed_values.get("emoji", emoji),
+                status=healed_values.get("status", status),
+                agents=healed_values.get("agents", agents),
                 meta_filters=meta_filters,
-                limit=fallback_params.get("limit", limit),
-                page=fallback_params.get("page", page),
-                page_size=fallback_params.get("page_size", page_size),
+                limit=healed_values.get("limit", limit),
+                page=healed_values.get("page", page),
+                page_size=healed_values.get("page_size", page_size),
                 compact=compact,
-                fields=fallback_params.get("fields", fields),
+                fields=healed_values.get("fields", fields),
                 include_metadata=include_metadata,
-                search_scope=fallback_params.get("search_scope", search_scope),
-                document_types=fallback_params.get("document_types", document_types),
+                search_scope=healed_values.get("search_scope", search_scope),
+                document_types=healed_values.get("document_types", document_types),
                 include_outdated=include_outdated,
                 verify_code_references=verify_code_references,
-                time_range=fallback_params.get("time_range", time_range),
-                relevance_threshold=fallback_params.get("relevance_threshold", relevance_threshold),
-                max_results=fallback_params.get("max_results", max_results)
+                time_range=healed_values.get("time_range", time_range),
+                relevance_threshold=healed_values.get("relevance_threshold", relevance_threshold),
+                max_results=healed_values.get("max_results", max_results)
             )
 
             return safe_config, {
@@ -441,27 +432,15 @@ def _build_search_query(
         relevance_threshold = final_config.relevance_threshold
         max_results = final_config.max_results
 
-        # Resolve project context with error handling
-        try:
-            resolved_project, project_context = _HELPER.resolve_project_context(
-                project_name, context, tool_name="query_entries"
-            )
-        except Exception as project_error:
-            # Try to heal project resolution error
-            healed_project = _EXCEPTION_HEALER.heal_parameter_validation_error(
-                project_error, {"project": project_name, "tool": "query_entries"}
-            )
-
-            if healed_project and healed_project.get("success") and "healed_values" in healed_project:
-                resolved_project = healed_project["healed_values"].get("project", project_name)
-                project_context = context
-            else:
-                # Apply fallback project resolution
-                fallback_project = _FALLBACK_MANAGER.apply_context_aware_defaults(
-                    "query_entries", {"project": project_name, "operation": "project_resolution"}
-                )
-                resolved_project = fallback_project.get("project", "default")
-                project_context = context
+        # Resolve project context using the already prepared context from the caller
+        project_context = context
+        resolved_project = None
+        if isinstance(project, dict):
+            resolved_project = project.get("name") or project.get("project") or project.get("id")
+        if not resolved_project and getattr(context, "project", None):
+            resolved_project = (context.project or {}).get("name")
+        if not resolved_project:
+            resolved_project = project_name or "default"
 
         # Build search parameters dictionary
         search_params = {
@@ -507,7 +486,7 @@ def _build_search_query(
         # Validate pagination parameters
         if page < 1:
             healed_page = _PARAMETER_CORRECTOR.correct_numeric_parameter(
-                page, min_value=1, max_value=10000, field_name="page"
+                page, min_val=1, max_val=10000, field_name="page"
             )
             search_params["page"] = healed_page
             if healed_page != page:
@@ -515,16 +494,16 @@ def _build_search_query(
 
         if page_size < 1 or page_size > 1000:
             healed_page_size = _PARAMETER_CORRECTOR.correct_numeric_parameter(
-                page_size, min_value=1, max_value=1000, field_name="page_size"
+                page_size, min_val=1, max_val=1000, field_name="page_size"
             )
             search_params["page_size"] = healed_page_size
             if healed_page_size != page_size:
                 validation_errors.append(f"Page size corrected from {page_size} to {healed_page_size}")
 
         # Validate limit parameter
-        if limit < 1 or limit > 1000:
+        if limit is not None and (limit < 1 or limit > 1000):
             healed_limit = _PARAMETER_CORRECTOR.correct_numeric_parameter(
-                limit, min_value=1, max_value=1000, field_name="limit"
+                limit, min_val=1, max_val=1000, field_name="limit"
             )
             search_params["limit"] = healed_limit
             if healed_limit != limit:
@@ -533,7 +512,7 @@ def _build_search_query(
         # Validate relevance threshold
         if relevance_threshold < 0.0 or relevance_threshold > 1.0:
             healed_threshold = _PARAMETER_CORRECTOR.correct_numeric_parameter(
-                relevance_threshold, min_value=0.0, max_value=1.0, field_name="relevance_threshold"
+                relevance_threshold, min_val=0.0, max_val=1.0, field_name="relevance_threshold"
             )
             search_params["relevance_threshold"] = healed_threshold
             if healed_threshold != relevance_threshold:
@@ -595,7 +574,7 @@ def _build_search_query(
             }
 
 
-def _execute_search_with_fallbacks(
+async def _execute_search_with_fallbacks(
     search_query: Dict[str, Any],
     final_config: QueryEntriesConfig
 ) -> Dict[str, Any]:
@@ -615,24 +594,24 @@ def _execute_search_with_fallbacks(
         try:
             # Get log file path
             if resolved_project and project_context.project:
-                log_path = project_context.project["progress_log"]
+                log_path = Path(project_context.project["progress_log"])
             else:
                 # Fallback to default log path
                 log_path = Path("docs/dev_plans/default/PROGRESS_LOG.md")
 
             # Read log lines with error handling
             try:
-                lines = read_all_lines(log_path)
+                lines = await read_all_lines(log_path)
             except Exception as read_error:
                 # Try to heal file reading error
                 healed_read = _EXCEPTION_HEALER.heal_document_operation_error(
                     read_error, {"log_path": str(log_path), "operation": "read_log"}
                 )
 
-                if healed_read["success"]:
+                if healed_read.get("success") and healed_read.get("healed_values"):
                     # Try alternative log path
                     alt_log_path = healed_read["healed_values"].get("log_path", log_path)
-                    lines = read_all_lines(alt_log_path)
+                    lines = await read_all_lines(Path(alt_log_path))
                 else:
                     # Apply fallback - return empty results
                     lines = []
@@ -680,8 +659,12 @@ def _execute_search_with_fallbacks(
 
                     # Apply metadata filters
                     if search_params.get("meta_filters"):
-                        entry_meta = parsed.get("meta", {})
-                        if not _HELPER.matches_meta_filters(entry_meta, search_params["meta_filters"]):
+                        entry_meta = parsed.get("meta", {}) or {}
+                        normalized_filters, meta_error = normalize_meta_filters(search_params["meta_filters"])
+                        if meta_error:
+                            validation_warnings.append(f"Ignoring meta_filters due to error: {meta_error}")
+                            normalized_filters = {}
+                        if normalized_filters and not _meta_matches(entry_meta, normalized_filters):
                             continue
 
                     # Apply time range filter
@@ -728,7 +711,9 @@ def _execute_search_with_fallbacks(
             try:
                 page = search_params.get("page", 1)
                 page_size = search_params.get("page_size", 50)
-                limit = search_params.get("limit", 50)
+                limit = search_params.get("limit")
+                if limit is None:
+                    limit = page_size
 
                 # Calculate pagination
                 total_entries = len(filtered_entries)
@@ -865,16 +850,19 @@ def _execute_search_with_fallbacks(
 
             if healed_search["success"]:
                 # Try alternative search with simplified parameters
+                effective_limit = search_params.get("limit")
+                if effective_limit is None:
+                    effective_limit = search_params.get("page_size", 50)
                 simplified_params = {
                     "project": resolved_project,
                     "message": search_params.get("message", ""),
-                    "limit": min(search_params.get("limit", 50), 10),  # Reduce limit for safety
+                    "limit": min(effective_limit, 10),  # Reduce limit for safety
                     "page": 1,
-                    "page_size": min(search_params.get("page_size", 50), 10)
+                    "page_size": min(search_params.get("page_size", 50) or 50, 10)
                 }
 
                 # Execute simplified search
-                return _execute_search_with_fallbacks(
+                return await _execute_search_with_fallbacks(
                     {"search_params": simplified_params, "project_context": project_context, "resolved_project": resolved_project},
                     final_config
                 )
@@ -1069,7 +1057,7 @@ async def query_entries(
             # If query building failed, try to continue with emergency query
             if search_query.get("emergency_fallback"):
                 # Execute emergency search
-                search_result = _execute_search_with_fallbacks(search_query, final_config)
+                search_result = await _execute_search_with_fallbacks(search_query, final_config)
                 search_result["parameter_healing"] = True
                 search_result["emergency_fallback"] = True
                 return search_result
@@ -1083,7 +1071,7 @@ async def query_entries(
                 }
 
         # === ENHANCED SEARCH EXECUTION WITH FALLBACKS ===
-        search_result = _execute_search_with_fallbacks(search_query, final_config)
+        search_result = await _execute_search_with_fallbacks(search_query, final_config)
 
         # Add validation info to result if healing was applied
         if validation_info.get("healing_applied"):

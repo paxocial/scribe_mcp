@@ -31,6 +31,7 @@ class _ReadRecentHelper(LoggingToolMixin):
     def heal_parameters_with_exception_handling(
         self,
         n: Optional[Any] = None,
+        limit: Optional[Any] = None,
         page: int = 1,
         page_size: int = 50,
         compact: bool = False,
@@ -51,10 +52,11 @@ class _ReadRecentHelper(LoggingToolMixin):
 
         healed_params = {}
 
-        # Heal n parameter (could have comparison operator bug)
-        if n is not None:
+        # Heal n/limit parameter (limit is an alias)
+        effective_n = n if n is not None else limit
+        if effective_n is not None:
             healed_n, n_healed, n_message = self.parameter_estimator.heal_comparison_operator_bug(
-                n, "n"
+                effective_n, "n"
             )
             if n_healed:
                 healing_applied = True
@@ -149,7 +151,9 @@ _READ_RECENT_HELPER = _ReadRecentHelper()
 
 @app.tool()
 async def read_recent(
+    project: Optional[str] = None,
     n: Optional[Any] = None,
+    limit: Optional[Any] = None,
     filter: Optional[Dict[str, Any]] = None,
     page: int = 1,
     page_size: int = 50,
@@ -160,7 +164,9 @@ async def read_recent(
     """Return recent log entries with pagination and formatting options.
 
     Args:
+        project: Optional project name (uses active project if None)
         n: Legacy parameter for backward compatibility (max entries to return)
+        limit: Alias for n (commonly used by agents)
         filter: Optional filters to apply (agent, status, emoji)
         page: Page number for pagination (1-based)
         page_size: Number of entries per page
@@ -176,7 +182,7 @@ async def read_recent(
     # Apply Phase 1 exception healing to all parameters
     try:
         healed_params, healing_applied, healing_messages = _READ_RECENT_HELPER.heal_parameters_with_exception_handling(
-            n=n, page=page, page_size=page_size, compact=compact, fields=fields, include_metadata=include_metadata
+            n=n, limit=limit, page=page, page_size=page_size, compact=compact, fields=fields, include_metadata=include_metadata
         )
 
         # Update parameters with healed values
@@ -203,6 +209,7 @@ async def read_recent(
         context = await _READ_RECENT_HELPER.prepare_context(
             tool_name="read_recent",
             agent_id=None,
+            explicit_project=project,
             require_project=True,
             state_snapshot=state_snapshot,
         )

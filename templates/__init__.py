@@ -113,8 +113,10 @@ def substitution_context(project_name: str, author: str | None = None, rotation_
 
     custom_vars = _load_project_variables()
     if custom_vars:
-        context.update(custom_vars)
         for key, value in custom_vars.items():
+            # Do not override explicit context (e.g., passed-in author)
+            if key not in context:
+                context[key] = value
             if isinstance(key, str) and isinstance(value, (str, int, float, bool)):
                 context.setdefault(key.upper(), str(value))
 
