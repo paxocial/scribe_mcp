@@ -79,9 +79,12 @@ class QueryEntriesConfig:
         # Normalize list parameters
         self._normalize_list_parameters()
 
-        # Apply defaults and Phase 1 healing validation
+        # Apply safe normalization + defaults.
+        #
+        # NOTE: Do not auto-heal invalid enums/ranges here; the unit tests expect
+        # QueryEntriesConfig.validate() to detect invalid values rather than
+        # silently correcting them.
         self.normalize()
-        self.heal_and_validate()
 
     def _resolve_pagination_mode(self) -> None:
         """Resolve pagination vs legacy limit mode."""
@@ -114,7 +117,18 @@ class QueryEntriesConfig:
         if self.status is not None:
             self.status = ToolValidator.validate_list_parameter(self.status)
         if self.agents is not None:
-            self.agents = ToolValidator.validate_list_parameter(self.agents)
+            # Preserve agent casing (log lines store agents case-sensitively).
+            # Other list parameters can be lowercased safely.
+            if isinstance(self.agents, str):
+                candidates = self.agents.split(",")
+            else:
+                candidates = self.agents
+            cleaned: List[str] = []
+            for candidate in candidates:
+                text = str(candidate).strip()
+                if text:
+                    cleaned.append(text)
+            self.agents = cleaned
         if self.fields is not None:
             self.fields = ToolValidator.validate_list_parameter(self.fields)
         if self.document_types is not None:
@@ -168,12 +182,53 @@ class QueryEntriesConfig:
         return True, None
 
     def validate(self) -> Tuple[bool, Optional[Dict[str, Any]]]:
-        """Backward compatibility method for tests - delegates to heal_and_validate."""
-        is_valid, healing_info = self.heal_and_validate()
-        if healing_info and healing_info.get("healing_applied"):
-            # Return success with healing info for backward compatibility
-            return is_valid, healing_info
-        return is_valid, None
+        """Strict validation used by tests (no auto-healing)."""
+        # Validate enums
+        if self.message_mode not in VALID_MESSAGE_MODES:
+            return False, {
+                "error_type": "enum_validation_error",
+                "error_message": f"Invalid message_mode '{self.message_mode}'. Must be one of: {', '.join(sorted(VALID_MESSAGE_MODES))}",
+                "context": {"parameter": "message_mode", "value": self.message_mode},
+            }
+
+        if self.search_scope not in VALID_SEARCH_SCOPES:
+            return False, {
+                "error_type": "enum_validation_error",
+                "error_message": f"Invalid search_scope '{self.search_scope}'. Must be one of: {', '.join(sorted(VALID_SEARCH_SCOPES))}",
+                "context": {"parameter": "search_scope", "value": self.search_scope},
+            }
+
+        if self.document_types:
+            invalid = [dt for dt in self.document_types if dt not in VALID_DOCUMENT_TYPES]
+            if invalid:
+                return False, {
+                    "error_type": "enum_validation_error",
+                    "error_message": f"Invalid document_types {invalid}. Must be subset of: {', '.join(sorted(VALID_DOCUMENT_TYPES))}",
+                    "context": {"parameter": "document_types", "value": self.document_types},
+                }
+
+        # Validate relevance threshold
+        if self.relevance_threshold is not None and (self.relevance_threshold < 0.0 or self.relevance_threshold > 1.0):
+            return False, {
+                "error_type": "validation_error",
+                "error_message": f"relevance_threshold must be between 0.0 and 1.0, got {self.relevance_threshold}",
+                "context": {"parameter": "relevance_threshold", "value": self.relevance_threshold},
+            }
+
+        # Validate remaining parameters (regex, pagination, time)
+        is_valid, error = self._validate_regex_pattern()
+        if not is_valid:
+            return False, error
+
+        is_valid, error = self._validate_pagination_parameters()
+        if not is_valid:
+            return False, error
+
+        is_valid, error = self._validate_time_parameters()
+        if not is_valid:
+            return False, error
+
+        return True, None
 
     def _heal_enum_parameters(self) -> Tuple[bool, Optional[List[str]]]:
         """Heal enumeration parameters using Phase 1 BulletproofParameterCorrector."""
@@ -370,7 +425,7 @@ class QueryEntriesConfig:
         self.message_mode = (self.message_mode or "substring").lower()
 
         # Normalize search_scope
-        self.search_scope = self.search_scope.lower()
+        self.search_scope = (self.search_scope or "project").lower()
 
         # Apply configuration manager defaults
         self._apply_config_defaults()

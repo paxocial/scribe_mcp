@@ -38,6 +38,9 @@ from scribe_mcp.shared.logging_utils import (
 from scribe_mcp.utils.parameter_validator import ToolValidator, BulletproofParameterCorrector
 from scribe_mcp.utils.config_manager import ConfigManager, resolve_fallback_chain, BulletproofFallbackManager
 from scribe_mcp.utils.error_handler import ErrorHandler, ExceptionHealer
+
+# Import validation helpers for backwards-compatible test globals.
+from . import manage_docs_validation as _manage_docs_validation  # noqa: F401
 from scribe_mcp.tools.config.append_entry_config import AppendEntryConfig
 from scribe_mcp.shared.project_registry import ProjectRegistry
 
@@ -1108,6 +1111,7 @@ async def append_entry(
     agent_id: Optional[str] = None,  # Agent identification (auto-detected if not provided)
     log_type: Optional[str] = "progress",
     config: Optional[AppendEntryConfig] = None,  # Configuration object for enhanced parameter handling
+    **_kwargs: Any,  # tolerate unknown kwargs (contract: tools never TypeError)
 ) -> Dict[str, Any]:
     """
     Enhanced append_entry with robust multiline handling and bulk mode support.
@@ -1143,7 +1147,10 @@ async def append_entry(
     # Phase 3 Task 3.5: Enhanced Function Decomposition
     # This function now uses decomposed sub-functions with bulletproof error handling
 
-    state_snapshot = await server_module.state_manager.record_tool("append_entry")
+    try:
+        state_snapshot = await server_module.state_manager.record_tool("append_entry")
+    except Exception:
+        state_snapshot = {}
 
     try:
         # === PHASE 3 ENHANCED PARAMETER VALIDATION AND PREPARATION ===

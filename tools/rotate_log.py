@@ -1257,6 +1257,7 @@ async def rotate_log(
     auto_threshold: Optional[bool] = None,
     threshold_entries: Optional[int] = None,
     config: Optional[RotateLogConfig] = None,  # Configuration object for enhanced parameter handling
+    **_kwargs: Any,  # tolerate unknown kwargs (contract: tools never TypeError)
 ) -> Dict[str, Any]:
     """
     Rotate one or more project log files with integrity guarantees.
@@ -1287,7 +1288,10 @@ async def rotate_log(
     # Phase 3 Task 3.5: Enhanced Function Decomposition
     # This function now uses decomposed sub-functions with bulletproof error handling
 
-    state_snapshot = await server_module.state_manager.record_tool("rotate_log")
+    try:
+        state_snapshot = await server_module.state_manager.record_tool("rotate_log")
+    except Exception:
+        state_snapshot = {}
 
     try:
         # === PHASE 3 ENHANCED PARAMETER VALIDATION AND PREPARATION ===

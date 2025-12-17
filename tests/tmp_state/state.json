@@ -3,14 +3,14 @@
   "projects": {
     "enhanced-rotation-test": {
       "name": "enhanced-rotation-test",
-      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/d9c74dfd-7df8-4d1b-ba85-3664771fe658",
-      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/d9c74dfd-7df8-4d1b-ba85-3664771fe658/.scribe/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md",
-      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/d9c74dfd-7df8-4d1b-ba85-3664771fe658/.scribe/docs/dev_plans/enhanced_rotation_test",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/f24d9473-a885-4f2a-afff-b3dfa9602343",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/f24d9473-a885-4f2a-afff-b3dfa9602343/.scribe/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/f24d9473-a885-4f2a-afff-b3dfa9602343/.scribe/docs/dev_plans/enhanced_rotation_test",
       "docs": {
-        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/d9c74dfd-7df8-4d1b-ba85-3664771fe658/.scribe/docs/dev_plans/enhanced_rotation_test/ARCHITECTURE_GUIDE.md",
-        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/d9c74dfd-7df8-4d1b-ba85-3664771fe658/.scribe/docs/dev_plans/enhanced_rotation_test/PHASE_PLAN.md",
-        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/d9c74dfd-7df8-4d1b-ba85-3664771fe658/.scribe/docs/dev_plans/enhanced_rotation_test/CHECKLIST.md",
-        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/d9c74dfd-7df8-4d1b-ba85-3664771fe658/.scribe/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md"
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/f24d9473-a885-4f2a-afff-b3dfa9602343/.scribe/docs/dev_plans/enhanced_rotation_test/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/f24d9473-a885-4f2a-afff-b3dfa9602343/.scribe/docs/dev_plans/enhanced_rotation_test/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/f24d9473-a885-4f2a-afff-b3dfa9602343/.scribe/docs/dev_plans/enhanced_rotation_test/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/f24d9473-a885-4f2a-afff-b3dfa9602343/.scribe/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.md"
       },
       "defaults": {
         "emoji": "\ud83e\uddea",
@@ -247,14 +247,14 @@
     },
     "external_project": {
       "name": "external_project",
-      "root": "/tmp/pytest-of-austin/pytest-32/test_set_project_allows_extern0/external_repo",
-      "progress_log": "/tmp/pytest-of-austin/pytest-32/test_set_project_allows_extern0/external_repo/.scribe/docs/dev_plans/external_project/PROGRESS_LOG.md",
-      "docs_dir": "/tmp/pytest-of-austin/pytest-32/test_set_project_allows_extern0/external_repo/.scribe/docs/dev_plans/external_project",
+      "root": "/tmp/pytest-of-austin/pytest-34/test_set_project_allows_extern0/external_repo",
+      "progress_log": "/tmp/pytest-of-austin/pytest-34/test_set_project_allows_extern0/external_repo/.scribe/docs/dev_plans/external_project/PROGRESS_LOG.md",
+      "docs_dir": "/tmp/pytest-of-austin/pytest-34/test_set_project_allows_extern0/external_repo/.scribe/docs/dev_plans/external_project",
       "docs": {
-        "architecture": "/tmp/pytest-of-austin/pytest-32/test_set_project_allows_extern0/external_repo/.scribe/docs/dev_plans/external_project/ARCHITECTURE_GUIDE.md",
-        "phase_plan": "/tmp/pytest-of-austin/pytest-32/test_set_project_allows_extern0/external_repo/.scribe/docs/dev_plans/external_project/PHASE_PLAN.md",
-        "checklist": "/tmp/pytest-of-austin/pytest-32/test_set_project_allows_extern0/external_repo/.scribe/docs/dev_plans/external_project/CHECKLIST.md",
-        "progress_log": "/tmp/pytest-of-austin/pytest-32/test_set_project_allows_extern0/external_repo/.scribe/docs/dev_plans/external_project/PROGRESS_LOG.md"
+        "architecture": "/tmp/pytest-of-austin/pytest-34/test_set_project_allows_extern0/external_repo/.scribe/docs/dev_plans/external_project/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/tmp/pytest-of-austin/pytest-34/test_set_project_allows_extern0/external_repo/.scribe/docs/dev_plans/external_project/PHASE_PLAN.md",
+        "checklist": "/tmp/pytest-of-austin/pytest-34/test_set_project_allows_extern0/external_repo/.scribe/docs/dev_plans/external_project/CHECKLIST.md",
+        "progress_log": "/tmp/pytest-of-austin/pytest-34/test_set_project_allows_extern0/external_repo/.scribe/docs/dev_plans/external_project/PROGRESS_LOG.md"
       },
       "defaults": {
         "agent": "Scribe"
@@ -274,48 +274,48 @@
   "recent_tools": [
     {
       "name": "vector_index_status",
-      "ts": "2025-12-17 03:55:21 UTC"
+      "ts": "2025-12-17 04:25:44 UTC"
     },
     {
       "name": "retrieve_by_uuid",
-      "ts": "2025-12-17 03:55:21 UTC"
+      "ts": "2025-12-17 04:25:44 UTC"
     },
     {
       "name": "vector_search",
-      "ts": "2025-12-17 03:55:21 UTC"
+      "ts": "2025-12-17 04:25:44 UTC"
     },
     {
       "name": "generate_doc_templates",
-      "ts": "2025-12-17 03:54:33 UTC"
+      "ts": "2025-12-17 04:24:58 UTC"
     },
     {
       "name": "set_project",
-      "ts": "2025-12-17 03:54:33 UTC"
+      "ts": "2025-12-17 04:24:58 UTC"
     },
     {
       "name": "get_project",
-      "ts": "2025-12-17 03:54:32 UTC"
+      "ts": "2025-12-17 04:24:57 UTC"
     },
     {
       "name": "rotate_log",
-      "ts": "2025-12-17 03:54:32 UTC"
+      "ts": "2025-12-17 04:24:57 UTC"
     },
     {
       "name": "append_entry",
-      "ts": "2025-12-17 03:54:32 UTC"
+      "ts": "2025-12-17 04:24:57 UTC"
     },
     {
       "name": "list_projects",
-      "ts": "2025-12-17 03:54:17 UTC"
+      "ts": "2025-12-17 04:24:42 UTC"
     },
     {
       "name": "query_entries",
-      "ts": "2025-12-17 03:54:16 UTC"
+      "ts": "2025-12-17 04:24:41 UTC"
     }
   ],
-  "last_activity_at": "2025-12-17 03:55:21 UTC",
+  "last_activity_at": "2025-12-17 04:25:44 UTC",
   "session_started_at": "2025-12-17 03:20:01 UTC",
-  "version": 93,
+  "version": 97,
   "last_updated_by": "Scribe",
-  "operation_timestamp": "2025-12-17 03:54:33 UTC"
+  "operation_timestamp": "2025-12-17 04:24:58 UTC"
 }

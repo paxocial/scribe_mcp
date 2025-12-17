@@ -597,8 +597,38 @@ async def _execute_search_with_fallbacks(
             if resolved_project and project_context.project:
                 log_path = Path(project_context.project["progress_log"])
             else:
-                # Fallback to default log path
-                log_path = Path("docs/dev_plans/default/PROGRESS_LOG.md")
+                # Fallbacks when no active project is resolved.
+                # Prefer a configured project (if present), otherwise try common on-disk layouts.
+                fallback_project = None
+                if resolved_project and resolved_project != "default":
+                    try:
+                        fallback_project = load_project_config(resolved_project)
+                    except Exception:
+                        fallback_project = None
+
+                if fallback_project and fallback_project.get("progress_log"):
+                    log_path = Path(fallback_project["progress_log"])
+                else:
+                    candidates: List[Path] = []
+
+                    # Most common runtime layout (used by tests and Codex CLI runs)
+                    if resolved_project and isinstance(resolved_project, str):
+                        slug = resolved_project.strip().lower().replace(" ", "_")
+                        candidates.append(Path(".scribe") / "docs" / "dev_plans" / slug / "PROGRESS_LOG.md")
+
+                    # Template defaults (legacy fallbacks)
+                    candidates.append(Path(".scribe") / "docs" / "dev_plans" / "default" / "PROGRESS_LOG.md")
+                    candidates.append(Path("docs") / "dev_plans" / "default" / "PROGRESS_LOG.md")
+
+                    # If a single project exists under .scribe/docs/dev_plans, use it.
+                    base = Path(".scribe") / "docs" / "dev_plans"
+                    try:
+                        if base.exists():
+                            candidates.extend(sorted(base.glob("*/PROGRESS_LOG.md")))
+                    except Exception:
+                        pass
+
+                    log_path = next((p for p in candidates if p.exists()), candidates[0])
 
             # Read log lines with error handling
             try:
@@ -934,6 +964,7 @@ async def query_entries(
     case_sensitive: bool = False,
     emoji: Optional[List[str]] = None,
     status: Optional[List[str]] = None,
+    agent: Optional[Any] = None,  # tolerate legacy single-agent param
     agents: Optional[List[str]] = None,
     meta_filters: Optional[Dict[str, Any]] = None,
     limit: int = 50,
@@ -951,6 +982,7 @@ async def query_entries(
     relevance_threshold: float = 0.0,  # 0.0-1.0 relevance scoring threshold
     max_results: Optional[int] = None,  # Override for limit (deprecated but kept for compatibility)
     config: Optional[QueryEntriesConfig] = None,  # Configuration object for dual parameter support
+    **_kwargs: Any,  # tolerate unknown kwargs (contract: tools never TypeError)
 ) -> Dict[str, Any]:
     """Search the project log with flexible filters and pagination.
 
@@ -988,7 +1020,19 @@ async def query_entries(
     # Phase 3 Task 3.5: Enhanced Function Decomposition
     # This function now uses decomposed sub-functions with bulletproof error handling
 
-    state_snapshot = await server_module.state_manager.record_tool("query_entries")
+    # Back-compat: accept singular `agent=` and merge into `agents=`
+    if agent:
+        if agents is None:
+            agents = []
+        if isinstance(agent, str):
+            agents = [*agents, agent]
+        elif isinstance(agent, list):
+            agents = [*agents, *[a for a in agent if isinstance(a, str)]]
+
+    try:
+        state_snapshot = await server_module.state_manager.record_tool("query_entries")
+    except Exception:
+        state_snapshot = {}
 
     try:
         # === PHASE 3 ENHANCED PARAMETER VALIDATION AND PREPARATION ===

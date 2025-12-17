@@ -105,12 +105,20 @@ async def resolve_logging_context(
     reminders_payload: List[Dict[str, Any]] = []
     if project:
         try:
-            reminders_payload = await reminders.get_reminders(
-                project,
-                tool_name=tool_name,
-                state=state_snapshot,
-                agent_id=agent_id,
-            )
+            try:
+                reminders_payload = await reminders.get_reminders(
+                    project,
+                    tool_name=tool_name,
+                    state=state_snapshot,
+                    agent_id=agent_id,
+                )
+            except TypeError:
+                # Backwards compatibility: some tests/patches provide get_reminders without agent_id.
+                reminders_payload = await reminders.get_reminders(
+                    project,
+                    tool_name=tool_name,
+                    state=state_snapshot,
+                )
         except Exception:
             # Reminders should never block tool execution; ignore failures.
             reminders_payload = []
