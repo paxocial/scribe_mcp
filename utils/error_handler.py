@@ -8,7 +8,7 @@ duplication and provide consistent error responses across tools.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from scribe_mcp.shared.logging_utils import ProjectResolutionError
@@ -84,6 +84,25 @@ class ErrorHandler:
             "suggestion": suggestion or f"Invoke set_project before using {tool_name}",
             "recent_projects": list(error.recent_projects),
         }
+
+        # Best-effort "last known project" hint (QoL for post-reboot / missing context).
+        try:
+            from scribe_mcp.shared.project_registry import ProjectRegistry
+
+            registry = ProjectRegistry()
+            last_known = registry.get_last_known_project(candidates=list(error.recent_projects))
+            if last_known and last_known.last_access_at:
+                minutes_ago = int(
+                    max(
+                        0.0,
+                        (datetime.now(timezone.utc) - last_known.last_access_at).total_seconds() / 60.0,
+                    )
+                )
+                response["last_known_project"] = last_known.project_name
+                response["last_known_project_minutes_ago"] = minutes_ago
+                response["last_known_project_last_access_at"] = last_known.last_access_at.isoformat()
+        except Exception:
+            pass
 
         return response
 

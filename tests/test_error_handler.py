@@ -9,6 +9,8 @@ handling across MCP tools.
 import pytest
 import re
 from unittest.mock import Mock
+import sqlite3
+from datetime import datetime, timedelta, timezone
 
 # Add the parent directory to path for imports
 import sys
@@ -17,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scribe_mcp.utils.error_handler import ErrorHandler
 from scribe_mcp.shared.logging_utils import ProjectResolutionError
+from scribe_mcp.shared.project_registry import ProjectRegistry
 
 
 class TestErrorHandler:
@@ -82,6 +85,30 @@ class TestErrorHandler:
         assert result["error"] == "Test project error"
         assert result["suggestion"] == "Test suggestion"
         assert result["recent_projects"] == ["project1", "project2"]
+
+    def test_create_project_resolution_error_includes_last_known_hint(self):
+        """Regression: missing-project errors should include last-known project hint when available."""
+        registry = ProjectRegistry()
+        now = datetime.now(timezone.utc)
+        last_access = now - timedelta(minutes=4)
+
+        with sqlite3.connect(registry._db_path) as conn:  # noqa: SLF001 - test-only access
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO scribe_projects (name, repo_root, progress_log_path, created_at, last_access_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("project1", "/tmp/repo", "/tmp/repo/PROGRESS_LOG.md", now.isoformat(), last_access.isoformat()),
+            )
+            conn.commit()
+
+        error = ProjectResolutionError("No project configured", ["project1"])
+        result = ErrorHandler.create_project_resolution_error(error=error, tool_name="append_entry")
+
+        assert result["ok"] is False
+        assert result["last_known_project"] == "project1"
+        assert isinstance(result["last_known_project_minutes_ago"], int)
+        assert result["last_known_project_minutes_ago"] >= 0
 
     def test_create_project_resolution_error_default_suggestion(self):
         """Test project resolution error with default suggestion."""

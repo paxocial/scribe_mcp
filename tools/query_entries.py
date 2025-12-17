@@ -630,9 +630,10 @@ async def _execute_search_with_fallbacks(
                     message = parsed.get("message", "")
                     if search_params.get("message"):
                         if not message_matches(
-                            message, search_params["message"],
-                            search_params.get("message_mode", "substring"),
-                            search_params.get("case_sensitive", False)
+                            message,
+                            search_params["message"],
+                            mode=search_params.get("message_mode", "substring"),
+                            case_sensitive=search_params.get("case_sensitive", False),
                         ):
                             continue
 
