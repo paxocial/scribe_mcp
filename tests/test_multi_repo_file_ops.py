@@ -11,7 +11,7 @@ from scribe_mcp.utils.files import append_line, read_tail, rotate_file, verify_f
 @pytest.mark.asyncio
 async def test_append_line_blocks_outside_server_root_without_repo_root(tmp_path: Path) -> None:
     repo_root = tmp_path / "external_repo"
-    log_path = repo_root / "docs" / "dev_plans" / "x" / "PROGRESS_LOG.md"
+    log_path = repo_root / ".scribe" / "docs" / "dev_plans" / "x" / "PROGRESS_LOG.md"
 
     with pytest.raises(SecurityError):
         await append_line(log_path, "blocked")
@@ -20,7 +20,7 @@ async def test_append_line_blocks_outside_server_root_without_repo_root(tmp_path
 @pytest.mark.asyncio
 async def test_repo_root_override_allows_cross_repo_append_read_rotate(tmp_path: Path) -> None:
     repo_root = tmp_path / "external_repo"
-    log_path = repo_root / "docs" / "dev_plans" / "x" / "PROGRESS_LOG.md"
+    log_path = repo_root / ".scribe" / "docs" / "dev_plans" / "x" / "PROGRESS_LOG.md"
 
     await append_line(log_path, "hello", repo_root=repo_root)
     lines = await read_tail(log_path, 10, repo_root=repo_root)

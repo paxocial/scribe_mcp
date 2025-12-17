@@ -10,10 +10,10 @@ async def test_compute_log_counts_counts_parsed_entries(tmp_path: Path) -> None:
     project = {
         "name": "X",
         "root": str(tmp_path),
-        "docs_dir": str(tmp_path / "docs" / "dev_plans" / "x"),
-        "progress_log": str(tmp_path / "docs" / "dev_plans" / "x" / "PROGRESS_LOG.md"),
+        "docs_dir": str(tmp_path / ".scribe" / "docs" / "dev_plans" / "x"),
+        "progress_log": str(tmp_path / ".scribe" / "docs" / "dev_plans" / "x" / "PROGRESS_LOG.md"),
     }
-    (tmp_path / "docs" / "dev_plans" / "x").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".scribe" / "docs" / "dev_plans" / "x").mkdir(parents=True, exist_ok=True)
 
     logs = log_config_module.load_log_config()
     line = "[ℹ️] [2025-12-17 00:00:00 UTC] [Agent: Codex] [Project: X] hello\n"
@@ -27,4 +27,3 @@ async def test_compute_log_counts_counts_parsed_entries(tmp_path: Path) -> None:
     assert counts
     for log_type in logs.keys():
         assert counts.get(log_type) == 2
-

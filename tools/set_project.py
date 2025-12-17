@@ -146,7 +146,7 @@ async def set_project(
     resolved_root.mkdir(parents=True, exist_ok=True)
 
     # Bootstrap documentation scaffolds when missing
-    doc_result = await _ensure_documents(name, author, overwrite_docs, resolved_root)
+    doc_result = await _ensure_documents(name, author, overwrite_docs, resolved_root, docs_dir)
     if not doc_result.get("ok", False):
         return _SET_PROJECT_HELPER.apply_context_payload(doc_result, base_context)
 
@@ -327,7 +327,15 @@ def _resolve_root(root: Optional[str]) -> Path:
 
 def _resolve_docs_dir(name: str, root_path: Path) -> Path:
     slug = slugify_project_name(name)
-    return (root_path / "docs" / "dev_plans" / slug).resolve()
+    # Prefer repo-local .scribe dev plans to avoid cluttering repo root, but stay
+    # backward compatible: if an existing docs/dev_plans path is present, keep using it.
+    scribe_path = (root_path / settings.dev_plans_base / slug).resolve()
+    legacy_path = (root_path / "docs" / "dev_plans" / slug).resolve()
+    if scribe_path.exists():
+        return scribe_path
+    if legacy_path.exists():
+        return legacy_path
+    return scribe_path
 
 
 def _resolve_log(log: Optional[str], root_path: Path, docs_dir: Path) -> Path:
@@ -382,6 +390,7 @@ async def _ensure_documents(
     author: Optional[str],
     overwrite: bool,
     root_path: Path,
+    docs_dir: Path,
 ) -> Dict[str, Any]:
     """
     Ensure project documentation exists with proper idempotency.
@@ -389,18 +398,15 @@ async def _ensure_documents(
     This function checks if documentation already exists and skips generation
     unless explicitly requested to overwrite, making it truly idempotent.
     """
-    from scribe_mcp.tools.project_utils import slugify_project_name
-
-    # Resolve expected docs path
-    slug = slugify_project_name(name)
-    docs_dir = root_path / "docs" / "dev_plans" / slug
-
     # Check if docs already exist
     doc_files = {
         "architecture": docs_dir / "ARCHITECTURE_GUIDE.md",
         "phase_plan": docs_dir / "PHASE_PLAN.md",
         "checklist": docs_dir / "CHECKLIST.md",
-        "progress_log": docs_dir / "PROGRESS_LOG.md"
+        "progress_log": docs_dir / "PROGRESS_LOG.md",
+        "doc_log": docs_dir / "DOC_LOG.md",
+        "security_log": docs_dir / "SECURITY_LOG.md",
+        "bug_log": docs_dir / "BUG_LOG.md",
     }
 
     existing_files = []
@@ -429,7 +435,10 @@ async def _ensure_documents(
         project_name=name,
         author=author,
         overwrite=overwrite,
-        base_dir=str(root_path),
+        # Thread the resolved docs_dir through to guarantee templates land in the
+        # same location set_project will return (supports `.scribe` normalization
+        # and legacy docs/dev_plans back-compat).
+        base_dir=str(docs_dir),
     )
 
     # Add detailed status about what was done

@@ -131,12 +131,14 @@ MCP_SPINE/
 ```
 
 ### Environment Configuration & External Repos
-- **SCRIBE_ROOT**: Absolute path to the project root where `docs/dev_plans/<project>/...` lives. Set this when running Scribe against any repo outside `MCP_SPINE`.
+- **SCRIBE_ROOT**: Absolute path to the Scribe server’s default root (used only when `set_project(root=...)` is omitted). For multi-repo usage, prefer `set_project(name=..., root=/abs/path/to/repo)` so every tool is repo-scoped.
+- **SCRIBE_DEV_PLANS_BASE**: Base path (relative to repo root) for dev plans/logs. Default: `.scribe/docs/dev_plans`. Back-compat: if `<repo>/docs/dev_plans/<slug>` already exists, Scribe keeps using it unless you override.
 - **SCRIBE_STATE_PATH**: Writable JSON state file (per-user or per-repo). Defaults to `~/.scribe/state.json`; override for isolated test runs.
 - **Optional storage envs**: `SCRIBE_STORAGE_BACKEND` (`sqlite` | `postgres`) and `SCRIBE_DB_URL` for Postgres deployments.
 - **PYTHONPATH**: Include the parent of `scribe_mcp` when launching from other repos so imports resolve.
 - **.env loading**: Scribe now best-effort auto-loads `.env` via `python-dotenv` on startup; shell/process manager exports still work as usual.
 - **Overlap detection**: Root overlaps are tolerated when progress logs/docs differ (e.g., many dev_plan folders under one repo). Actual collisions on `progress_log` or `docs_dir` remain guarded.
+ - **SCRIBE_REMINDER_CACHE_PATH**: Optional path for reminder cooldown cache (default: `data/reminder_cooldowns.json`).
 
 ### MCP Server Core (`MCP_SPINE/scribe_mcp/server.py`)
 - Boots a stdio-based MCP server using the official `mcp` Python SDK when available (falls back to a permissive stub if the SDK is missing for local testing).
@@ -147,7 +149,7 @@ MCP_SPINE/
   - `storage_backend`: chosen at startup (SQLite by default, Postgres when configured).
 
 ### Configuration Layer (`config/settings.py`)
-- Parses environment variables with fallbacks for repository discovery (`SCRIBE_ROOT`, `SCRIBE_STATE_PATH`).
+- Parses environment variables with fallbacks for repository discovery (`SCRIBE_ROOT`, `SCRIBE_STATE_PATH`, `SCRIBE_DEV_PLANS_BASE`).
 - Determines storage backend selection (`SCRIBE_STORAGE_BACKEND`, `SCRIBE_DB_URL`).
 - Sets operational limits (log rotation size, rate limiting, reminder defaults).
 - Exposes reminder tuning knobs (tone, severity weights, idle reset thresholds) via `Settings.reminder_defaults`.
@@ -179,6 +181,7 @@ MCP_SPINE/
   - **Staleness checks**: timezone-aware comparisons guard against missing UTC offsets.
   - **Workflow enforcement**: warns when development proceeds before architecture/phase/checklist are in acceptable states.
   - **Context reminder**: ensures every reply identifies the active project, log counts, and session age.
+  - **Cooldown + time context**: reminders are throttled per `(repo_root, agent_id)` to reduce spam and can include UTC timestamp context in messages; cooldowns can be reset via `set_project(reset_reminders=true)`.
 
 ### Agent Report Cards System (`storage/`)
 **Enterprise-Grade Performance Grading Infrastructure**
@@ -306,6 +309,10 @@ The Modern Tool Architecture provides a unified foundation for all Scribe MCP to
 **Advanced Logging System:**
 - `append_entry`: Single/bulk entry modes with comprehensive metadata and auto-splitting
 - Multi-log routing support (progress, doc_updates, security, bugs) via log_config.json
+- Auto tee routing:
+  - `status="bug"` (or bug emoji) can also write to `BUG_LOG.md` when required meta is present (`severity`, `component`, `status`).
+  - Security events can also write to `SECURITY_LOG.md` (security emoji or `meta.security_event=true`) when required meta is present.
+  - When required meta is missing, Scribe returns a teaching reminder rather than inventing metadata.
 - Structured metadata with key=value pairs, JSON support, and automatic validation
 - Enhanced emoji and status handling with timezone-aware timestamp generation
 
@@ -497,7 +504,8 @@ These signals are exposed via `list_projects(fields=["name","status","meta"])` s
 ## Configuration & Deployment
 
 ### Environment Variables
-- `SCRIBE_ROOT`: Absolute path to `MCP_SPINE` directory (critical for Codex integration).
+- `SCRIBE_ROOT`: Absolute path to the Scribe server install/root (used as a default root when `set_project(root=...)` is omitted).
+- `SCRIBE_DEV_PLANS_BASE`: Base path (relative to repo root) for dev plans/logs (default: `.scribe/docs/dev_plans`).
 - `SCRIBE_STORAGE_BACKEND`: `sqlite` (default) or `postgres`.
 - `SCRIBE_DB_URL`: Postgres connection string when needed.
 - `SCRIBE_LOG_*`: Rate limits and file rotation settings.
@@ -508,14 +516,14 @@ These signals are exposed via `list_projects(fields=["name","status","meta"])` s
 - Codex CLI registration example:
   ```bash
   codex mcp add scribe \
-    --env SCRIBE_ROOT=/home/austin/projects/Scribe/MCP_SPINE \
+    --env SCRIBE_ROOT=/home/austin/projects/MCP_SPINE \
     --env SCRIBE_STORAGE_BACKEND=sqlite \
-    -- python -m MCP_SPINE.scribe_mcp.server
+    -- bash -lc 'cd /home/austin/projects/MCP_SPINE && exec python -m scribe_mcp.server'
   ```
 - `MCP_SPINE/scripts/test_mcp_server.py` performs a `tools/list` handshake to validate server readiness before wiring into Codex.
 
 ### CLI Utility (`scripts/scribe.py`)
-- Standalone script for local append operations. Reads `config/projects/*.json`, falls back to environment defaults, supports dry-run mode, and respects `SCRIBE_ROOT`.
+- Standalone script for local append operations. Reads `config/projects/*.json`, falls back to environment defaults, supports dry-run mode, and respects `set_project(root=...)` for multi-repo workflows.
 
 ---
 

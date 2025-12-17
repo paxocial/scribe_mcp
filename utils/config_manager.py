@@ -883,19 +883,23 @@ class BulletproofFallbackManager:
         # Emergency fallbacks - these are guaranteed to work
         param_lower = param_name.lower()
 
-        if "bool" in param_lower or param_lower.endswith("_enabled"):
+        if "bool" in param_lower or "enabled" in param_lower:
             return False  # Safe boolean default
-        elif "int" in param_lower or "count" in param_lower or "limit" in param_lower:
+
+        if any(token in param_lower for token in ("int", "count", "limit", "page", "size", "offset", "max", "min")):
             return 1  # Safe integer default
-        elif "str" in param_lower or "name" in param_lower or "message" in param_lower:
-            return ""  # Safe string default
-        elif "list" in param_lower or param_lower.endswith("s"):
+
+        if any(token in param_lower for token in ("list", "items", "entries", "projects", "documents", "fields", "tags", "types")):
             return []  # Safe list default
-        elif "dict" in param_lower or "meta" in param_lower or "config" in param_lower:
+
+        if any(token in param_lower for token in ("dict", "meta", "metadata", "config", "defaults", "params", "options")):
             return {}  # Safe dict default
-        else:
-            # Ultimate emergency fallback - return safe empty string
-            return ""  # Safe default string for unknown parameters
+
+        if any(token in param_lower for token in ("str", "name", "message", "path", "suffix", "emoji", "agent", "doc", "section")):
+            return ""  # Safe string default
+
+        # Ultimate emergency fallback - return safe None for unknown parameters
+        return None
 
     def apply_operation_fallback(self, failed_operation: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """

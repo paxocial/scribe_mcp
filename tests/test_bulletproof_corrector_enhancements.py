@@ -53,7 +53,8 @@ class TestBulletproofParameterCorrectorEnhancements:
         result = BulletproofParameterCorrector.correct_intelligent_parameter(
             'search_scope', ['project', 'global'], context
         )
-        assert isinstance(result, list)
+        assert isinstance(result, str)
+        assert result in {'project', 'global', 'all_projects', 'research', 'bugs', 'all'}
 
     def test_correct_intelligent_parameter_message_params(self):
         """Test intelligent parameter correction for message parameters."""

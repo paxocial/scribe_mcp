@@ -29,7 +29,7 @@ async def test_append_entry_integration():
     tmpdir = Path(tempfile.mkdtemp())
     project_dir = tmpdir / "test_project"
     project_dir.mkdir()
-    docs_dir = project_dir / "docs" / "dev_plans" / "test_project"
+    docs_dir = project_dir / ".scribe" / "docs" / "dev_plans" / "test_project"
     docs_dir.mkdir(parents=True)
     log_file = docs_dir / "PROGRESS_LOG.md"
     log_file.write_text("# Test Progress Log\n\n")

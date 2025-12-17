@@ -74,9 +74,9 @@ class EnhancedAppendEntryTest:
         # Create test project directory structure
         self.project_dir = self.temp_dir / "test-project"
         self.project_dir.mkdir()
-        (self.project_dir / "docs" / "dev_plans").mkdir(parents=True)
+        (self.project_dir / ".scribe" / "docs" / "dev_plans").mkdir(parents=True)
 
-        self.log_path = self.project_dir / "docs" / "dev_plans" / "PROGRESS_LOG.md"
+        self.log_path = self.project_dir / ".scribe" / "docs" / "dev_plans" / "PROGRESS_LOG.md"
 
     def cleanup(self):
         """Clean up test environment."""

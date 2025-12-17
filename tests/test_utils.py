@@ -13,6 +13,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scribe_mcp.state.manager import StateManager
+from scribe_mcp.config.settings import settings
 from scribe_mcp.tools import set_project
 from scribe_mcp.tools.append_entry import (
     _normalise_meta,
@@ -68,7 +69,7 @@ async def test_set_project_allows_external_root(tmp_path: Path):
     try:
         assert result["ok"]
         assert Path(result["project"]["root"]).resolve() == external_root.resolve()
-        expected_docs = external_root / "docs" / "dev_plans" / "external_project"
+        expected_docs = external_root / settings.dev_plans_base / "external_project"
         assert Path(result["project"]["progress_log"]).resolve() == (expected_docs / "PROGRESS_LOG.md").resolve()
     finally:
         if external_root.exists():

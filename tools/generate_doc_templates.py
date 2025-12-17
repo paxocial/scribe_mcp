@@ -124,13 +124,17 @@ async def generate_doc_templates(
             "error": "Validation requires the Jinja2 template engine. Enable legacy_fallback only for emergency writes.",
         }
 
-    output_dir = _target_directory(project_name, base_dir)
-    await asyncio.to_thread(output_dir.mkdir, parents=True, exist_ok=True)
-
     selected = _select_documents(documents)
 
     # Treat legacy overwrite as opt-in force, but gate overwrites behind force for safety.
     force_overwrite = bool(force or overwrite)
+
+    project_root_for_docs = settings.project_root
+    try:
+        if logging_context.project and logging_context.project.get("root"):
+            project_root_for_docs = Path(str(logging_context.project["root"])).resolve()
+    except Exception:
+        project_root_for_docs = settings.project_root
 
     written: List[str] = []
     skipped: List[str] = []
@@ -144,6 +148,10 @@ async def generate_doc_templates(
     if include_template_metadata and engine:
         template_directories_info = engine.describe_template_directories()
         available_templates = engine.list_templates()
+    output_dir = _target_directory(project_name, base_dir, project_root=project_root_for_docs)
+    if not validate_only:
+        await asyncio.to_thread(output_dir.mkdir, parents=True, exist_ok=True)
+
     for key, filename in OUTPUT_FILENAMES:
         if key not in selected:
             continue
@@ -248,11 +256,27 @@ async def generate_doc_templates(
     return _GENERATE_DOC_TEMPLATES_HELPER.apply_context_payload(response, logging_context)
 
 
-def _target_directory(project_name: str, base_dir: str | None) -> Path:
+def _target_directory(project_name: str, base_dir: str | None, *, project_root: Path) -> Path:
     slug = slugify_project_name(project_name)
     if base_dir:
-        return Path(base_dir).resolve() / "docs" / "dev_plans" / slug
-    return settings.project_root / "docs" / "dev_plans" / slug
+        base_path = Path(base_dir).resolve()
+
+        # If caller already points at .../docs/dev_plans/<slug>, avoid re-nesting.
+        if (
+            base_path.name == slug
+            and base_path.parent.name == "dev_plans"
+            and base_path.parent.parent.name == "docs"
+        ):
+            return base_path
+
+        # If caller points at .../docs/dev_plans, append slug.
+        if base_path.name == "dev_plans" and base_path.parent.name == "docs":
+            return base_path / slug
+
+        # Treat base_dir as repo root by default.
+        return base_path / "docs" / "dev_plans" / slug
+
+    return (project_root / settings.dev_plans_base / slug).resolve()
 
 
 def _render_template(template: str, context: Dict[str, str]) -> str:

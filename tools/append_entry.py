@@ -187,7 +187,10 @@ def _validate_and_prepare_parameters(
                 healed_params["agent"] = healed_agent
                 healing_applied = True
 
-        if meta:
+        # Only apply metadata healing to dict/string payloads; sequence-of-pairs
+        # metadata (e.g. [("k","v")]) is handled downstream by `normalize_metadata`
+        # and should not be collapsed into a single {"value": "..."} blob.
+        if meta and isinstance(meta, (dict, str)):
             healed_meta = _PARAMETER_CORRECTOR.correct_metadata_parameter(meta)
             if healed_meta != meta:
                 healed_params["meta"] = healed_meta
@@ -206,11 +209,10 @@ def _validate_and_prepare_parameters(
                 healing_applied = True
 
         # Apply fallbacks for corrected parameters
-        if healing_applied:
-            fallback_params = _FALLBACK_MANAGER.resolve_parameter_fallback(
-                "append_entry", healed_params, context="parameter_validation"
-            )
-            healed_params.update(fallback_params)
+        # NOTE: healed_params already contains best-effort corrected values; do not
+        # call the per-parameter fallback resolver with a dict payload (it expects
+        # a single param + context dict). Any missing keys are handled below via
+        # `.get(..., original)` fallbacks.
 
         # Update parameters with healed values
         final_message = healed_params.get("message", message)
@@ -274,8 +276,8 @@ def _validate_and_prepare_parameters(
 
         if healed_exception.get("success"):
             # Use healed values from exception recovery
-            fallback_params = _FALLBACK_MANAGER.resolve_parameter_fallback(
-                "append_entry", healed_exception.get("healed_values", {}), context="exception_healing"
+            fallback_params = _FALLBACK_MANAGER.apply_emergency_fallback(
+                "append_entry", healed_exception.get("healed_values", {}) or {}
             )
 
             # Create safe fallback configuration
@@ -367,9 +369,8 @@ async def _process_single_entry(
             if healed_message["success"]:
                 message = healed_message["healed_values"].get("message", message)
             else:
-                # Apply fallback
-                fallback_result = _FALLBACK_MANAGER.resolve_parameter_fallback(
-                    "append_entry", {"message": message}, context="message_validation_error"
+                fallback_result = _FALLBACK_MANAGER.apply_emergency_fallback(
+                    "append_entry", {"message": message}
                 )
                 message = fallback_result.get("message", "Message validation failed")
 
@@ -481,6 +482,10 @@ async def _process_single_entry(
                 project_name=project.get("name", "unknown"),
                 meta_pairs=meta_pairs
             )
+
+            # Auto-rotate oversized logs for single-entry writes as well (bulk
+            # mode already does this).
+            await _rotate_if_needed(log_path, repo_root=repo_root)
 
             line_id = await append_line(log_path, line, repo_root=repo_root)
 
@@ -625,6 +630,10 @@ async def _process_single_entry(
         response = {
             "ok": True,
             "id": entry_id,
+            # Backwards-compatible convenience: many clients/tests expect the exact
+            # rendered line that was appended to the primary log path.
+            "written_line": line,
+            "meta": meta_payload,
             "path": str(log_path),
             "paths": sorted({str(log_path), *tee_paths}),
             "line_id": line_id,
@@ -717,11 +726,7 @@ async def _process_bulk_entries(
                 if healed_items["success"]:
                     bulk_items = healed_items["healed_values"].get("items_list", [])
                 else:
-                    # Apply fallback
-                    fallback_items = _FALLBACK_MANAGER.resolve_parameter_fallback(
-                        "append_entry", {"items_list": items_list}, context="bulk_processing"
-                    )
-                    bulk_items = fallback_items.get("items_list", [])
+                    bulk_items = []
             else:
                 bulk_items = items_list.copy()
 
@@ -738,11 +743,7 @@ async def _process_bulk_entries(
                     if healed_parsed["success"]:
                         bulk_items = healed_parsed["healed_values"].get("items", [])
                     else:
-                        # Apply fallback
-                        fallback_items = _FALLBACK_MANAGER.resolve_parameter_fallback(
-                            "append_entry", {"items": items}, context="bulk_json_parsing"
-                        )
-                        bulk_items = fallback_items.get("items", [])
+                        bulk_items = []
                 else:
                     bulk_items = parsed_items
 
@@ -781,9 +782,23 @@ async def _process_bulk_entries(
 
         # Apply inherited metadata and prepare items
         try:
-            bulk_items = _apply_inherited_metadata(bulk_items, meta_pairs)
+            inherited_meta = {key: value for key, value in meta_pairs}
+            normalized_bulk: List[Dict[str, Any]] = []
+            for raw_item in bulk_items or []:
+                if isinstance(raw_item, dict):
+                    item = dict(raw_item)
+                else:
+                    item = {"message": str(raw_item)}
+
+                item_meta_pairs = _normalise_meta(item.get("meta"))
+                item_meta_dict = {key: value for key, value in item_meta_pairs}
+                merged_meta = dict(inherited_meta)
+                merged_meta.update(item_meta_dict)
+                item["meta"] = merged_meta
+                normalized_bulk.append(item)
+
             bulk_items = _prepare_bulk_items_with_timestamps(
-                bulk_items, final_config.timestamp_utc, stagger_seconds
+                normalized_bulk, final_config.timestamp_utc, stagger_seconds
             )
         except Exception as prep_error:
             # Try to heal bulk preparation error
@@ -823,7 +838,7 @@ async def _process_bulk_entries(
                         )
 
                         result = await _process_single_entry(
-                            item_config, context, project, recent, log_cache, tuple(item.get("meta", {}).items())
+                            item_config, context, project, recent, log_cache, _normalise_meta(item.get("meta"))
                         )
                         results.append(result)
 
@@ -876,7 +891,7 @@ async def _process_bulk_entries(
                         )
 
                         result = await _process_single_entry(
-                            item_config, context, project, recent, log_cache, tuple(item.get("meta", {}).items())
+                            item_config, context, project, recent, log_cache, _normalise_meta(item.get("meta"))
                         )
                         results.append(result)
 
@@ -926,6 +941,21 @@ async def _process_bulk_entries(
             "results": results,
             "recent_projects": list(recent),
         }
+
+        # Backwards-compatible bulk response fields.
+        written_lines = [r.get("written_line") for r in successful_results if r.get("written_line")]
+        failed_items = failed_results
+        paths_accum = sorted({str(r.get("path")) for r in successful_results if r.get("path")})
+        response.update(
+            {
+                "written_count": len(written_lines),
+                "failed_count": len(failed_items),
+                "written_lines": written_lines,
+                "failed_items": failed_items,
+                "path": paths_accum[0] if paths_accum else project.get("progress_log"),
+                "paths": paths_accum or ([project.get("progress_log")] if project.get("progress_log") else []),
+            }
+        )
 
         if failed_results:
             response["warning"] = f"{len(failed_results)} items failed to process"

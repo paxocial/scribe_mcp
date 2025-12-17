@@ -108,7 +108,11 @@ def resolve_log_path(project: Dict[str, Any], definition: Dict[str, Any]) -> Pat
 
     docs_dir = project.get("docs_dir") or (Path(project.get("progress_log", "")).parent if project.get("progress_log") else "")
     if not docs_dir:
-        docs_dir = Path(project.get("root", settings.project_root)) / "docs" / "dev_plans" / _slugify_project_name(project["name"])
+        docs_dir = (
+            Path(project.get("root", settings.project_root))
+            / settings.dev_plans_base
+            / _slugify_project_name(project["name"])
+        )
 
     context = {
         "project_slug": _slugify_project_name(project["name"]),

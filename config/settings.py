@@ -50,6 +50,7 @@ class Settings:
     reminder_defaults: Dict[str, Any]
     reminder_idle_minutes: int
     reminder_warmup_minutes: int
+    dev_plans_base: Path
     # Vector indexing settings
     vector_enabled: bool
     vector_backend: str
@@ -112,6 +113,13 @@ class Settings:
         reminder_idle_minutes = max(1, _int_env("SCRIBE_REMINDER_IDLE_MINUTES", 45))
         reminder_warmup_minutes = max(0, _int_env("SCRIBE_REMINDER_WARMUP_MINUTES", 5))
 
+        dev_plans_base_raw = os.environ.get("SCRIBE_DEV_PLANS_BASE", ".scribe/docs/dev_plans")
+        dev_plans_base = Path(dev_plans_base_raw).expanduser()
+        if dev_plans_base.is_absolute():
+            # Treat as a relative-to-repo path by stripping the anchor.
+            # This keeps the setting repo-scoped even if an absolute was provided.
+            dev_plans_base = Path(*dev_plans_base.parts[1:])
+
         # Vector indexing configuration
         from .vector_config import load_vector_config, merge_with_env_overrides
 
@@ -164,6 +172,7 @@ class Settings:
             reminder_defaults=reminder_defaults,
             reminder_idle_minutes=reminder_idle_minutes,
             reminder_warmup_minutes=reminder_warmup_minutes,
+            dev_plans_base=dev_plans_base,
             vector_enabled=vector_enabled,
             vector_backend=vector_backend,
             vector_dimension=vector_dimension,

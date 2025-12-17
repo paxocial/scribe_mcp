@@ -10,7 +10,7 @@ from scribe_mcp.tools.append_entry import _tee_entry_to_log_type, _make_missing_
 @pytest.mark.asyncio
 async def test_tee_to_bug_log_requires_meta(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
-    docs_dir = repo_root / "docs" / "dev_plans" / "p"
+    docs_dir = repo_root / ".scribe" / "docs" / "dev_plans" / "p"
     project = {
         "name": "p",
         "root": str(repo_root),
@@ -42,7 +42,7 @@ async def test_tee_to_bug_log_requires_meta(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_tee_to_bug_log_writes_when_meta_present(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
-    docs_dir = repo_root / "docs" / "dev_plans" / "p"
+    docs_dir = repo_root / ".scribe" / "docs" / "dev_plans" / "p"
     bug_log = docs_dir / "BUG_LOG.md"
     project = {
         "name": "p",

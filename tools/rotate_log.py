@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import uuid
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
@@ -43,10 +44,12 @@ from scribe_mcp.utils.error_handler import ErrorHandler, HealingErrorHandler, Ex
 from scribe_mcp.utils.config_manager import ConfigManager, apply_response_defaults, build_response_payload, BulletproofFallbackManager
 from scribe_mcp.tools.config.rotate_log_config import RotateLogConfig
 from scribe_mcp.utils.audit import get_audit_manager, store_rotation_metadata
+from scribe_mcp.utils import audit as audit_utils
 from scribe_mcp.utils.files import rotate_file, verify_file_integrity, file_lock
 from scribe_mcp.utils.integrity import (
     create_rotation_metadata,
     count_file_lines,
+    compute_file_hash,
 )
 from scribe_mcp.utils.rotation_state import (
     get_next_sequence_number,
@@ -77,6 +80,55 @@ class _RotateLogHelper(LoggingToolMixin):
 
 
 _ROTATE_HELPER = _RotateLogHelper()
+
+
+async def verify_rotation_integrity(rotation_id: str, project: str | None = None) -> Dict[str, Any]:
+    """
+    Verify archive integrity for a prior rotation.
+
+    Backwards compatible helper for CLI/tests that import from `scribe_mcp.tools.rotate_log`.
+    (Not an MCP tool entry-point.)
+    """
+    state = await server_module.state_manager.load()
+    project_name = project or state.current_project
+    if not project_name:
+        return {"ok": False, "error": "No project configured"}
+
+    try:
+        integrity_ok, message = audit_utils.verify_rotation_integrity(project_name, rotation_id)
+        return {
+            "ok": True,
+            "project": project_name,
+            "rotation_id": rotation_id,
+            "integrity_valid": bool(integrity_ok),
+            "message": message,
+        }
+    except Exception as exc:  # pragma: no cover - defensive
+        return {"ok": False, "error": str(exc), "project": project_name, "rotation_id": rotation_id}
+
+
+async def get_rotation_history(limit: int | None = None, project: str | None = None) -> Dict[str, Any]:
+    """
+    Return recent rotation history for the current (or explicit) project.
+
+    Backwards compatible helper for CLI/tests that import from `scribe_mcp.tools.rotate_log`.
+    (Not an MCP tool entry-point.)
+    """
+    state = await server_module.state_manager.load()
+    project_name = project or state.current_project
+    if not project_name:
+        return {"ok": False, "error": "No project configured"}
+
+    try:
+        rotations = audit_utils.get_rotation_history(project_name, limit=limit)
+        return {
+            "ok": True,
+            "project": project_name,
+            "rotation_count": len(rotations),
+            "rotations": rotations,
+        }
+    except Exception as exc:  # pragma: no cover - defensive
+        return {"ok": False, "error": str(exc), "project": project_name}
 
 # Global configuration manager for parameter handling
 _CONFIG_MANAGER = ConfigManager("rotate_log")
@@ -899,34 +951,34 @@ async def _execute_rotation_with_fallbacks(
                     else:
                         # Actual rotation execution
                         try:
-                            # Create rotation metadata
-                            rotation_metadata = {
-                                "timestamp": datetime.now().isoformat(),
-                                "log_type": log_type,
-                                "entry_count": operation.get("entry_count", 0),
-                                "suffix": operation.get("suffix"),
-                                "auto_initiated": False,
-                                **processed_metadata
-                            }
-
-                            # Store rotation metadata
-                            audit_manager = get_audit_manager()
-                            rotation_id = await audit_manager.store_rotation_metadata(
-                                project["name"], rotation_metadata
-                            )
+                            rotation_id = generate_rotation_id(project["name"])
+                            sequence_number = get_next_sequence_number(project["name"])
+                            rotation_timestamp = format_utc(utcnow())
 
                             # Execute file rotation
                             repo_root = Path(project.get("root") or settings.project_root).resolve()
+                            rotation_started = time.monotonic()
                             archive_path = await rotate_file(
                                 log_path,
                                 suffix=operation.get("suffix"),
                                 confirm=True,
                                 repo_root=repo_root,
                             )
+                            rotation_duration = time.monotonic() - rotation_started
 
                             # Verify rotation integrity
                             archive_info = verify_file_integrity(archive_path, repo_root=repo_root)
                             integrity_ok = bool(archive_info.get("exists")) and not archive_info.get("error")
+
+                            rotation_metadata = create_rotation_metadata(
+                                archived_file_path=str(archive_path),
+                                rotation_uuid=rotation_id,
+                                rotation_timestamp=rotation_timestamp,
+                                sequence_number=sequence_number,
+                                log_type=log_type,
+                            )
+                            audit_success = store_rotation_metadata(project["name"], rotation_metadata)
+                            state_success = update_project_state(project["name"], rotation_metadata)
 
                             rotation_result = {
                                 "log_type": log_type,
@@ -934,9 +986,17 @@ async def _execute_rotation_with_fallbacks(
                                 "dry_run": False,
                                 "original_path": str(log_path),
                                 "archive_path": str(archive_path),
-                                "entry_count": operation.get("entry_count", 0),
+                                "entry_count": rotation_metadata.get("entry_count", operation.get("entry_count", 0)),
                                 "rotation_id": rotation_id,
-                                "integrity_verified": integrity_ok
+                                "sequence_number": sequence_number,
+                                "rotation_completed": True,
+                                "rotation_duration_seconds": rotation_duration,
+                                "archive_hash": rotation_metadata.get("file_hash"),
+                                "archive_sha256": rotation_metadata.get("file_hash"),
+                                "archive_size_bytes": rotation_metadata.get("file_size"),
+                                "integrity_verified": integrity_ok,
+                                "audit_trail_stored": bool(audit_success),
+                                "state_updated": bool(state_success),
                             }
 
                             if not integrity_ok:
@@ -1066,6 +1126,7 @@ async def _execute_rotation_with_fallbacks(
             "ok": len(successful_rotations) > 0 or len(skipped_rotations) > 0,
             "rotation_executed": not final_dry_run,
             "dry_run": final_dry_run,
+            "dry_run_mode": rotation_prep.get("final_dry_run_mode"),
             "processed_log_types": rotation_prep["validated_log_types"],
             "results": execution_results,
             "summary": {
@@ -1075,6 +1136,56 @@ async def _execute_rotation_with_fallbacks(
                 "skipped": len(skipped_rotations)
             }
         }
+
+        # Backwards-compat: historically rotate_log returned a single-file shape with
+        # `archived_to` + a few top-level counters. When exactly one rotation
+        # produced an archive path, mirror those fields for callers/tests.
+        try:
+            primary = None
+            for item in execution_results:
+                if isinstance(item, dict) and (item.get("archive_path") or item.get("archived_to")):
+                    primary = item
+                    break
+            if primary is None:
+                for item in execution_results:
+                    if isinstance(item, dict):
+                        primary = item
+                        break
+            if primary:
+                archived_to = primary.get("archived_to") or primary.get("archive_path")
+                if archived_to:
+                    response.setdefault("archived_to", archived_to)
+                    response.setdefault("archive_path", archived_to)
+
+                response.setdefault("rotation_id", primary.get("rotation_id"))
+                response.setdefault("estimated_entry_count", primary.get("estimated_entry_count"))
+                response.setdefault(
+                    "entry_count",
+                    primary.get("entry_count")
+                    or primary.get("rotated_entry_count")
+                    or primary.get("estimated_entry_count"),
+                )
+                response.setdefault("rotation_completed", primary.get("rotation_completed"))
+                response.setdefault("archive_hash", primary.get("archive_hash") or primary.get("archive_sha256") or primary.get("file_hash"))
+                response.setdefault("archive_sha256", primary.get("archive_sha256") or primary.get("archive_hash") or primary.get("file_hash"))
+                response.setdefault("integrity_verified", primary.get("integrity_verified"))
+                response.setdefault("audit_trail_stored", primary.get("audit_trail_stored"))
+                response.setdefault("state_updated", primary.get("state_updated"))
+                response.setdefault("rotation_duration_seconds", primary.get("rotation_duration_seconds"))
+                response.setdefault("sequence_number", primary.get("sequence_number"))
+                response.setdefault(
+                    "entry_count_method",
+                    primary.get("entry_count_method") or primary.get("estimated_entry_count_method") or "unknown",
+                )
+
+                mode = (response.get("dry_run_mode") or "estimate").lower()
+                if response.get("dry_run") is True:
+                    response.setdefault("entry_count_approximate", mode != "precise")
+                    response["entry_count_method"] = "full_count" if mode == "precise" else response.get("entry_count_method")
+                    response.setdefault("file_hash", primary.get("file_hash"))
+                    response.setdefault("sequence_number", 0)
+        except Exception:
+            pass
 
         # Add warnings if any operations failed
         if failed_rotations:
@@ -1134,6 +1245,7 @@ async def _execute_rotation_with_fallbacks(
 
 @app.tool()
 async def rotate_log(
+    project: Optional[str] = None,
     suffix: Optional[str] = None,
     custom_metadata: Optional[str] = None,
     confirm: Optional[bool] = None,
@@ -1150,6 +1262,7 @@ async def rotate_log(
     Rotate one or more project log files with integrity guarantees.
 
     Args:
+        project: Optional project name override (defaults to active project context).
         suffix: Optional suffix for archive filenames.
         custom_metadata: Optional JSON metadata appended to rotation record.
         confirm: When True, perform actual rotation (required unless auto-threshold triggers).
@@ -1198,6 +1311,7 @@ async def rotate_log(
             context = await _ROTATE_HELPER.prepare_context(
                 tool_name="rotate_log",
                 agent_id=None,
+                explicit_project=project,
                 require_project=True,
                 state_snapshot=state_snapshot,
             )

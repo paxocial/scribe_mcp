@@ -94,7 +94,7 @@ def test_set_and_get_project_roundtrip(isolated_state, project_root):
     assert active["ok"]
     project = active["project"]
     assert project["name"] == "test-project"
-    docs_dir = root / "docs" / "dev_plans" / slugify_project_name("test-project")
+    docs_dir = root / settings.dev_plans_base / slugify_project_name("test-project")
     assert project["progress_log"] == str((docs_dir / "PROGRESS_LOG.md").resolve())
     assert project["docs"]["architecture"].endswith("ARCHITECTURE_GUIDE.md")
     assert active["recent_projects"][0] == "test-project"
@@ -146,7 +146,7 @@ def test_append_entry_uses_slugified_log_path(isolated_state, project_root):
     slug = slugify_project_name(project_name)
     run(set_project.set_project(project_name, str(root)))
 
-    canonical_dir = (root / "docs" / "dev_plans" / slug).resolve()
+    canonical_dir = (root / settings.dev_plans_base / slug).resolve()
     log_path = (canonical_dir / "PROGRESS_LOG.md").resolve()
     assert log_path.exists()
 

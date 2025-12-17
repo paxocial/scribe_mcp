@@ -158,7 +158,7 @@ async def test_manage_docs_renders_jinja_content_and_custom_templates(tmp_path: 
     repo_root = Path(__file__).resolve().parents[1]
     test_root = repo_root / "tmp_tests" / f"manage_docs_{uuid4().hex}"
     project_root = test_root
-    docs_dir = project_root / "docs" / "dev_plans" / "test_project"
+    docs_dir = project_root / ".scribe" / "docs" / "dev_plans" / "test_project"
     docs_dir.mkdir(parents=True, exist_ok=True)
 
     architecture_path = docs_dir / "ARCHITECTURE_GUIDE.md"
@@ -240,7 +240,7 @@ async def test_special_document_templates_and_agent_card_storage(tmp_path: Path)
     project_name = "TestProject"
     repo_root = Path(__file__).resolve().parents[1]
     project_root = repo_root / "tmp_tests" / f"manage_docs_special_{uuid4().hex}"
-    docs_dir = project_root / "docs" / "dev_plans" / project_name
+    docs_dir = project_root / ".scribe" / "docs" / "dev_plans" / project_name
     docs_dir.mkdir(parents=True, exist_ok=True)
 
     # Seed required doc files

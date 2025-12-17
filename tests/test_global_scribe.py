@@ -158,11 +158,11 @@ def test_cli_doctor():
             repo_path = temp_path / "test-repo"
             repo_path.mkdir()
             (repo_path / ".git").mkdir()
-            (repo_path / "docs" / "dev_plans").mkdir(parents=True)
+            (repo_path / ".scribe" / "docs" / "dev_plans").mkdir(parents=True)
 
             # Create .scribe config
             scribe_dir = repo_path / ".scribe"
-            scribe_dir.mkdir()
+            scribe_dir.mkdir(exist_ok=True)
             config_file = scribe_dir / "scribe.yaml"
             config_file.write_text("repo_slug: test-repo\\n")
 

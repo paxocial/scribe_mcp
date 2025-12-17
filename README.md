@@ -52,13 +52,12 @@ pip install -r requirements.txt
 ### 2️⃣ Launch MCP Server (Primary Integration Path)
 ```bash
 # Start the MCP server for Claude/Claude Code integration
-export SCRIBE_ROOT=$(pwd)  # Set your project root
 python -m scribe_mcp.server
 ```
 
 Once connected from Claude / Codex MCP:
 
-- Use **`set_project`** to register/select a project and bootstrap dev_plan docs.
+- Use **`set_project`** to register/select a project and bootstrap dev_plan docs (pass `root=/abs/path/to/repo` to work in any repo).
 - Use **`append_entry`** for all logging (single/bulk).
 - Use **`manage_docs`** for architecture/phase/checklist updates.
 - Use **`read_recent` / `list_projects`** to resume context after compaction.
@@ -86,6 +85,11 @@ python -m scribe_mcp.scripts.scribe "Completed authentication module" --status s
 # Track bugs and issues
 python -m scribe_mcp.scripts.scribe "Fixed JWT token expiry bug" --status bug --meta severity=high,component=security
 ```
+
+**Automatic log routing (BUG / SECURITY)**
+- `status=bug` (or a bug emoji) will also write to `BUG_LOG.md` when required meta is present (`severity`, `component`, `status`).
+- Security events can also tee to `SECURITY_LOG.md` (example: use a security emoji, or `--meta security_event=true,impact=...,status=...`).
+- If required meta is missing, Scribe returns a teaching reminder instead of inventing data.
 
 **Research Workflows:**
 ```bash
@@ -162,7 +166,7 @@ codex mcp add scribe \
 ```
 
 Notes:
-- We intentionally **do not** bake `SCRIBE_ROOT` into the MCP config, because Scribe is used across many repos. Set `SCRIBE_ROOT` per repo (e.g., in your shell, direnv, or project scripts) to point at the repository whose `docs/dev_plans` you’re working inside.
+- We intentionally **do not** bake a per-repo root into the MCP config. Scribe is multi-repo: switch repos by calling `set_project(name=..., root=/abs/path/to/repo)` (no MCP re-register needed).
 - The same `bash -lc "cd REPO_ROOT && python -m scribe_mcp.server"` pattern works for any MCP client that expects a stdio server command.
 
 ---
@@ -171,12 +175,11 @@ Notes:
 
 You can run Scribe from any codebase (not just `MCP_SPINE`) by pointing it at that project’s root:
 
-1. Set env vars before starting the server/tools:
-   - `SCRIBE_ROOT=/abs/path/to/your/repo` (where `docs/dev_plans/...` should live)
-   - `SCRIBE_STATE_PATH=/abs/path/to/state.json` (per-user or per-repo; must be writable)
-   - Optional: `SCRIBE_STORAGE_BACKEND=postgres` and `SCRIBE_DB_URL=postgresql://...` if you want Postgres.
-2. Ensure `PYTHONPATH` includes the parent of `scribe_mcp` so imports work when launched from elsewhere.
-3. Run `python -m scribe_mcp.server` (or your MCP launch command) and call `set_project` for each project name you want to track.
+1. Start the MCP server from the Scribe codebase (once), then use `set_project(..., root=/abs/path/to/your/repo)` to target any repository.
+2. Optional env vars:
+   - `SCRIBE_STATE_PATH=/abs/path/to/state.json` (per-user; must be writable)
+   - `SCRIBE_STORAGE_BACKEND=postgres` and `SCRIBE_DB_URL=postgresql://...` if you want Postgres.
+3. Ensure `PYTHONPATH` includes the parent of `scribe_mcp` so imports work when launched from elsewhere.
 
 ---
 
@@ -341,6 +344,10 @@ Every MCP tool response includes contextual reminders about:
 - 🎯 **Project Context** - Active project status and recent activity
 - 🔄 **Drift Detection** - When implementation deviates from plans
 
+Reminders are throttled with a short cooldown per `(repo_root, agent_id)` so you see what matters without constant repetition. If an agent gets confused, you can clear cooldowns with `set_project(reset_reminders=true)`.
+
+If you call a project-bound tool without selecting a project, Scribe returns a “last known project” hint (including last access time) to help you recover quickly.
+
 ### ⚙️ Customization
 ```json
 {
@@ -360,6 +367,7 @@ Every MCP tool response includes contextual reminders about:
 - `SCRIBE_REMINDER_IDLE_MINUTES` - Work session reset timeout (default: 45)
 - `SCRIBE_REMINDER_WARMUP_MINUTES` - Grace period after resuming (default: 5)
 - `SCRIBE_REMINDER_DEFAULTS` - JSON configuration for all projects
+- `SCRIBE_REMINDER_CACHE_PATH` - Optional path for reminder cooldown cache (default: `data/reminder_cooldowns.json`)
 
 ---
 
@@ -370,11 +378,7 @@ scribe_mcp/                     # 🏛️ Main Scribe MCP server
 ├── 📁 config/
 │   ├── 📁 projects/           # Per-project configurations
 │   └── 📄 mcp_config.json     # Sample MCP configuration
-├── 📁 docs/dev_plans/         # Auto-generated documentation
-│   ├── 📄 ARCHITECTURE_GUIDE.md
-│   ├── 📄 PHASE_PLAN.md
-│   ├── 📄 CHECKLIST.md
-│   └── 📄 PROGRESS_LOG.md
+├── 📁 docs/                   # 📖 Server docs (whitepapers, guides)
 ├── 📁 templates/              # 🎨 Jinja2 template system
 │   ├── 📁 documents/          # 13+ specialized templates
 │   ├── 📁 fragments/          # Reusable template pieces
@@ -385,6 +389,11 @@ scribe_mcp/                     # 🏛️ Main Scribe MCP server
 ├── 📁 tests/                  # 🧪 Comprehensive test suite
 └── 📄 server.py               # 🚀 MCP server entrypoint
 ```
+
+**Per-repo output location (dev plans + logs)**
+- Default: `<repo>/.scribe/docs/dev_plans/<project_slug>/...`
+- Back-compat: if `<repo>/docs/dev_plans/<project_slug>` exists, Scribe keeps using it.
+- Override: set `SCRIBE_DEV_PLANS_BASE` (example: `docs/dev_plans`) to force a different base.
 
 ---
 
@@ -478,11 +487,13 @@ python -c "from scribe_mcp.tools import *; print('All tools loaded')"
 
 **🗄️ SQLite Permission Issues**
 ```bash
-# Check SCRIBE_ROOT is writable
-ls -la $SCRIBE_ROOT
+# Check your state/db paths are writable
+echo $SCRIBE_STATE_PATH
+ls -la $(dirname "$SCRIBE_STATE_PATH")
 
-# Set proper permissions if needed
-chmod 755 $SCRIBE_ROOT
+# Check the target repo is writable (Scribe writes under <repo>/.scribe/ by default)
+ls -la /abs/path/to/your/repo
+ls -la /abs/path/to/your/repo/.scribe || true
 ```
 
 **🐍 Python Path Issues**

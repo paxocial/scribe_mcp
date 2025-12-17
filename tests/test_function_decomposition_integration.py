@@ -36,7 +36,7 @@ class TestFunctionDecompositionIntegration:
             project_dir.mkdir()
 
             # Create project structure
-            docs_dir = project_dir / "docs" / "dev_plans" / "test_project"
+            docs_dir = project_dir / ".scribe" / "docs" / "dev_plans" / "test_project"
             docs_dir.mkdir(parents=True)
 
             # Create progress log
@@ -428,7 +428,7 @@ def test_integration_summary():
         project_dir.mkdir()
 
         # Create project structure
-        docs_dir = project_dir / "docs" / "dev_plans" / "test_project"
+        docs_dir = project_dir / ".scribe" / "docs" / "dev_plans" / "test_project"
         docs_dir.mkdir(parents=True)
 
         progress_log = docs_dir / "PROGRESS_LOG.md"
