@@ -816,9 +816,19 @@ class BulletproofParameterCorrector:
             return BulletproofParameterCorrector.correct_numeric_parameter(
                 invalid_value, min_val=1, max_val=1000, fallback_value=50
             )
-        elif param_name in ['document_types', 'search_scope', 'output_mode']:
+        elif param_name in ['document_types']:
             return BulletproofParameterCorrector.correct_list_parameter(
                 invalid_value, delimiter=",", max_items=10
+            )
+        elif param_name in ["search_scope"]:
+            allowed_scopes = {"project", "global", "all_projects", "research", "bugs", "all"}
+            return BulletproofParameterCorrector.correct_enum_parameter(
+                invalid_value, allowed_scopes, "search_scope", "project"
+            )
+        elif param_name in ["output_mode"]:
+            allowed_modes = {"project", "global", "all", "research"}  # best-effort, tool-specific enums can override
+            return BulletproofParameterCorrector.correct_enum_parameter(
+                invalid_value, allowed_modes, "output_mode", "project"
             )
         elif param_name in ['message', 'query', 'action']:
             return BulletproofParameterCorrector.correct_message_parameter(invalid_value)

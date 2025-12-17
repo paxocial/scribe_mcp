@@ -28,6 +28,12 @@ def _get_engine() -> ReminderEngine:
     return _reminder_engine
 
 
+def reset_reminder_cooldowns(*, project_root: str, agent_id: Optional[str] = None) -> int:
+    """Clear reminder cooldown timestamps for a repo/project (and optionally agent)."""
+    engine = _get_engine()
+    return engine.reset_cooldowns(project_root=project_root, agent_id=agent_id)
+
+
 # ---------------------------------------------------------------------------
 # Legacy Compatibility API
 # ---------------------------------------------------------------------------
@@ -37,6 +43,7 @@ async def get_reminders(
     *,
     tool_name: str,
     state: Optional[object] = None,
+    agent_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Legacy compatibility wrapper for the original get_reminders function.
@@ -48,7 +55,7 @@ async def get_reminders(
         return []
 
     # Build the new reminder context from the old format
-    context = await _build_legacy_context(project, tool_name, state)
+    context = await _build_legacy_context(project, tool_name, state, agent_id=agent_id)
 
     # Use the new engine
     engine = _get_engine()
@@ -62,11 +69,18 @@ async def get_reminders(
 # Context Building Functions
 # ---------------------------------------------------------------------------
 
-async def _build_legacy_context(project: Dict[str, Any], tool_name: str, state: Optional[object]) -> NewReminderContext:
+async def _build_legacy_context(
+    project: Dict[str, Any],
+    tool_name: str,
+    state: Optional[object],
+    *,
+    agent_id: Optional[str] = None,
+) -> NewReminderContext:
     """Convert legacy project/state format to new ReminderContext."""
 
     # Extract project information
     project_name = project.get("name")
+    project_root = project.get("root")
     log_path = Path(project.get("progress_log", ""))
 
     # Read log information (similar to original _build_context)
@@ -168,6 +182,8 @@ async def _build_legacy_context(project: Dict[str, Any], tool_name: str, state: 
     return NewReminderContext(
         tool_name=tool_name,
         project_name=project_name,
+        project_root=str(project_root) if project_root else None,
+        agent_id=agent_id,
         total_entries=total_entries,
         minutes_since_log=minutes_since_log,
         last_log_time=last_log_time,

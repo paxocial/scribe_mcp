@@ -114,41 +114,31 @@ def _validate_search_parameters(
 
         # Heal array parameters
         if emoji:
-            healed_emoji = _PARAMETER_CORRECTOR.correct_list_parameter(
-                emoji, field_name="emoji"
-            )
+            healed_emoji = _PARAMETER_CORRECTOR.correct_list_parameter(emoji)
             if healed_emoji != emoji:
                 healed_params["emoji"] = healed_emoji
                 healing_applied = True
 
         if status:
-            healed_status = _PARAMETER_CORRECTOR.correct_list_parameter(
-                status, field_name="status"
-            )
+            healed_status = _PARAMETER_CORRECTOR.correct_list_parameter(status)
             if healed_status != status:
                 healed_params["status"] = healed_status
                 healing_applied = True
 
         if agents:
-            healed_agents = _PARAMETER_CORRECTOR.correct_list_parameter(
-                agents, field_name="agents"
-            )
+            healed_agents = _PARAMETER_CORRECTOR.correct_list_parameter(agents)
             if healed_agents != agents:
                 healed_params["agents"] = healed_agents
                 healing_applied = True
 
         if fields:
-            healed_fields = _PARAMETER_CORRECTOR.correct_list_parameter(
-                fields, field_name="fields"
-            )
+            healed_fields = _PARAMETER_CORRECTOR.correct_list_parameter(fields)
             if healed_fields != fields:
                 healed_params["fields"] = healed_fields
                 healing_applied = True
 
         if document_types:
-            healed_document_types = _PARAMETER_CORRECTOR.correct_list_parameter(
-                document_types, field_name="document_types"
-            )
+            healed_document_types = _PARAMETER_CORRECTOR.correct_list_parameter(document_types)
             if healed_document_types != document_types:
                 healed_params["document_types"] = healed_document_types
                 healing_applied = True
@@ -309,18 +299,29 @@ def _validate_search_parameters(
     except Exception as e:
         # Apply Phase 2 ExceptionHealer for parameter validation errors
         healed_exception = _EXCEPTION_HEALER.heal_parameter_validation_error(
-            e, {
-                "project": project,
-                "message": message,
-                "message_mode": message_mode,
-                "search_scope": search_scope,
-                "limit": limit,
-                "page": page,
-                "page_size": page_size
-            }
+            e,
+            {
+                "operation_type": "query_entries",
+                "parameters": {
+                    "project": project,
+                    "start": start,
+                    "end": end,
+                    "message": message,
+                    "message_mode": message_mode,
+                    "search_scope": search_scope,
+                    "limit": limit,
+                    "page": page,
+                    "page_size": page_size,
+                    "fields": fields,
+                    "emoji": emoji,
+                    "status": status,
+                    "agents": agents,
+                    "document_types": document_types,
+                },
+            },
         )
 
-        if healed_exception["success"]:
+        if healed_exception.get("success"):
             healed_values = healed_exception.get("healed_values", {})
 
             # Create safe fallback configuration
@@ -353,7 +354,7 @@ def _validate_search_parameters(
             return safe_config, {
                 "healing_applied": True,
                 "exception_healing": True,
-                "healed_params": healed_exception["healed_values"],
+                "healed_params": healed_values,
                 "fallback_used": True
             }
         else:

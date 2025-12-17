@@ -272,10 +272,10 @@ def _validate_and_prepare_parameters(
             e, {"message": message, "status": status, "agent": agent, "log_type": log_type}
         )
 
-        if healed_exception["success"]:
+        if healed_exception.get("success"):
             # Use healed values from exception recovery
             fallback_params = _FALLBACK_MANAGER.resolve_parameter_fallback(
-                "append_entry", healed_exception["healed_values"], context="exception_healing"
+                "append_entry", healed_exception.get("healed_values", {}), context="exception_healing"
             )
 
             # Create safe fallback configuration
@@ -298,7 +298,7 @@ def _validate_and_prepare_parameters(
             return safe_config, {
                 "healing_applied": True,
                 "exception_healing": True,
-                "healed_params": healed_exception["healed_values"],
+                "healed_params": healed_exception.get("healed_values", {}),
                 "fallback_used": True
             }
         else:
@@ -468,6 +468,7 @@ async def _process_single_entry(
 
         # Compose and write line with enhanced error handling
         line = None  # Initialize to prevent UnboundLocalError
+        repo_root = Path(project.get("root") or settings.project_root).resolve()
         try:
             # Convert meta dict to meta_pairs tuple for _compose_line
             meta_pairs = tuple(meta_payload.items()) if meta_payload else ()
@@ -481,7 +482,7 @@ async def _process_single_entry(
                 meta_pairs=meta_pairs
             )
 
-            line_id = await append_line(log_path, line)
+            line_id = await append_line(log_path, line, repo_root=repo_root)
 
         except Exception as write_error:
             # Try to heal write errors
@@ -493,17 +494,82 @@ async def _process_single_entry(
                 # Try alternative write method
                 try:
                     alternative_line = healed_write["healed_values"].get("line", line)
-                    line_id = await append_line(log_path, alternative_line)
+                    line_id = await append_line(log_path, alternative_line, repo_root=repo_root)
                 except Exception:
                     # Emergency fallback - write to emergency log
-                    emergency_root = Path(project.get("root", settings.project_root))
+                    emergency_root = repo_root
                     emergency_log_path = emergency_root / "emergency_entries.log"
                     emergency_line = f"[{timestamp}] [Agent: {resolved_agent}] {message}\n"
-                    line_id = await append_line(emergency_log_path, emergency_line)
+                    line_id = await append_line(emergency_log_path, emergency_line, repo_root=repo_root)
                     meta_payload["emergency_write"] = True
             else:
                 # Ultimate fallback
                 raise write_error
+
+        tee_paths: List[str] = []
+        tee_reminders: List[Dict[str, Any]] = []
+        try:
+            primary_log_type = entry_log_type
+
+            wants_bug = _should_tee_to_bug(status, resolved_emoji)
+            wants_security = _should_tee_to_security(meta_payload, resolved_emoji)
+
+            # Ensure bug/security entries still land in progress for canonical timeline.
+            wants_progress = primary_log_type in {"bugs", "security"} or wants_bug or wants_security
+
+            if wants_progress and primary_log_type != "progress":
+                progress_path, missing = await _tee_entry_to_log_type(
+                    project=project,
+                    repo_root=repo_root,
+                    log_type="progress",
+                    message=message,
+                    emoji=resolved_emoji,
+                    timestamp=timestamp,
+                    agent=resolved_agent,
+                    meta_payload=meta_payload,
+                    log_cache=log_cache,
+                )
+                if progress_path:
+                    tee_paths.append(str(progress_path))
+                if missing:
+                    tee_reminders.append(_make_missing_meta_reminder(target_log_type="progress", missing_keys=missing))
+
+            if wants_bug and primary_log_type != "bugs":
+                bug_path, missing = await _tee_entry_to_log_type(
+                    project=project,
+                    repo_root=repo_root,
+                    log_type="bugs",
+                    message=message,
+                    emoji=resolved_emoji,
+                    timestamp=timestamp,
+                    agent=resolved_agent,
+                    meta_payload=meta_payload,
+                    log_cache=log_cache,
+                )
+                if bug_path:
+                    tee_paths.append(str(bug_path))
+                if missing:
+                    tee_reminders.append(_make_missing_meta_reminder(target_log_type="bugs", missing_keys=missing))
+
+            if wants_security and primary_log_type != "security":
+                sec_path, missing = await _tee_entry_to_log_type(
+                    project=project,
+                    repo_root=repo_root,
+                    log_type="security",
+                    message=message,
+                    emoji=resolved_emoji,
+                    timestamp=timestamp,
+                    agent=resolved_agent,
+                    meta_payload=meta_payload,
+                    log_cache=log_cache,
+                )
+                if sec_path:
+                    tee_paths.append(str(sec_path))
+                if missing:
+                    tee_reminders.append(_make_missing_meta_reminder(target_log_type="security", missing_keys=missing))
+        except Exception:
+            # Tee failures should never block logging.
+            pass
 
         # Mirror entry into database-backed storage when available, without
         # impacting the primary file append path.
@@ -560,8 +626,10 @@ async def _process_single_entry(
             "ok": True,
             "id": entry_id,
             "path": str(log_path),
+            "paths": sorted({str(log_path), *tee_paths}),
             "line_id": line_id,
             "recent_projects": list(recent),
+            "reminders": list(getattr(context, "reminders", []) or []) + tee_reminders,
         }
 
         if timestamp_warning:
@@ -789,9 +857,9 @@ async def _process_bulk_entries(
                 bulk_error, {"bulk_items": bulk_items, "project": project}
             )
 
-            if healed_bulk["success"]:
+            if healed_bulk.get("success"):
                 # Try alternative bulk processing
-                alternative_items = healed_bulk["healed_values"].get("bulk_items", bulk_items[:1])
+                alternative_items = healed_bulk.get("healed_values", {}).get("bulk_items", bulk_items[:1])
                 results = []
 
                 for item in alternative_items:
@@ -1388,6 +1456,87 @@ def _validate_log_requirements(definition: Dict[str, Any], meta_payload: Dict[st
     return ToolValidator.validate_metadata_requirements(definition, meta_payload)
 
 
+BUG_EMOJIS = {"🐛", "🐞", "🪲"}
+SECURITY_EMOJIS = {"🔐", "🔒", "🛡️"}
+
+
+def _missing_required_meta(definition: Dict[str, Any], meta_payload: Dict[str, Any]) -> List[str]:
+    required = definition.get("metadata_requirements") or []
+    missing: List[str] = []
+    for key in required:
+        value = meta_payload.get(key)
+        if value is None:
+            missing.append(key)
+            continue
+        if isinstance(value, str) and not value.strip():
+            missing.append(key)
+    return missing
+
+
+def _should_tee_to_bug(status: Optional[str], resolved_emoji: str) -> bool:
+    return (status or "").lower() == "bug" or resolved_emoji in BUG_EMOJIS
+
+
+def _should_tee_to_security(meta_payload: Dict[str, Any], resolved_emoji: str) -> bool:
+    security_flag = str(meta_payload.get("security_event", "")).lower() in {"1", "true", "yes"}
+    return security_flag or resolved_emoji in SECURITY_EMOJIS
+
+
+async def _tee_entry_to_log_type(
+    *,
+    project: Dict[str, Any],
+    repo_root: Path,
+    log_type: str,
+    message: str,
+    emoji: str,
+    timestamp: str,
+    agent: str,
+    meta_payload: Dict[str, Any],
+    log_cache: Dict[str, Tuple[Path, Dict[str, Any]]],
+) -> Tuple[Optional[Path], List[str]]:
+    """Best-effort secondary write used to populate auxiliary logs (bugs/security/progress)."""
+    log_path, log_definition = _resolve_log_target(project, log_type, log_cache)
+    meta_copy = dict(meta_payload)
+    meta_copy["log_type"] = log_type
+    missing = _missing_required_meta(log_definition, meta_copy)
+    if missing:
+        return None, missing
+
+    line = _compose_line(
+        emoji=emoji,
+        message=message,
+        timestamp=timestamp,
+        agent=agent,
+        project_name=project.get("name", "unknown"),
+        meta_pairs=tuple(meta_copy.items()),
+    )
+    await append_line(log_path, line, repo_root=repo_root)
+    return log_path, []
+
+
+def _make_missing_meta_reminder(
+    *,
+    target_log_type: str,
+    missing_keys: List[str],
+) -> Dict[str, Any]:
+    if target_log_type == "bugs":
+        example = "meta={severity:high, component:auth, status:open}"
+    elif target_log_type == "security":
+        example = "meta={severity:high, area:sandbox, impact:path-escape}"
+    else:
+        example = "meta={...}"
+
+    missing = ", ".join(missing_keys)
+    return {
+        "level": "info",
+        "score": 300,
+        "emoji": "🧠",
+        "category": "teaching",
+        "message": f"To also write this entry to `{target_log_type}` log, include required meta keys: {missing} (example: {example}).",
+        "tone": "neutral",
+    }
+
+
 async def _process_bulk_items_parallel(
     items: List[Dict[str, Any]],
     project: Dict[str, Any],
@@ -1562,7 +1711,7 @@ async def _process_single_item(
 
     # Rotate if needed (only once per path)
     if log_path not in rotated_paths:
-        await _rotate_if_needed(log_path)
+        await _rotate_if_needed(log_path, repo_root=Path(project.get("root") or settings.project_root).resolve())
         rotated_paths.add(log_path)
 
     requirement_error = _validate_log_requirements(log_definition, meta_payload)
@@ -1598,7 +1747,7 @@ async def _process_single_item(
 
     # Write to file
     try:
-        await append_line(log_path, log_line)
+        await append_line(log_path, log_line, repo_root=Path(project.get("root") or settings.project_root).resolve())
         return {
             "success": True,
             "written_line": log_line,
@@ -1743,7 +1892,7 @@ async def _append_bulk_entries(
             entry_log_type = (item.get("log_type") or base_log_type).lower()
             log_path, log_definition = _resolve_log_target(project, entry_log_type, log_cache)
             if log_path not in rotated_paths:
-                await _rotate_if_needed(log_path)
+                await _rotate_if_needed(log_path, repo_root=Path(project.get("root") or settings.project_root).resolve())
                 rotated_paths.add(log_path)
 
             requirement_error = _validate_log_requirements(log_definition, meta_payload)
@@ -1780,7 +1929,7 @@ async def _append_bulk_entries(
             )
 
             # Write to file immediately (ensures order)
-            await append_line(log_path, line)
+            await append_line(log_path, line, repo_root=Path(project.get("root") or settings.project_root).resolve())
             written_lines.append(line)
             paths_used.append(str(log_path))
 
@@ -1883,7 +2032,7 @@ async def _append_bulk_entries(
     return result
 
 
-async def _rotate_if_needed(path: Path) -> None:
+async def _rotate_if_needed(path: Path, repo_root: Optional[Path] = None) -> None:
     max_bytes = settings.log_max_bytes
     if max_bytes <= 0:
         return
@@ -1893,4 +2042,4 @@ async def _rotate_if_needed(path: Path) -> None:
     if size < max_bytes:
         return
     suffix = utcnow().strftime("%Y%m%d%H%M%S")
-    await rotate_file(path, suffix, confirm=True)
+    await rotate_file(path, suffix, confirm=True, repo_root=repo_root)

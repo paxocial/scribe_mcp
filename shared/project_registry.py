@@ -45,6 +45,7 @@ class ProjectRegistry:
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self._db_path = Path(db_path or settings.sqlite_path).expanduser()
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
     # ------------------------------------------------------------------
@@ -382,6 +383,63 @@ class ProjectRegistry:
             rows = conn.execute(query, params).fetchall()
 
         return [self._row_to_project_info(r) for r in rows]
+
+    def get_last_known_project(
+        self,
+        *,
+        candidates: Optional[List[str]] = None,
+    ) -> Optional[ProjectInfo]:
+        """Return the most recently accessed project (optionally among candidates)."""
+        clauses = ["1=1"]
+        params: List[Any] = []
+        if candidates:
+            placeholders = ",".join("?" for _ in candidates)
+            clauses.append(f"p.name IN ({placeholders})")
+            params.extend(candidates)
+
+        where_clause = " AND ".join(clauses)
+        query = f"""
+            SELECT
+                p.name AS project_slug,
+                p.name AS project_name,
+                p.description,
+                COALESCE(p.status, 'planning') AS status,
+                p.created_at,
+                p.last_entry_at,
+                p.last_access_at,
+                p.last_status_change,
+                COALESCE(m.total_entries, 0) AS total_entries,
+                COALESCE(df.total_files, 0) AS total_files,
+                COALESCE(ph.total_phases, 0) AS total_phases,
+                p.tags,
+                p.meta
+            FROM scribe_projects p
+            LEFT JOIN scribe_metrics m
+                ON m.project_id = p.id
+            LEFT JOIN (
+                SELECT project_id, COUNT(*) AS total_files
+                FROM dev_plans
+                GROUP BY project_id
+            ) AS df
+                ON df.project_id = p.id
+            LEFT JOIN (
+                SELECT project_id, COUNT(*) AS total_phases
+                FROM phases
+                GROUP BY project_id
+            ) AS ph
+                ON ph.project_id = p.id
+            WHERE {where_clause}
+            ORDER BY COALESCE(p.last_access_at, p.last_entry_at, p.created_at) DESC
+            LIMIT 1
+        """
+
+        with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(query, params).fetchone()
+
+        if not row:
+            return None
+        return self._row_to_project_info(row)
 
     # ------------------------------------------------------------------
     # Internal helpers

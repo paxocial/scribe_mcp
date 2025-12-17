@@ -39,12 +39,17 @@ except ImportError:
     HAS_FCNTL = False
 
 
-def _ensure_safe_path(path: Union[str, Path], operation: str = "read", context: Optional[Dict[str, Any]] = None) -> Path:
+def _ensure_safe_path(
+    path: Union[str, Path],
+    operation: str = "read",
+    context: Optional[Dict[str, Any]] = None,
+    repo_root: Optional[Path] = None,
+) -> Path:
     """
     Validate path access against the repo sandbox before performing operations.
     """
-    repo_root = settings.project_root
-    return safe_file_operation(repo_root, Path(path), operation=operation, context=context or {"component": "files"})
+    root = (repo_root or settings.project_root).resolve()
+    return safe_file_operation(root, Path(path), operation=operation, context=context or {"component": "files"})
 
 
 class FileLockError(Exception):
@@ -58,7 +63,12 @@ class AtomicFileError(Exception):
 
 
 @contextmanager
-def file_lock(file_path: Union[str, Path], mode: str = 'r+', timeout: float = 30.0):
+def file_lock(
+    file_path: Union[str, Path],
+    mode: str = 'r+',
+    timeout: float = 30.0,
+    repo_root: Optional[Path] = None,
+):
     """
     Cross-platform file locking context manager.
 
@@ -78,7 +88,7 @@ def file_lock(file_path: Union[str, Path], mode: str = 'r+', timeout: float = 30
     Raises:
         FileLockError: If lock cannot be acquired within timeout
     """
-    file_path = _ensure_safe_path(file_path, operation="lock")
+    file_path = _ensure_safe_path(file_path, operation="lock", repo_root=repo_root)
     lock_file = file_path.with_suffix(file_path.suffix + '.lock')
 
     # Create lock file
@@ -163,13 +173,20 @@ class WriteAheadLog:
     to the main file. On startup, any uncommitted operations are replayed.
     """
 
-    def __init__(self, log_path: Union[str, Path]):
-        safe_log = _ensure_safe_path(log_path, operation="append", context={"component": "wal"})
+    def __init__(self, log_path: Union[str, Path], repo_root: Optional[Path] = None):
+        self.repo_root = repo_root
+        safe_log = _ensure_safe_path(
+            log_path,
+            operation="append",
+            context={"component": "wal"},
+            repo_root=self.repo_root,
+        )
         self.log_path = safe_log
         self.journal_path = _ensure_safe_path(
             safe_log.with_suffix(safe_log.suffix + '.journal'),
             operation="append",
-            context={"component": "wal", "type": "journal"}
+            context={"component": "wal", "type": "journal"},
+            repo_root=self.repo_root,
         )
 
     def write_entry(self, entry: Dict[str, Any]) -> str:
@@ -188,7 +205,7 @@ class WriteAheadLog:
 
         journal_line = json.dumps(entry) + '\n'
 
-        with file_lock(self.journal_path, 'a') as f:
+        with file_lock(self.journal_path, 'a', repo_root=self.repo_root) as f:
             f.write(journal_line)
             f.flush()
             os.fsync(f.fileno())
@@ -203,7 +220,7 @@ class WriteAheadLog:
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
-        with file_lock(self.journal_path, 'a') as f:
+        with file_lock(self.journal_path, 'a', repo_root=self.repo_root) as f:
             f.write(json.dumps(commit_entry) + '\n')
             f.flush()
             os.fsync(f.fileno())
@@ -221,7 +238,7 @@ class WriteAheadLog:
         replayed = 0
         uncommitted = []
 
-        with file_lock(self.journal_path, 'r') as f:
+        with file_lock(self.journal_path, 'r', repo_root=self.repo_root) as f:
             for line in f:
                 try:
                     entry = json.loads(line.strip())
@@ -249,13 +266,18 @@ class WriteAheadLog:
 
     def _apply_append(self, content: str):
         """Apply an append operation to the main log."""
-        with file_lock(self.log_path, 'a') as f:
+        with file_lock(self.log_path, 'a', repo_root=self.repo_root) as f:
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
 
 
-def atomic_write(file_path: Union[str, Path], content: str, mode: str = 'w') -> None:
+def atomic_write(
+    file_path: Union[str, Path],
+    content: str,
+    mode: str = 'w',
+    repo_root: Optional[Path] = None,
+) -> None:
     """
     Atomically write content to a file.
 
@@ -273,7 +295,12 @@ def atomic_write(file_path: Union[str, Path], content: str, mode: str = 'w') -> 
         AtomicFileError: If atomic operation fails
         ValueError: If mode is not 'w' (only overwrite is atomic)
     """
-    file_path = _ensure_safe_path(file_path, operation="write", context={"component": "files", "op": "atomic_write"})
+    file_path = _ensure_safe_path(
+        file_path,
+        operation="write",
+        context={"component": "files", "op": "atomic_write"},
+        repo_root=repo_root,
+    )
 
     # Validate mode - only overwrite is atomic
     if mode != 'w':
@@ -315,7 +342,12 @@ def atomic_write(file_path: Union[str, Path], content: str, mode: str = 'w') -> 
         raise AtomicFileError(f"Atomic write failed: {e}")
 
 
-async def async_atomic_write(file_path: Union[str, Path], content: str, mode: str = 'w') -> None:
+async def async_atomic_write(
+    file_path: Union[str, Path],
+    content: str,
+    mode: str = 'w',
+    repo_root: Optional[Path] = None,
+) -> None:
     """
     Asynchronously atomically write content to a file.
 
@@ -334,10 +366,10 @@ async def async_atomic_write(file_path: Union[str, Path], content: str, mode: st
         AtomicFileError: If atomic operation fails
         ValueError: If mode is not 'w' (only overwrite is atomic)
     """
-    await asyncio.to_thread(atomic_write, file_path, content, mode)
+    await asyncio.to_thread(atomic_write, file_path, content, mode, repo_root)
 
 
-def preflight_backup(file_path: Union[str, Path]) -> Path:
+def preflight_backup(file_path: Union[str, Path], repo_root: Optional[Path] = None) -> Path:
     """
     Create a preflight backup of the file.
 
@@ -347,7 +379,12 @@ def preflight_backup(file_path: Union[str, Path]) -> Path:
     Returns:
         Path to the backup file
     """
-    file_path = _ensure_safe_path(file_path, operation="read", context={"component": "files", "op": "backup"})
+    file_path = _ensure_safe_path(
+        file_path,
+        operation="read",
+        context={"component": "files", "op": "backup"},
+        repo_root=repo_root,
+    )
 
     if not file_path.exists():
         raise AtomicFileError(f"Cannot backup non-existent file: {file_path}")
@@ -365,6 +402,7 @@ def verify_file_integrity(
     *,
     include_line_count: bool = True,
     include_hash: bool = True,
+    repo_root: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Verify file integrity and return metadata.
@@ -375,7 +413,12 @@ def verify_file_integrity(
     Returns:
         Dictionary with integrity information
     """
-    file_path = _ensure_safe_path(file_path, operation="read", context={"component": "files", "op": "verify"})
+    file_path = _ensure_safe_path(
+        file_path,
+        operation="read",
+        context={"component": "files", "op": "verify"},
+        repo_root=repo_root,
+    )
 
     if not file_path.exists():
         return {
@@ -431,13 +474,13 @@ def verify_file_integrity(
         }
 
 
-async def ensure_parent(path: Path) -> None:
+async def ensure_parent(path: Path, repo_root: Optional[Path] = None) -> None:
     """Create parent directories for the given path if missing."""
-    safe_path = _ensure_safe_path(path, operation="mkdir", context={"component": "files"})
+    safe_path = _ensure_safe_path(path, operation="mkdir", context={"component": "files"}, repo_root=repo_root)
     await asyncio.to_thread(safe_path.parent.mkdir, parents=True, exist_ok=True)
 
 
-async def append_line(path: Path, line: str, use_wal: bool = True) -> None:
+async def append_line(path: Path, line: str, use_wal: bool = True, repo_root: Optional[Path] = None) -> None:
     """
     Bulletproof append a single line to the provided file path.
 
@@ -446,19 +489,19 @@ async def append_line(path: Path, line: str, use_wal: bool = True) -> None:
         line: Line content to append
         use_wal: Whether to use Write-Ahead Log for crash safety
     """
-    path = _ensure_safe_path(path, operation="append", context={"component": "logs"})
-    await ensure_parent(path)
+    path = _ensure_safe_path(path, operation="append", context={"component": "logs"}, repo_root=repo_root)
+    await ensure_parent(path, repo_root=repo_root)
 
     if use_wal:
-        await asyncio.to_thread(_write_line_with_wal, path, line)
+        await asyncio.to_thread(_write_line_with_wal, path, line, repo_root)
     else:
-        await asyncio.to_thread(_write_line, path, line)
+        await asyncio.to_thread(_write_line, path, line, True, repo_root)
 
 
-def _write_line_with_wal(path: Path, line: str) -> None:
+def _write_line_with_wal(path: Path, line: str, repo_root: Optional[Path] = None) -> None:
     """Write line with Write-Ahead Log for crash safety."""
-    path = _ensure_safe_path(path, operation="append", context={"component": "wal"})
-    wal = WriteAheadLog(path)
+    path = _ensure_safe_path(path, operation="append", context={"component": "wal"}, repo_root=repo_root)
+    wal = WriteAheadLog(path, repo_root=repo_root)
 
     # Journal the operation first
     entry_id = wal.write_entry({
@@ -469,7 +512,7 @@ def _write_line_with_wal(path: Path, line: str) -> None:
 
     try:
         # Apply the operation with file locking
-        with file_lock(path, 'a') as f:
+        with file_lock(path, 'a', repo_root=repo_root) as f:
             f.write(line)
             if not line.endswith("\n"):
                 f.write("\n")
@@ -483,7 +526,7 @@ def _write_line_with_wal(path: Path, line: str) -> None:
         raise
 
 
-def _write_line(path: Path, line: str, use_lock: bool = True) -> None:
+def _write_line(path: Path, line: str, use_lock: bool = True, repo_root: Optional[Path] = None) -> None:
     """
     Write line with optional file locking for safety.
 
@@ -492,9 +535,9 @@ def _write_line(path: Path, line: str, use_lock: bool = True) -> None:
         line: Line content to write
         use_lock: Whether to use file locking
     """
-    path = _ensure_safe_path(path, operation="append", context={"component": "logs"})
+    path = _ensure_safe_path(path, operation="append", context={"component": "logs"}, repo_root=repo_root)
     if use_lock:
-        with file_lock(path, 'a') as handle:
+        with file_lock(path, 'a', repo_root=repo_root) as handle:
             handle.write(line)
             if not line.endswith("\n"):
                 handle.write("\n")
@@ -507,14 +550,14 @@ def _write_line(path: Path, line: str, use_lock: bool = True) -> None:
                 handle.write("\n")
 
 
-async def read_tail(path: Path, count: int) -> List[str]:
+async def read_tail(path: Path, count: int, repo_root: Optional[Path] = None) -> List[str]:
     """Return the last `count` lines from `path`."""
-    safe_path = _ensure_safe_path(path, operation="read", context={"component": "logs", "op": "tail"})
-    return await asyncio.to_thread(_read_tail_sync, safe_path, count)
+    safe_path = _ensure_safe_path(path, operation="read", context={"component": "logs", "op": "tail"}, repo_root=repo_root)
+    return await asyncio.to_thread(_read_tail_sync, safe_path, count, repo_root)
 
 
-def _read_tail_sync(path: Path, count: int) -> List[str]:
-    path = _ensure_safe_path(path, operation="read", context={"component": "logs", "op": "tail"})
+def _read_tail_sync(path: Path, count: int, repo_root: Optional[Path] = None) -> List[str]:
+    path = _ensure_safe_path(path, operation="read", context={"component": "logs", "op": "tail"}, repo_root=repo_root)
     if count <= 0:
         return []
     try:
@@ -525,7 +568,14 @@ def _read_tail_sync(path: Path, count: int) -> List[str]:
     return [line.rstrip("\n") for line in tail]
 
 
-async def rotate_file(path: Path, suffix: str | None, confirm: bool = False, dry_run: bool = False, template_content: Optional[str] = None) -> Path:
+async def rotate_file(
+    path: Path,
+    suffix: str | None,
+    confirm: bool = False,
+    dry_run: bool = False,
+    template_content: Optional[str] = None,
+    repo_root: Optional[Path] = None,
+) -> Path:
     """
     Bulletproof rotate `path` to a timestamped copy and return the archive path.
 
@@ -542,7 +592,7 @@ async def rotate_file(path: Path, suffix: str | None, confirm: bool = False, dry
     Raises:
         AtomicFileError: If rotation fails
     """
-    path = _ensure_safe_path(path, operation="rotate", context={"component": "logs"})
+    path = _ensure_safe_path(path, operation="rotate", context={"component": "logs"}, repo_root=repo_root)
     suffix_part = suffix or "archive"
     archive = path.with_name(f"{path.name}.{suffix_part}.md")
 
@@ -558,7 +608,7 @@ async def rotate_file(path: Path, suffix: str | None, confirm: bool = False, dry
         return archive
 
     # Pre-flight backup
-    backup_path = await asyncio.to_thread(preflight_backup, path)
+    backup_path = await asyncio.to_thread(preflight_backup, path, repo_root)
 
     # Lock order: journal → log
     log_lock_acquired = False
@@ -568,11 +618,11 @@ async def rotate_file(path: Path, suffix: str | None, confirm: bool = False, dry
 
         # Create temp file for new log content
         temp_path = path.with_suffix(path.suffix + '.new')
-        await asyncio.to_thread(_write_temp_file, temp_path, new_log_content)
+        await asyncio.to_thread(_write_temp_file, temp_path, new_log_content, repo_root)
 
         try:
             # Acquire log lock BEFORE any file operations
-            with file_lock(path, 'r+', timeout=30.0) as f:
+            with file_lock(path, 'r+', timeout=30.0, repo_root=repo_root) as f:
                 log_lock_acquired = True
 
                 # Create archive with unique name to avoid overwrites
@@ -580,7 +630,7 @@ async def rotate_file(path: Path, suffix: str | None, confirm: bool = False, dry
                     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")[:-3]
                     archive = archive.with_name(f"{archive.stem}_{timestamp}{archive.suffix}")
 
-                await ensure_parent(archive)
+                await ensure_parent(archive, repo_root=repo_root)
 
                 # Atomic rotation: rename original to archive
                 await asyncio.to_thread(path.rename, archive)
@@ -619,16 +669,21 @@ async def rotate_file(path: Path, suffix: str | None, confirm: bool = False, dry
             pass
 
 
-def _write_temp_file(temp_path: Path, content: str) -> None:
+def _write_temp_file(temp_path: Path, content: str, repo_root: Optional[Path] = None) -> None:
     """Write content to temporary file."""
-    temp_path = _ensure_safe_path(temp_path, operation="write", context={"component": "files", "op": "temp"})
+    temp_path = _ensure_safe_path(
+        temp_path,
+        operation="write",
+        context={"component": "files", "op": "temp"},
+        repo_root=repo_root,
+    )
     with open(temp_path, 'w', encoding='utf-8') as f:
         f.write(content)
         f.flush()
         os.fsync(f.fileno())
 
 
-def _create_new_log(path: Path) -> None:
+def _create_new_log(path: Path, repo_root: Optional[Path] = None) -> None:
     """
     Create a new progress log file with proper header.
 
@@ -637,8 +692,8 @@ def _create_new_log(path: Path) -> None:
     Args:
         path: Path where to create the new log
     """
-    path = _ensure_safe_path(path, operation="write", context={"component": "logs", "op": "new"})
-    with file_lock(path, 'w') as f:
+    path = _ensure_safe_path(path, operation="write", context={"component": "logs", "op": "new"}, repo_root=repo_root)
+    with file_lock(path, 'w', repo_root=repo_root) as f:
         f.write("# Progress Log\n\n")
         f.flush()
         os.fsync(f.fileno())

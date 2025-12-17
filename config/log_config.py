@@ -4,12 +4,24 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
 from scribe_mcp.config.settings import settings
-from scribe_mcp.tools.project_utils import slugify_project_name
+
+_SLUG_CLEANER = re.compile(r"[^0-9a-z_]+")
+
+
+def _slugify_project_name(name: str) -> str:
+    """Return a filesystem-friendly slug for the provided project name.
+
+    Keep this local to avoid importing from scribe_mcp.tools.* (which registers MCP tools
+    at import time and can create circular imports).
+    """
+    normalised = name.strip().lower().replace(" ", "_").replace("-", "_")
+    return _SLUG_CLEANER.sub("_", normalised).strip("_") or "project"
 
 # Setup structured logging for configuration operations
 config_logger = logging.getLogger(__name__)
@@ -96,11 +108,11 @@ def resolve_log_path(project: Dict[str, Any], definition: Dict[str, Any]) -> Pat
 
     docs_dir = project.get("docs_dir") or (Path(project.get("progress_log", "")).parent if project.get("progress_log") else "")
     if not docs_dir:
-        docs_dir = Path(project.get("root", settings.project_root)) / "docs" / "dev_plans" / slugify_project_name(project["name"])
+        docs_dir = Path(project.get("root", settings.project_root)) / "docs" / "dev_plans" / _slugify_project_name(project["name"])
 
     context = {
-        "project_slug": slugify_project_name(project["name"]),
-        "PROJECT_SLUG": slugify_project_name(project["name"]),
+        "project_slug": _slugify_project_name(project["name"]),
+        "PROJECT_SLUG": _slugify_project_name(project["name"]),
         "project_root": project.get("root") or str(settings.project_root),
         "PROJECT_ROOT": project.get("root") or str(settings.project_root),
         "progress_log": project.get("progress_log"),

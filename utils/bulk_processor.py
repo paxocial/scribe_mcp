@@ -65,16 +65,10 @@ class BulkProcessor:
         if items is not None or items_list is not None:
             return True
 
-        # Check for multiline content
-        newline_count = message.count('\n')
-        pipe_count = message.count('|')
-
-        # Use bulk mode if: many lines, contains pipes (potential delimiter issues), or very long
-        return (
-            newline_count > 0 or  # Any newlines
-            pipe_count > 0 or      # Pipe characters that might cause issues
-            len(message) > length_threshold     # Long messages
-        )
+        # Check for multiline content. Bulk mode is intended for multi-entry operations
+        # (explicit `items`/`items_list`) or auto-splitting multiline content.
+        # Long single-line messages and pipe characters should remain single-entry logs.
+        return message.count("\n") > 0
 
     @staticmethod
     def split_multiline_content(

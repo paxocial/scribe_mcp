@@ -214,13 +214,9 @@ async def read_recent(
             state_snapshot=state_snapshot,
         )
     except ProjectResolutionError as exc:
-        base_response = {
-            "ok": False,
-            "error": "No project configured.",
-            "suggestion": "Invoke set_project before reading logs",
-            "recent_projects": list(exc.recent_projects),
-            "reminders": [],
-        }
+        base_response = _READ_RECENT_HELPER.translate_project_error(exc)
+        base_response["suggestion"] = "Invoke set_project before reading logs"
+        base_response.setdefault("reminders", [])
 
         # Add healing information if parameters were healed
         if healing_applied:
@@ -286,12 +282,15 @@ async def read_recent(
 
             # Apply Phase 1 token budget management
             try:
-                # Use enhanced token budget management
-                managed_response, token_count, items_truncated = _READ_RECENT_HELPER.token_budget_manager.apply_token_budget_to_response(
-                    response_data=response,
+                truncated, token_count, items_truncated = _READ_RECENT_HELPER.token_budget_manager.truncate_response_to_budget(
+                    response,
                     token_limit=None,  # Use default budget
-                    preserve_structure=True
+                    preserve_structure=True,
                 )
+                managed_response = truncated if isinstance(truncated, dict) else {"result": truncated}
+                managed_response["token_count"] = token_count
+                managed_response["items_truncated"] = items_truncated
+                managed_response["token_limit"] = _READ_RECENT_HELPER.token_budget_manager.default_token_limit
 
                 # Add healing information to response if parameters were healed
                 if healing_applied:
@@ -357,7 +356,11 @@ async def read_recent(
     # File-based fallback with pagination
     # Read more lines than needed to account for filtering
     fetch_limit = page_size * 3  # Fetch 3x to account for filter reductions
-    all_lines = await read_tail(_progress_log_path(project), fetch_limit)
+    all_lines = await read_tail(
+        _progress_log_path(project),
+        fetch_limit,
+        repo_root=Path(project.get("root") or settings.project_root).resolve(),
+    )
     all_lines = _apply_line_filters(all_lines, filters)
 
     # Apply pagination
@@ -391,12 +394,15 @@ async def read_recent(
 
     # Apply Phase 1 token budget management for file-based fallback
     try:
-        # Use enhanced token budget management
-        managed_response, token_count, items_truncated = _READ_RECENT_HELPER.token_budget_manager.apply_token_budget_to_response(
-            response_data=response,
+        truncated, token_count, items_truncated = _READ_RECENT_HELPER.token_budget_manager.truncate_response_to_budget(
+            response,
             token_limit=None,  # Use default budget
-            preserve_structure=True
+            preserve_structure=True,
         )
+        managed_response = truncated if isinstance(truncated, dict) else {"result": truncated}
+        managed_response["token_count"] = token_count
+        managed_response["items_truncated"] = items_truncated
+        managed_response["token_limit"] = _READ_RECENT_HELPER.token_budget_manager.default_token_limit
 
         # Add healing information to response if parameters were healed
         if healing_applied:

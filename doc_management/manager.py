@@ -128,7 +128,8 @@ async def apply_doc_change(
 
         # Resolve and validate document path
         doc_path = _resolve_doc_path(project, doc)
-        await ensure_parent(doc_path)
+        repo_root = Path(project["root"]).resolve()
+        await ensure_parent(doc_path, repo_root=repo_root)
 
         # Get original content and metadata
         original_text = ""
@@ -192,7 +193,7 @@ async def apply_doc_change(
         if not dry_run:
             try:
                 # Write the file
-                await async_atomic_write(doc_path, updated_text, mode="w")
+                await async_atomic_write(doc_path, updated_text, mode="w", repo_root=repo_root)
 
                 # Verify the write was successful
                 verification_passed = await _verify_file_write(doc_path, updated_text, after_hash)
@@ -225,7 +226,7 @@ async def apply_doc_change(
                 # Attempt rollback if write failed
                 try:
                     if original_text and doc_path.exists():
-                        await async_atomic_write(doc_path, original_text, mode="w")
+                        await async_atomic_write(doc_path, original_text, mode="w", repo_root=repo_root)
                         duration_ms = (time.time() - start_time) * 1000
                         _log_operation(
                             level="warning",

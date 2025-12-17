@@ -109,6 +109,7 @@ async def resolve_logging_context(
                 project,
                 tool_name=tool_name,
                 state=state_snapshot,
+                agent_id=agent_id,
             )
         except Exception:
             # Reminders should never block tool execution; ignore failures.

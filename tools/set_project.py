@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from scribe_mcp import server as server_module
 from scribe_mcp.config.settings import settings
 from scribe_mcp.server import app
+from scribe_mcp import reminders
 from scribe_mcp.tools.agent_project_utils import ensure_agent_session
 from scribe_mcp.tools.project_utils import (
     list_project_configs,
@@ -50,6 +51,7 @@ async def set_project(
     # Reminder and notification settings
     reminder_settings: Optional[Dict[str, Any]] = None,
     notification_config: Optional[Dict[str, Any]] = None,
+    reset_reminders: bool = False,
     # Quick emoji/agent settings (for convenience)
     emoji: Optional[str] = None,  # Default emoji for the project
     project_agent: Optional[str] = None,  # Default agent for the project (alias for agent_id)
@@ -167,6 +169,21 @@ async def set_project(
         "description": description,
         "tags": tags or [],
     }
+
+    # Optional: allow agents to clear reminder cooldowns if they're confused.
+    # This is scoped to (project_root + agent_id) to avoid impacting other agents.
+    if reset_reminders:
+        try:
+            cleared = reminders.reset_reminder_cooldowns(
+                project_root=str(resolved_root),
+                agent_id=agent_id,
+            )
+            project_data.setdefault("meta", {})
+            project_data["meta"]["reminders_reset"] = True
+            project_data["meta"]["reminders_reset_count"] = cleared
+        except Exception as exc:  # pragma: no cover - defensive
+            project_data.setdefault("meta", {})
+            project_data["meta"]["reminders_reset_error"] = str(exc)
 
     # Create/upsert project in database first
     backend = server_module.storage_backend

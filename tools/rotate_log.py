@@ -916,14 +916,17 @@ async def _execute_rotation_with_fallbacks(
                             )
 
                             # Execute file rotation
+                            repo_root = Path(project.get("root") or settings.project_root).resolve()
                             archive_path = await rotate_file(
                                 log_path,
                                 suffix=operation.get("suffix"),
-                                backup=True
+                                confirm=True,
+                                repo_root=repo_root,
                             )
 
                             # Verify rotation integrity
-                            integrity_ok = await verify_file_integrity(archive_path)
+                            archive_info = verify_file_integrity(archive_path, repo_root=repo_root)
+                            integrity_ok = bool(archive_info.get("exists")) and not archive_info.get("error")
 
                             rotation_result = {
                                 "log_type": log_type,
@@ -1557,6 +1560,7 @@ async def _rotate_single_log(
             archive_suffix,
             confirm=should_rotate,
             dry_run=True,
+            repo_root=Path(project.get("root") or settings.project_root).resolve(),
         )
         current_size_mb = round(snapshot["size_bytes"] / (1024 * 1024), 3) if snapshot["size_bytes"] else 0.0
         estimation_decision_label = estimation_decision or ("rotate" if should_rotate else "manual")
@@ -1613,9 +1617,13 @@ async def _rotate_single_log(
         confirm=True,
         dry_run=False,
         template_content=None,
+        repo_root=Path(project.get("root") or settings.project_root).resolve(),
     )
 
-    archive_info = verify_file_integrity(archive_path)
+    archive_info = verify_file_integrity(
+        archive_path,
+        repo_root=Path(project.get("root") or settings.project_root).resolve(),
+    )
     archive_hash = archive_info.get("sha256")
     archive_size = archive_info.get("size_bytes")
     rotated_entries = archive_info.get("line_count")

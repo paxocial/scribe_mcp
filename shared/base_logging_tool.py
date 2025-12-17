@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from scribe_mcp.utils.response import default_formatter
+from scribe_mcp.shared.project_registry import ProjectRegistry
 
 from .logging_utils import (
     LoggingContext,
@@ -112,4 +114,21 @@ class LoggingToolMixin:
         payload = {"ok": False, "error": str(error)}
         if error.recent_projects:
             payload["recent_projects"] = list(error.recent_projects)
+
+        # Best-effort hint: show last known project + recency without auto-restoring.
+        try:
+            registry = ProjectRegistry()
+            last_known = registry.get_last_known_project(candidates=list(error.recent_projects))
+            if last_known and last_known.last_access_at:
+                minutes_ago = int(
+                    max(
+                        0.0,
+                        (datetime.now(timezone.utc) - last_known.last_access_at).total_seconds() / 60.0,
+                    )
+                )
+                payload["last_known_project"] = last_known.project_name
+                payload["last_known_project_minutes_ago"] = minutes_ago
+                payload["last_known_project_last_access_at"] = last_known.last_access_at.isoformat()
+        except Exception:
+            pass
         return payload

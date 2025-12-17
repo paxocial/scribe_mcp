@@ -370,6 +370,7 @@ class TestExceptionHealer:
         assert result["healing_type"] == "document_operation"
         assert "fallback_strategies_tried" in result
         assert len(result["fallback_strategies_tried"]) > 0
+        assert "healed_values" in result
 
     def test_heal_document_operation_error_create_missing(self):
         """Test document operation error healing by creating missing document."""
@@ -384,6 +385,7 @@ class TestExceptionHealer:
         assert result["healing_type"] == "document_operation"
         assert result["success"] is True
         assert result["final_strategy"] in ["create_missing", "emergency"]
+        assert "healed_values" in result
 
     def test_heal_document_operation_error_emergency_fallback(self):
         """Test document operation error healing with emergency fallback."""
@@ -412,6 +414,8 @@ class TestExceptionHealer:
         assert result["healing_type"] == "bulk_processing"
         assert result["success"] is True
         assert result["recovery_strategy"] == "empty_batch"
+        assert "healed_values" in result
+        assert "bulk_items" in result["healed_values"]
 
     def test_heal_bulk_processing_error_with_items(self):
         """Test bulk processing error healing with items to process."""
@@ -429,6 +433,38 @@ class TestExceptionHealer:
         assert "result" in result
         assert result["partial_success"] is True
         assert result["success"] is True
+        assert "healed_values" in result
+        assert "bulk_items" in result["healed_values"]
+
+    def test_heal_bulk_processing_error_accepts_bulk_items_key(self):
+        """Regression: some callers pass `bulk_items` instead of `items`."""
+        exception = RuntimeError("Bulk processing failed")
+        context = {"bulk_items": [{"id": 1}, {"id": 2}], "operation": "process"}
+
+        result = ExceptionHealer.heal_bulk_processing_error(exception, context)
+
+        assert result["healing_type"] == "bulk_processing"
+        assert result["success"] is True
+        assert "healed_values" in result
+        assert "bulk_items" in result["healed_values"]
+
+    def test_heal_emergency_exception_always_provides_healed_values(self):
+        """Regression: emergency healing must keep the `healed_values` key for callers."""
+        exception = RuntimeError("boom")
+        result = ExceptionHealer.heal_emergency_exception(exception)
+
+        assert result["success"] is True
+        assert "healed_values" in result
+        assert isinstance(result["healed_values"], dict)
+
+    def test_heal_operation_specific_error_failure_shape_has_healed_values(self):
+        """Regression: even failure responses should include `healed_values` for stability."""
+        exception = RuntimeError("not a test exception")
+        result = ExceptionHealer.heal_operation_specific_error(exception, "append_entry")
+
+        assert result["success"] is False
+        assert "healed_values" in result
+        assert isinstance(result["healed_values"], dict)
 
     def test_heal_rotation_error_permission_issues(self):
         """Test rotation error healing for permission issues."""

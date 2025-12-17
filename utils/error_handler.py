@@ -638,7 +638,11 @@ class ExceptionHealer:
             "healing_strategies": [],
             "corrected_parameters": {},
             "original_parameters": context.get("parameters", {}),
-            "fallback_used": False
+            "fallback_used": False,
+            # Backwards-compatible interface: callers may expect `success`, `ok`, and `healed_values`.
+            "success": True,
+            "ok": True,
+            "healed_values": {},
         }
 
         parameters = context.get("parameters", {}).copy()
@@ -682,6 +686,8 @@ class ExceptionHealer:
                 healing_result["healing_strategies"].append("Missing parameter combination healing")
 
         healing_result["healed_parameters"] = parameters
+        # Back-compat alias used across tools.
+        healing_result["healed_values"] = parameters
         healing_result["strategies_applied"] = len(healing_result["healing_strategies"])
 
         return healing_result
@@ -793,6 +799,8 @@ class ExceptionHealer:
             "exception_type": type(exception).__name__,
             "fallback_strategy": fallback_strategy,
             "guaranteed_success": True,
+            # Backwards-compatible interface: callers may expect `healed_values`.
+            "healed_values": {},
             "limitations": ["Functionality may be reduced", "Some features may be disabled"],
             "recovery_time": "immediate"
         }
@@ -864,7 +872,9 @@ class ExceptionHealer:
                     "operation_context": operation_context,
                     "fallback_strategy": fallback_strategy,
                     "healing_applied": False,
-                    "reason": "Exception not suitable for operation-specific healing"
+                    "reason": "Exception not suitable for operation-specific healing",
+                    # Backwards-compatible interface: callers may expect `healed_values` even on failures.
+                    "healed_values": {},
                 }
 
             # Initialize healing result with required interface keys
@@ -877,7 +887,9 @@ class ExceptionHealer:
                 "operation_context": operation_context,
                 "fallback_strategy": fallback_strategy,
                 "healing_applied": True,
-                "result": None
+                "result": None,
+                # Backwards-compatible interface: callers may expect `healed_values`.
+                "healed_values": {},
             }
 
             # Apply operation-specific healing strategies
@@ -1120,7 +1132,9 @@ class ExceptionHealer:
             "fallback_strategies_tried": [],
             "success": False,
             "final_strategy": None,
-            "result": None
+            "result": None,
+            # Backwards-compatible interface: callers may expect `healed_values`.
+            "healed_values": {},
         }
 
         document_path = context.get("document_path")
@@ -1151,6 +1165,7 @@ class ExceptionHealer:
                 healing_result["success"] = True
                 healing_result["final_strategy"] = "alternative_path"
                 healing_result["result"] = {"alternative_path": alt_path}
+                healing_result["healed_values"] = {"document_path": alt_path}
                 break
 
         # Strategy 4: Apply emergency document operation for other errors
@@ -1181,15 +1196,19 @@ class ExceptionHealer:
             "items_failed": 0,
             "recovery_strategy": None,
             "success": False,
-            "partial_success": False
+            "partial_success": False,
+            # Backwards-compatible interface: callers may expect `healed_values`.
+            "healed_values": {"bulk_items": []},
         }
 
-        items = context.get("items", [])
+        # Callers have historically used multiple context shapes (`items` vs `bulk_items`).
+        items = context.get("items") or context.get("bulk_items") or []
         operation = context.get("operation", "process")
 
         if not items:
             healing_result["recovery_strategy"] = "empty_batch"
             healing_result["success"] = True
+            healing_result["healed_values"] = {"bulk_items": []}
             return healing_result
 
         # Strategy 1: Process items individually with healing
@@ -1211,6 +1230,7 @@ class ExceptionHealer:
 
         healing_result["items_processed"] = len(successful_items)
         healing_result["items_failed"] = len(failed_items)
+        healing_result["healed_values"] = {"bulk_items": successful_items}
 
         if successful_items:
             healing_result["partial_success"] = True
@@ -1249,7 +1269,9 @@ class ExceptionHealer:
             "rotation_type": context.get("rotation_type", "standard"),
             "fallback_strategies": [],
             "success": False,
-            "rotation_completed": False
+            "rotation_completed": False,
+            # Backwards-compatible interface: callers may expect `healed_values`.
+            "healed_values": {},
         }
 
         # Strategy 1: Simplified rotation for permission/access issues

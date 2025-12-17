@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +43,8 @@ class ReminderContext:
     """Context for reminder generation."""
     tool_name: str
     project_name: Optional[str]
+    project_root: Optional[str]
+    agent_id: Optional[str]
     total_entries: int
     minutes_since_log: Optional[float]
     last_log_time: Optional[datetime]
@@ -78,6 +81,8 @@ class ReminderEngine:
         self.fallback_language = "en-US"
 
         self.history = ReminderHistory()
+        self._cooldown_cache_path: Optional[Path] = None
+        self._cooldown_cache_dirty = False
 
         self._load_configuration()
 
@@ -96,6 +101,8 @@ class ReminderEngine:
 
             self._load_reminders()
             self._load_rules()
+            self._configure_cooldown_cache()
+            self._load_cooldown_cache()
 
         except Exception as e:
             print(f"Warning: Failed to load reminder configuration: {e}")
@@ -175,10 +182,109 @@ class ReminderEngine:
 
         self.history.last_cleanup = now
 
+        # Keep the persisted cooldown cache bounded as well.
+        self._cleanup_cooldown_cache()
+        self._save_cooldown_cache()
+
+    def _configure_cooldown_cache(self) -> None:
+        override = os.environ.get("SCRIBE_REMINDER_CACHE_PATH")
+        if override:
+            self._cooldown_cache_path = Path(override).expanduser()
+            return
+
+        behavior = self.config.get("behavior", {}) if isinstance(self.config, dict) else {}
+        path_raw = behavior.get("cooldown_cache_path", "data/reminder_cooldowns.json")
+        path_obj = Path(path_raw).expanduser()
+        if not path_obj.is_absolute():
+            path_obj = (settings.project_root / path_obj).resolve()
+        self._cooldown_cache_path = path_obj
+
+    def _load_cooldown_cache(self) -> None:
+        behavior = self.config.get("behavior", {}) if isinstance(self.config, dict) else {}
+        enabled = bool(behavior.get("persist_cooldowns", True))
+        if not enabled or not self._cooldown_cache_path:
+            return
+
+        try:
+            path = self._cooldown_cache_path
+            if not path.exists():
+                return
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            entries = raw.get("entries", raw) if isinstance(raw, dict) else {}
+            if not isinstance(entries, dict):
+                return
+
+            loaded: Dict[str, datetime] = {}
+            for key, ts in entries.items():
+                if not isinstance(key, str) or not isinstance(ts, str):
+                    continue
+                try:
+                    dt = datetime.fromisoformat(ts)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    else:
+                        dt = dt.astimezone(timezone.utc)
+                    loaded[key] = dt
+                except ValueError:
+                    continue
+
+            if loaded:
+                self.history.reminder_hashes.update(loaded)
+        except Exception:
+            return
+
+    def _save_cooldown_cache(self) -> None:
+        behavior = self.config.get("behavior", {}) if isinstance(self.config, dict) else {}
+        enabled = bool(behavior.get("persist_cooldowns", True))
+        if not enabled or not self._cooldown_cache_path or not self._cooldown_cache_dirty:
+            return
+
+        try:
+            path = self._cooldown_cache_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "version": 1,
+                "written_at": datetime.now(timezone.utc).isoformat(),
+                "entries": {k: v.isoformat() for k, v in self.history.reminder_hashes.items()},
+            }
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+            tmp.replace(path)
+            self._cooldown_cache_dirty = False
+        except Exception:
+            return
+
+    def _cleanup_cooldown_cache(self) -> None:
+        behavior = self.config.get("behavior", {}) if isinstance(self.config, dict) else {}
+        retention_minutes = int(behavior.get("cooldown_cache_retention_minutes", 24 * 60))
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=max(1, retention_minutes))
+        before = len(self.history.reminder_hashes)
+        self.history.reminder_hashes = {
+            k: v for k, v in self.history.reminder_hashes.items()
+            if v >= cutoff
+        }
+        if len(self.history.reminder_hashes) != before:
+            self._cooldown_cache_dirty = True
+
+    def reset_cooldowns(self, *, project_root: str, agent_id: Optional[str] = None) -> int:
+        prefix = f"{project_root}|"
+        if agent_id:
+            prefix = f"{project_root}|{agent_id}|"
+
+        keys = [k for k in self.history.reminder_hashes.keys() if k.startswith(prefix)]
+        for key in keys:
+            self.history.reminder_hashes.pop(key, None)
+        if keys:
+            self._cooldown_cache_dirty = True
+            self._save_cooldown_cache()
+        return len(keys)
+
     def _get_reminder_hash(self, reminder_key: str, variables: Dict[str, Any]) -> str:
-        """Generate hash for reminder deduplication."""
-        content = f"{reminder_key}:{json.dumps(variables, sort_keys=True)}"
-        return hashlib.sha256(content.encode()).hexdigest()[:16]
+        """Generate a stable fingerprint for reminder cooldown checks."""
+        project_root = str(variables.get("project_root") or "")
+        agent_id = str(variables.get("agent_id") or "")
+        tool_name = str(variables.get("tool_name") or "")
+        return f"{project_root}|{agent_id}|{tool_name}|{reminder_key}"
 
     def _should_show_reminder(self, reminder: ReminderInstance, context: ReminderContext) -> bool:
         """Check if reminder should be shown based on rules."""
@@ -188,11 +294,15 @@ class ReminderEngine:
             return False
 
         # Cooldown check
-        if reminder.cooldown_minutes > 0:
+        cooldown_minutes = reminder.cooldown_minutes
+        if cooldown_minutes <= 0 and reminder.category == "teaching":
+            cooldown_minutes = int(self.config.get("behavior", {}).get("default_teaching_cooldown_minutes", 10))
+
+        if cooldown_minutes > 0:
             reminder_hash = self._get_reminder_hash(reminder.key, reminder.variables)
             last_shown = self.history.reminder_hashes.get(reminder_hash)
             if last_shown:
-                cooldown_cutoff = datetime.now(timezone.utc) - timedelta(minutes=reminder.cooldown_minutes)
+                cooldown_cutoff = datetime.now(timezone.utc) - timedelta(minutes=cooldown_minutes)
                 if last_shown > cooldown_cutoff:
                     return False
 
@@ -244,18 +354,28 @@ class ReminderEngine:
 
     def _build_variables(self, context: ReminderContext) -> Dict[str, Any]:
         """Build variable dictionary for template substitution."""
+        now_utc = datetime.now(timezone.utc)
+        date_format = self.formatting.get("date_format", "%Y-%m-%d %H:%M UTC")
+
         variables = {
             "project_name": context.project_name or "No project",
+            "project_root": context.project_root or "",
+            "agent_id": context.agent_id or "",
+            "tool_name": context.tool_name,
             "total_entries": context.total_entries,
             "minutes": int(context.minutes_since_log or 0),
             "hours": int((context.minutes_since_log or 0) / 60),
             "days": int((context.minutes_since_log or 0) / 1440),
+            "now_utc": now_utc.strftime(date_format),
+            "now_iso_utc": now_utc.isoformat(),
+            "date_utc": now_utc.strftime("%Y-%m-%d"),
+            "time_utc": now_utc.strftime("%H:%M:%S UTC"),
         }
 
         # Time formatting
         if context.last_log_time:
             variables["last_log"] = context.last_log_time.strftime(
-                self.formatting.get("date_format", "%Y-%m-%d %H:%M UTC")
+                date_format
             )
         else:
             variables["last_log"] = "no logs yet"
@@ -315,10 +435,13 @@ class ReminderEngine:
         for reminder in selected:
             reminder_hash = self._get_reminder_hash(reminder.key, reminder.variables)
             self.history.reminder_hashes[reminder_hash] = datetime.now(timezone.utc)
+            self._cooldown_cache_dirty = True
 
             if reminder.category == "teaching":
                 session_key = f"{context.tool_name}:{reminder.key}"
                 self.history.teaching_sessions[session_key] = self.history.teaching_sessions.get(session_key, 0) + 1
+
+        self._save_cooldown_cache()
 
         # Apply formatting
         use_short = self.config.get("formatting", {}).get("use_short_templates", True)
