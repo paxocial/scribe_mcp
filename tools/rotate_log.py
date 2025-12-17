@@ -959,10 +959,10 @@ async def _execute_rotation_with_fallbacks(
                                     # create a fresh file with a minimal rotation header.
                                     fallback_suffix = operation.get(
                                         "suffix",
-                                        f\"rotated-{datetime.now().strftime('%Y%m%d-%H%M%S')}\",
+                                        f"rotated-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
                                     )
                                     archive_path = log_path.with_suffix(
-                                        f\".{fallback_suffix}{log_path.suffix}\"
+                                        f".{fallback_suffix}{log_path.suffix}"
                                     )
 
                                     # Move current log to archive
@@ -970,20 +970,20 @@ async def _execute_rotation_with_fallbacks(
 
                                     # Write a simple rotation header into the new log file
                                     try:
-                                        timestamp = datetime.now().strftime(\"%Y-%m-%d %H:%M:%S UTC\")
-                                        project_name = project.get(\"name\", \"Unknown Project\")
+                                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+                                        project_name = project.get("name", "Unknown Project")
                                         header = (
-                                            \"# Progress Log\\n\\n\"
-                                            \"## Rotation Notice\\n\"
-                                            f\"Previous log was archived to: {archive_path.name}\\n\\n\"
-                                            f\"Rotation Time: {timestamp}\\n\"
-                                            f\"Project: {project_name}\\n\\n\"
-                                            \"---\\n\\n\"
+                                            "# Progress Log\n\n"
+                                            "## Rotation Notice\n"
+                                            f"Previous log was archived to: {archive_path.name}\n\n"
+                                            f"Rotation Time: {timestamp}\n"
+                                            f"Project: {project_name}\n\n"
+                                            "---\n\n"
                                         )
                                         await asyncio.to_thread(lambda: log_path.write_text(header))
                                     except Exception:
                                         # If header write fails, fall back to an empty file.
-                                        await asyncio.to_thread(lambda: log_path.write_text(\"\"))
+                                        await asyncio.to_thread(lambda: log_path.write_text(""))
 
                                     fallback_result = {
                                         "log_type": log_type,

@@ -303,6 +303,29 @@ class TestExceptionHealer:
 
         assert result["healing_type"] == "parameter_validation"
         mock_corrector.correct_append_entry_parameters.assert_called_once()
+        assert "healed_values" in result
+
+    @patch('scribe_mcp.utils.parameter_validator.BulletproofParameterCorrector')
+    def test_heal_parameter_validation_error_top_level_context_params(self, mock_corrector):
+        """
+        Regression: some tools pass parameters directly in the context dict rather than under `parameters`.
+        When healing succeeds, callers expect `healed_values` to exist.
+        """
+        mock_corrector.correct_append_entry_parameters.return_value = {"message": "fixed", "log_type": "progress"}
+        exception = ValueError("bad params")
+        context = {
+            "message": 123,
+            "log_type": None,
+            "operation_type": "append_entry",
+        }
+
+        result = ExceptionHealer.heal_parameter_validation_error(exception, context)
+
+        assert result["healing_type"] == "parameter_validation"
+        assert result["success"] is True
+        assert result["healed_values"]["message"] == "fixed"
+        assert "corrected_parameters" in result
+        assert result["corrected_parameters"]["message"] == "fixed"
 
     @patch('scribe_mcp.utils.parameter_validator.BulletproofParameterCorrector')
     def test_heal_parameter_validation_error_rotate_log(self, mock_corrector):

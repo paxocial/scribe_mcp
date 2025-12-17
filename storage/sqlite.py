@@ -874,6 +874,20 @@ class SQLiteStorage(StorageBackend):
                     """,
                 ]
             )
+            # Ensure legacy databases have the newer scribe_projects columns
+            await self._ensure_column("scribe_projects", "repo_root", "TEXT")
+            await self._ensure_column("scribe_projects", "progress_log_path", "TEXT")
+            await self._ensure_column("scribe_projects", "status", "TEXT DEFAULT 'planning'")
+            await self._ensure_column("scribe_projects", "phase", "TEXT DEFAULT 'setup'")
+            await self._ensure_column("scribe_projects", "confidence", "REAL DEFAULT 0.0")
+            await self._ensure_column("scribe_projects", "completed_at", "TIMESTAMP")
+            await self._ensure_column("scribe_projects", "last_activity", "TIMESTAMP")
+            await self._ensure_column("scribe_projects", "description", "TEXT")
+            await self._ensure_column("scribe_projects", "last_entry_at", "TEXT")
+            await self._ensure_column("scribe_projects", "last_access_at", "TEXT")
+            await self._ensure_column("scribe_projects", "last_status_change", "TEXT")
+            await self._ensure_column("scribe_projects", "tags", "TEXT")
+            await self._ensure_column("scribe_projects", "meta", "TEXT")
             await self._migrate_document_sections()
             await self._ensure_column("document_changes", "project_root", "TEXT")
             await self._ensure_column("document_changes", "file_path", "TEXT")

@@ -496,7 +496,8 @@ async def _process_single_entry(
                     line_id = await append_line(log_path, alternative_line)
                 except Exception:
                     # Emergency fallback - write to emergency log
-                    emergency_log_path = project["root"] / "emergency_entries.log"
+                    emergency_root = Path(project.get("root", settings.project_root))
+                    emergency_log_path = emergency_root / "emergency_entries.log"
                     emergency_line = f"[{timestamp}] [Agent: {resolved_agent}] {message}\n"
                     line_id = await append_line(emergency_log_path, emergency_line)
                     meta_payload["emergency_write"] = True

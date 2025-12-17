@@ -395,6 +395,30 @@ class ProjectRegistry:
         """
         with sqlite3.connect(self._db_path) as conn:
             cursor = conn.cursor()
+            # Create a minimal table if it does not exist. This avoids first-run
+            # failures when running Scribe against a fresh repo before the main
+            # storage backend has created schema.
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scribe_projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE,
+                    repo_root TEXT,
+                    progress_log_path TEXT,
+                    description TEXT,
+                    status TEXT,
+                    progress_log TEXT,
+                    root TEXT,
+                    created_at TEXT,
+                    last_entry_at TEXT,
+                    last_access_at TEXT,
+                    last_status_change TEXT,
+                    tags TEXT,
+                    meta TEXT
+                )
+                """
+            )
+
             cursor.execute("PRAGMA table_info(scribe_projects)")
             existing = {row[1] for row in cursor.fetchall()}
 

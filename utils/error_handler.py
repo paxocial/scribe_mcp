@@ -1036,17 +1036,29 @@ class ExceptionHealer:
         """
         from .parameter_validator import BulletproofParameterCorrector
 
-        healing_result = {
+        healing_result: Dict[str, Any] = {
             "healing_type": "parameter_validation",
             "original_exception": str(exception),
             "parameters_corrected": [],
             "corrections_applied": [],
             "success": False,
-            "corrected_parameters": {}
+            "corrected_parameters": {},
+            # Backwards-compatible alias used throughout tools (append_entry/query_entries/rotate_log).
+            # Many call sites treat `context` itself as the parameter dict (not nested under `parameters`).
+            "healed_values": {},
         }
 
-        parameters = context.get("parameters", {}).copy()
-        operation_type = context.get("operation_type", "unknown")
+        # Some call sites pass a nested `parameters` dict, others pass parameters directly at the top level.
+        # Prefer explicit `parameters`, otherwise treat remaining context keys as parameters.
+        if isinstance(context.get("parameters"), dict):
+            parameters = context.get("parameters", {}).copy()
+        else:
+            parameters = {
+                k: v for k, v in context.items()
+                if k not in {"operation_type", "operation", "context", "error_type", "requirements"}
+            }
+
+        operation_type = context.get("operation_type") or context.get("operation") or "unknown"
 
         # Apply tool-specific parameter correction
         if operation_type == "read_recent":
@@ -1083,6 +1095,9 @@ class ExceptionHealer:
                 })
 
         healing_result["corrected_parameters"] = corrected_params
+        # Back-compat for existing tools: when success is True, call sites expect `healed_values` to exist.
+        # We populate it unconditionally to keep the interface stable even if callers don't gate on success.
+        healing_result["healed_values"] = corrected_params
         healing_result["success"] = len(healing_result["parameters_corrected"]) > 0
 
         return healing_result
