@@ -347,6 +347,16 @@ class ReminderEngine:
             return any(status == "missing" for status in context.docs_status.values())
         elif condition.startswith("tool="):
             return context.tool_name == condition.split("=")[1]
+        elif condition.startswith("action="):
+            return context.variables.get("action") == condition.split("=")[1]
+        elif condition.startswith("scaffold="):
+            expected = condition.split("=")[1].strip().lower()
+            actual = context.variables.get("scaffold")
+            if isinstance(actual, bool):
+                actual_value = "true" if actual else "false"
+            else:
+                actual_value = str(actual).strip().lower()
+            return actual_value == expected
         elif condition == "always":
             return True
 

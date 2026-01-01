@@ -44,6 +44,7 @@ async def get_reminders(
     tool_name: str,
     state: Optional[object] = None,
     agent_id: Optional[str] = None,
+    variables: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Legacy compatibility wrapper for the original get_reminders function.
@@ -55,7 +56,13 @@ async def get_reminders(
         return []
 
     # Build the new reminder context from the old format
-    context = await _build_legacy_context(project, tool_name, state, agent_id=agent_id)
+    context = await _build_legacy_context(
+        project,
+        tool_name,
+        state,
+        agent_id=agent_id,
+        variables=variables,
+    )
 
     # Use the new engine
     engine = _get_engine()
@@ -75,6 +82,7 @@ async def _build_legacy_context(
     state: Optional[object],
     *,
     agent_id: Optional[str] = None,
+    variables: Optional[Dict[str, Any]] = None,
 ) -> NewReminderContext:
     """Convert legacy project/state format to new ReminderContext."""
 
@@ -191,7 +199,7 @@ async def _build_legacy_context(
         docs_changed=docs_changed,
         current_phase=current_phase,
         session_age_minutes=session_age_minutes,
-        variables={}  # Additional variables can be added as needed
+        variables=variables or {}
     )
 
 

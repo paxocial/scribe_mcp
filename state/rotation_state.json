@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "created_timestamp": "2025-10-24 11:35:00 UTC",
-  "last_updated": "2025-12-17T03:44:54.151175 UTC",
+  "last_updated": "2025-12-26T11:01:47.505985 UTC",
   "projects": {
     "enhanced-rotation-test": {
       "created_timestamp": "2025-10-24T12:05:59.361388 UTC",
@@ -922,6 +922,25 @@
           "updated_at": "2025-11-05T20:48:19.893632 UTC"
         }
       },
+      "settings": {
+        "auto_cleanup": true,
+        "max_rotations": 100
+      }
+    },
+    "agentkitv1": {
+      "created_timestamp": "2025-12-26T11:01:47.491866 UTC",
+      "current_sequence": 1,
+      "total_rotations": 1,
+      "last_rotation_timestamp": "2025-12-26 11:01:47 UTC",
+      "hash_chain": {
+        "root_hash": "1a39505065e4605532f02262f9c16334aeda4e245c464814d129243f8dca1fed",
+        "current_sequence": 1,
+        "last_hash": "1a39505065e4605532f02262f9c16334aeda4e245c464814d129243f8dca1fed"
+      },
+      "rotation_ids": [
+        "0757101b-c584-4976-9d31-e2539e8ca80e"
+      ],
+      "log_stats": {},
       "settings": {
         "auto_cleanup": true,
         "max_rotations": 100

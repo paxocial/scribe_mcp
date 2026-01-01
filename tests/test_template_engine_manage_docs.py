@@ -197,6 +197,10 @@ async def test_manage_docs_renders_jinja_content_and_custom_templates(tmp_path: 
         action="replace_section",
         section="problem_statement",
         content="**Project:** {{ project_name }} | Note: {{ metadata.note }}",
+        patch=None,
+        patch_source_hash=None,
+        start_line=None,
+        end_line=None,
         template=None,
         metadata=metadata,
         dry_run=False,
@@ -221,6 +225,10 @@ async def test_manage_docs_renders_jinja_content_and_custom_templates(tmp_path: 
         action="append",
         section=None,
         content=None,
+        patch=None,
+        patch_source_hash=None,
+        start_line=None,
+        end_line=None,
         template="summary_block",
         metadata=metadata_append,
         dry_run=False,
@@ -232,6 +240,205 @@ async def test_manage_docs_renders_jinja_content_and_custom_templates(tmp_path: 
     assert "Context: manage_docs+jinja" in updated_text
 
     shutil.rmtree(test_root, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_manage_docs_apply_patch_and_replace_range(tmp_path: Path) -> None:
+    """Verify apply_patch and replace_range operations on documents."""
+    project_root = tmp_path / "patch_repo"
+    docs_dir = project_root / ".scribe" / "docs" / "dev_plans" / "test_project"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    architecture_path = docs_dir / "ARCHITECTURE_GUIDE.md"
+    architecture_path.write_text(
+        "alpha\nbeta\ngamma\n",
+        encoding="utf-8",
+    )
+
+    project: Dict[str, object] = {
+        "name": "Patch Project",
+        "root": str(project_root),
+        "docs_dir": str(docs_dir),
+        "progress_log": str(docs_dir / "PROGRESS_LOG.md"),
+        "docs": {
+            "architecture": str(architecture_path),
+            "phase_plan": str(docs_dir / "PHASE_PLAN.md"),
+            "checklist": str(docs_dir / "CHECKLIST.md"),
+            "progress_log": str(docs_dir / "PROGRESS_LOG.md"),
+        },
+        "defaults": {"agent": "QA Bot"},
+    }
+
+    patch_text = "\n".join(
+        [
+            "--- before",
+            "+++ after",
+            "@@ -1,3 +1,3 @@",
+            "-alpha",
+            "+alpha updated",
+            " beta",
+            " gamma",
+        ]
+    )
+
+    change = await apply_doc_change(
+        project,
+        doc="architecture",
+        action="apply_patch",
+        section=None,
+        content=None,
+        patch=patch_text,
+        patch_source_hash=None,
+        patch_mode="unified",
+        start_line=None,
+        end_line=None,
+        template=None,
+        metadata={},
+        dry_run=False,
+    )
+
+    assert change.success
+    updated_text = architecture_path.read_text(encoding="utf-8")
+    assert "alpha updated" in updated_text
+
+    range_change = await apply_doc_change(
+        project,
+        doc="architecture",
+        action="replace_range",
+        section=None,
+        content="BETA\nGAMMA\n",
+        patch=None,
+        patch_source_hash=None,
+        start_line=2,
+        end_line=3,
+        template=None,
+        metadata={},
+        dry_run=False,
+    )
+
+    assert range_change.success
+    updated_text = architecture_path.read_text(encoding="utf-8")
+    assert "BETA" in updated_text
+    assert "GAMMA" in updated_text
+
+
+@pytest.mark.asyncio
+async def test_manage_docs_apply_patch_mismatch_fails(tmp_path: Path) -> None:
+    """Verify apply_patch fails with strict context mismatch."""
+    project_root = tmp_path / "patch_repo_mismatch"
+    docs_dir = project_root / ".scribe" / "docs" / "dev_plans" / "test_project"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    architecture_path = docs_dir / "ARCHITECTURE_GUIDE.md"
+    architecture_path.write_text(
+        "alpha\nbeta\ngamma\n",
+        encoding="utf-8",
+    )
+
+    project: Dict[str, object] = {
+        "name": "Patch Project",
+        "root": str(project_root),
+        "docs_dir": str(docs_dir),
+        "progress_log": str(docs_dir / "PROGRESS_LOG.md"),
+        "docs": {
+            "architecture": str(architecture_path),
+            "phase_plan": str(docs_dir / "PHASE_PLAN.md"),
+            "checklist": str(docs_dir / "CHECKLIST.md"),
+            "progress_log": str(docs_dir / "PROGRESS_LOG.md"),
+        },
+        "defaults": {"agent": "QA Bot"},
+    }
+
+    patch_text = "\n".join(
+        [
+            "--- before",
+            "+++ after",
+            "@@ -1,3 +1,3 @@",
+            "-delta",
+            "+delta updated",
+            " beta",
+            " gamma",
+        ]
+    )
+
+    change = await apply_doc_change(
+        project,
+        doc="architecture",
+        action="apply_patch",
+        section=None,
+        content=None,
+        patch=patch_text,
+        patch_source_hash=None,
+        patch_mode="unified",
+        start_line=None,
+        end_line=None,
+        template=None,
+        metadata={},
+        dry_run=False,
+    )
+
+    assert not change.success
+    assert "PATCH_DELETE_MISMATCH" in (change.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_manage_docs_apply_patch_stale_source_fails(tmp_path: Path) -> None:
+    """Verify apply_patch fails when patch_source_hash does not match current file."""
+    project_root = tmp_path / "patch_repo_stale"
+    docs_dir = project_root / ".scribe" / "docs" / "dev_plans" / "test_project"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    architecture_path = docs_dir / "ARCHITECTURE_GUIDE.md"
+    architecture_path.write_text(
+        "alpha\nbeta\ngamma\n",
+        encoding="utf-8",
+    )
+
+    project: Dict[str, object] = {
+        "name": "Patch Project",
+        "root": str(project_root),
+        "docs_dir": str(docs_dir),
+        "progress_log": str(docs_dir / "PROGRESS_LOG.md"),
+        "docs": {
+            "architecture": str(architecture_path),
+            "phase_plan": str(docs_dir / "PHASE_PLAN.md"),
+            "checklist": str(docs_dir / "CHECKLIST.md"),
+            "progress_log": str(docs_dir / "PROGRESS_LOG.md"),
+        },
+        "defaults": {"agent": "QA Bot"},
+    }
+
+    patch_text = "\n".join(
+        [
+            "--- before",
+            "+++ after",
+            "@@ -1,3 +1,3 @@",
+            "-alpha",
+            "+alpha updated",
+            " beta",
+            " gamma",
+        ]
+    )
+
+    change = await apply_doc_change(
+        project,
+        doc="architecture",
+        action="apply_patch",
+        section=None,
+        content=None,
+        patch=patch_text,
+        patch_source_hash="deadbeef",
+        patch_mode="unified",
+        start_line=None,
+        end_line=None,
+        template=None,
+        metadata={},
+        dry_run=False,
+    )
+
+    assert not change.success
+    assert "PATCH_STALE_SOURCE" in (change.error_message or "")
+    assert change.extra.get("precondition_failed") == "SOURCE_HASH_MISMATCH"
 
 
 @pytest.mark.asyncio

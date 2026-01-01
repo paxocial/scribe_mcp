@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from scribe_mcp.doc_management.manager import apply_doc_change
+from scribe_mcp.utils.frontmatter import parse_frontmatter
+from scribe_mcp.state import StateManager
+from scribe_mcp.tools.manage_docs import manage_docs
+from scribe_mcp import server as server_module
+
+
+async def _setup_project(tmp_path: Path) -> dict:
+    project_root = tmp_path / "create_doc_repo"
+    docs_dir = project_root / ".scribe" / "docs" / "dev_plans" / "test_project"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    (docs_dir / "ARCHITECTURE_GUIDE.md").write_text("# Architecture\n", encoding="utf-8")
+    (docs_dir / "PHASE_PLAN.md").write_text("# Phase\n", encoding="utf-8")
+    (docs_dir / "CHECKLIST.md").write_text("# Checklist\n", encoding="utf-8")
+    (docs_dir / "PROGRESS_LOG.md").write_text("# Log\n", encoding="utf-8")
+
+    return {
+        "name": "Create Doc Project",
+        "root": str(project_root),
+        "docs_dir": str(docs_dir),
+        "progress_log": str(docs_dir / "PROGRESS_LOG.md"),
+        "docs": {
+            "architecture": str(docs_dir / "ARCHITECTURE_GUIDE.md"),
+            "phase_plan": str(docs_dir / "PHASE_PLAN.md"),
+            "checklist": str(docs_dir / "CHECKLIST.md"),
+            "progress_log": str(docs_dir / "PROGRESS_LOG.md"),
+        },
+        "defaults": {"agent": "QA Bot"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_doc_from_body(tmp_path: Path) -> None:
+    project = await _setup_project(tmp_path)
+    target_dir = Path(project["docs_dir"]) / "custom"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    change = await apply_doc_change(
+        project,
+        doc="custom_doc",
+        action="create_doc",
+        section=None,
+        content=None,
+        patch=None,
+        patch_source_hash=None,
+        edit=None,
+        start_line=None,
+        end_line=None,
+        template=None,
+        metadata={
+            "doc_name": "lore_drop_003",
+            "doc_type": "lore_drop",
+            "body": "# Lore Drop\nDetails here.",
+            "target_dir": str(target_dir),
+            "frontmatter": {"category": "lore"},
+        },
+        dry_run=False,
+    )
+
+    assert change.success
+    path = Path(change.path)
+    parsed = parse_frontmatter(path.read_text(encoding="utf-8"))
+    assert parsed.frontmatter_data.get("doc_type") == "lore_drop"
+    assert parsed.frontmatter_data.get("category") == "lore"
+    assert "# Lore Drop" in parsed.body
+
+
+@pytest.mark.asyncio
+async def test_create_doc_missing_content_fails(tmp_path: Path) -> None:
+    project = await _setup_project(tmp_path)
+
+    change = await apply_doc_change(
+        project,
+        doc="custom_doc",
+        action="create_doc",
+        section=None,
+        content=None,
+        patch=None,
+        patch_source_hash=None,
+        edit=None,
+        start_line=None,
+        end_line=None,
+        template=None,
+        metadata={"doc_name": "empty_doc"},
+        dry_run=False,
+    )
+
+    assert not change.success
+    assert "CREATE_DOC_MISSING_CONTENT" in (change.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_create_doc_registry_warning(tmp_path: Path) -> None:
+    project = await _setup_project(tmp_path)
+    state_manager = StateManager(path=tmp_path / "state.json")
+    await state_manager.set_current_project(project["name"], project)
+
+    original_state_manager = server_module.state_manager
+    original_storage_backend = server_module.storage_backend
+    server_module.state_manager = state_manager
+    server_module.storage_backend = None
+
+    async def _fail_set_current(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    state_manager.set_current_project = _fail_set_current  # type: ignore[assignment]
+
+    try:
+        result = await manage_docs(
+            action="create_doc",
+            doc="custom_doc",
+            metadata={
+                "doc_name": "one_off_note",
+                "body": "# Note\nDetails.",
+                "register_doc": True,
+            },
+            dry_run=False,
+        )
+        assert result["ok"] is True
+        assert "warnings" in result
+        assert "Registry update failed" in result["warnings"][0]
+    finally:
+        server_module.state_manager = original_state_manager
+        server_module.storage_backend = original_storage_backend
+
+
+@pytest.mark.asyncio
+async def test_manage_docs_create_doc_preserves_newlines(tmp_path: Path) -> None:
+    project = await _setup_project(tmp_path)
+    state_manager = StateManager(path=tmp_path / "state.json")
+    await state_manager.set_current_project(project["name"], project)
+
+    original_state_manager = server_module.state_manager
+    original_storage_backend = server_module.storage_backend
+    server_module.state_manager = state_manager
+    server_module.storage_backend = None
+
+    try:
+        result = await manage_docs(
+            action="create_doc",
+            doc="custom_doc",
+            metadata={
+                "doc_name": "newline_note",
+                "body": "# Note\nDetails line two.",
+            },
+            dry_run=False,
+        )
+        assert result["ok"] is True
+        path = Path(result["path"])
+        parsed = parse_frontmatter(path.read_text(encoding="utf-8"))
+        assert "# Note\nDetails line two." in parsed.body
+    finally:
+        server_module.state_manager = original_state_manager
+        server_module.storage_backend = original_storage_backend

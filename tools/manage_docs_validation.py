@@ -175,6 +175,12 @@ def _validate_inputs(
     action: Any,
     section: Any,
     content: Any,
+    patch: Any = None,
+    patch_source_hash: Any = None,
+    edit: Any = None,
+    patch_mode: Any = None,
+    start_line: Any = None,
+    end_line: Any = None,
     template: Any,
     metadata: Any,
 ) -> None:
@@ -198,7 +204,14 @@ def _validate_inputs(
         "append",
         "status_update",
         "list_sections",
+        "list_checklist_items",
         "batch",
+        "apply_patch",
+        "replace_range",
+        "normalize_headers",
+        "generate_toc",
+        "create_doc",
+        "validate_crosslinks",
         "create_research_doc",
         "create_bug_report",
         "create_review_report",
@@ -215,6 +228,30 @@ def _validate_inputs(
         if metadata is None:
             raise DocumentValidationError("Metadata is required for status_update")
         validator.validate_metadata(metadata, "metadata")
+
+    if action == "apply_patch":
+        if patch or content:
+            if not patch_mode:
+                raise DocumentValidationError("patch_mode is required when providing a patch")
+            if isinstance(patch_mode, str) and patch_mode not in {"structured", "unified"}:
+                raise DocumentValidationError("patch_mode must be 'structured' or 'unified'")
+        else:
+            if edit is None:
+                raise DocumentValidationError("edit payload is required for structured apply_patch")
+        if edit is not None:
+            validator.validate_metadata(edit, "edit")
+
+    if action == "replace_range":
+        if start_line is None or end_line is None:
+            raise DocumentValidationError("start_line and end_line are required for replace_range")
+
+    if action == "create_doc":
+        if metadata is None:
+            raise DocumentValidationError("metadata is required for create_doc")
+
+    if action == "validate_crosslinks":
+        if metadata is not None:
+            validator.validate_metadata(metadata, "metadata")
 
     # Validate comparison operators in user-provided strings (content + metadata values).
     if isinstance(content, str) and not _validate_comparison_symbols(content):
@@ -240,4 +277,3 @@ def _register_test_globals() -> None:
 
 
 _register_test_globals()
-

@@ -163,11 +163,11 @@ MCP_SPINE/
 - Normalizes tool history entries to ensure backwards compatibility as state evolves.
 
 ### Storage Backends (`storage/`)
-- **SQLite backend** (`sqlite.py`): 
+- **SQLite backend** (`sqlite.py`):
   - On-demand connections with busy timeout.
   - Mirrored schema (projects, entries, metrics) for local-first deployments.
   - JSON meta storage and timestamp indexes for fast queries.
-- **Postgres backend** (`postgres.py`): 
+- **Postgres backend** (`postgres.py`):
   - Asyncpg pool management.
   - Utilizes SQL helpers in `db/ops.py` for upsert, insert, and query operations.
 - Both backends implement the `StorageBackend` interface defined in `storage/base.py` to keep tool logic backend-agnostic.
@@ -230,6 +230,63 @@ The v2.1 template engine provides enterprise-grade security with multiple sandbo
 - **Atomic Writes**: Template rendering and file updates in single atomic operations
 - **Change Tracking**: Automatic logging of all document changes to audit trails
 - **Template Integration**: Seamless integration with Jinja2 template engine for dynamic content
+
+### YAML Frontmatter (Document Identity)
+Scribe treats YAML frontmatter as canonical document identity metadata. Frontmatter is parsed and preserved
+independently of the body, and `last_updated` is automatically refreshed on edits.
+
+**Requirements:**
+- Valid YAML mapping at the top of the file between `---` delimiters
+- Round-trip safe (frontmatter preserved byte-for-byte unless explicitly updated)
+- Extensible schema (teams can add fields without code changes)
+- Body-relative edits (diffs/line ranges exclude frontmatter to preserve stable line math)
+
+### Header Normalization & TOC Generation
+Header normalization and TOC generation operate on **body-only** content and ignore fenced code blocks.
+
+**Header rules (current):**
+- ATX headers with required space after `#` are normalized into numbered ATX form.
+- Other styles are ignored until explicitly supported.
+
+**Anchor rules (current):**
+- Lowercase, strip punctuation, collapse whitespace to `-`.
+- Duplicate headings receive `-1`, `-2`, ... suffixes.
+- Deterministic but not full GitHub parity; divergences must be documented when extended.
+
+**Canonical example:**
+```yaml
+---
+id: scribe-doc-architecture-overview
+title: "Scribe MCP: Architecture Overview"
+doc_type: internal_documentation
+category: engineering
+status: authoritative
+version: 2.1.1
+last_updated: 2026-01-01
+maintained_by: Corta Labs
+created_by: Corta Labs
+
+owners:
+  - platform
+  - ai_infra
+
+related_docs:
+  - architecture
+  - scribe_usage
+  - whitepaper
+
+tags:
+  - scribe
+  - documentation
+  - diff_engine
+  - governance
+  - infrastructure
+
+summary: >
+  Canonical architecture documentation for Scribe MCP, describing document
+  governance, diff application, rebase mechanics, helpers, and safety guarantees.
+---
+```
 
 ### 🤖 Claude Code Subagents Integration (`tools/manage_docs.py`)
 **Structured Workflows and Automated Reporting**
@@ -303,8 +360,44 @@ The Modern Tool Architecture provides a unified foundation for all Scribe MCP to
 
 **Document Management:**
 - `manage_docs`: Atomic document updates with real-time template rendering and diff verification
-- Structured operations: `replace_section`, `append`, `status_update` with validation
+- Structured operations: `replace_section`, `append`, `status_update`, `apply_patch`, `replace_range`, `normalize_headers`, `generate_toc`, `create_doc`, `validate_crosslinks` with validation
 - Automatic change tracking and audit logging via doc_updates log
+
+### Precision-First Document Mutation
+
+Scribe distinguishes between **structural scaffolding** and **precise modification**:
+
+- **replace_section**
+  - Use for initial scaffolding, templates, or structural bootstrapping.
+  - Not recommended for ongoing edits once a document is established.
+- **apply_patch**
+  - Strict unified diff application against the current file contents.
+  - Structured mode is default; unified diffs are compiler output only.
+  - `replace_block` ignores fenced code blocks and hard-fails on ambiguous anchors.
+- **replace_range**
+  - Replaces an explicit 1-based line range (inclusive).
+  - Use when line targeting is clearer than diff context.
+- **normalize_headers**
+  - Canonicalizes header numbering and outputs ATX headers.
+  - Supports ATX with or without a space plus Setext (`====`/`----`).
+  - Body-only; fenced code blocks are ignored; idempotent.
+- **generate_toc**
+  - Inserts/replaces a deterministic TOC between `<!-- TOC:start -->` / `<!-- TOC:end -->`.
+  - Uses GitHub-style anchors (NFKD normalization, ASCII folding, emoji removal, punctuation collapse, de-dup suffixes).
+  - Body-only; fenced code blocks are ignored; idempotent.
+- **create_doc**
+  - Creates custom docs from plain content/snippets/sections.
+  - Users do **not** supply Jinja; templates are internal only.
+  - Optional `register_doc` flag controls registry updates for one-off docs.
+  - Multiline `body`/`snippet`/`content` metadata is preserved.
+- **validate_crosslinks**
+  - Read-only diagnostics for `related_docs` (optional anchor checks).
+  - No writes, no doc_updates log entries.
+
+Structural actions validate `doc` against the project registry and fail with `DOC_NOT_FOUND` when the doc key is not registered.
+
+Once a document has been scaffolded, subsequent edits should prefer `apply_patch` (structured) or `replace_range`.
+Scribe’s reminder system reinforces this hierarchy, and scaffolding can be signaled via `metadata.scaffold=true`.
 
 **Advanced Logging System:**
 - `append_entry`: Single/bulk entry modes with comprehensive metadata and auto-splitting
@@ -516,9 +609,8 @@ These signals are exposed via `list_projects(fields=["name","status","meta"])` s
 - Codex CLI registration example:
   ```bash
   codex mcp add scribe \
-    --env SCRIBE_ROOT=/home/austin/projects/MCP_SPINE \
     --env SCRIBE_STORAGE_BACKEND=sqlite \
-    -- bash -lc 'cd /home/austin/projects/MCP_SPINE && exec python -m scribe_mcp.server'
+    -- bash -lc 'cd /home/path/to/scribe_mcp && exec python -m server'
   ```
 - `MCP_SPINE/scripts/test_mcp_server.py` performs a `tools/list` handshake to validate server readiness before wiring into Codex.
 

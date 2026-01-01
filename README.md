@@ -3,7 +3,7 @@
 <div align="center">
 
 **[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](tests/)**
-**[![Version](https://img.shields.io/badge/version-2.1-blue)](docs/whitepapers/)**
+**[![Version](https://img.shields.io/badge/version-2.1.1-blue)](docs/whitepapers/)**
 **[![License](https://img.shields.io/badge/license-Community+Small%20Business-orange)](LICENSE)**
 
 *Enterprise-grade documentation governance for AI-powered development — by Corta Labs*
@@ -13,6 +13,47 @@
 </div>
 
 ---
+
+## ✨ Update v2.1.1 (Diff Editor & Scaffold Reminders)
+
+Scribe MCP 2.1.1 introduces foundational document lifecycle upgrades, including a fully automated YAML frontmatter engine with round-trip safety, canonical metadata defaults, and extensible schema support. Frontmatter is created on first edit if missing, auto-updates `last_updated`, and supports explicit overrides without breaking existing fields. These changes establish a metadata plane separate from document body content, enabling safe diff operations, deterministic header/TOC tooling, and template-driven document creation.
+
+Structured edits are now the default path: agents express intent, the server compiles and applies deterministic mutations, and diagnostics remain explicit. Structural actions no longer auto-heal doc targets; if a doc key is not registered, the action fails with `DOC_NOT_FOUND` rather than redirecting the write.
+
+- `manage_docs` now supports **apply_patch** (structured by default) and **replace_range** for precise edits.
+- `apply_patch` supports `edit` payloads in structured mode; `patch_mode="unified"` opts into raw unified diffs.
+- `patch_source_hash` enforces stale-source protection for patches.
+- Reminder system teaches **scaffold-only** `replace_section`, preferring structured/line edits.
+- New doc lifecycle actions: `normalize_headers`, `generate_toc`, `create_doc`, `validate_crosslinks`.
+- `create_doc` builds documents from content/body/snippets/sections; users do **not** supply Jinja. Multiline bodies are preserved. Use `metadata.register_doc=true` only when you want the new doc added to the project registry.
+- `validate_crosslinks` is read-only diagnostics (no write, no doc_updates log).
+- `normalize_headers` supports ATX headers with or without space and Setext (`====` / `----`), skipping fenced code blocks. Output is canonical ATX.
+- `generate_toc` uses GitHub-style anchors (NFKD normalization, ASCII folding, emoji removal, punctuation collapse, de-duped suffixes).
+- Structural actions validate doc keys against the registry and fail hard on unknown docs (no silent redirects).
+
+Example (structured default):
+```json
+{
+  "action": "apply_patch",
+  "doc": "architecture",
+  "edit": {
+    "type": "replace_range",
+    "start_line": 12,
+    "end_line": 12,
+    "content": "Updated line\n"
+  }
+}
+```
+
+Example (unified diff mode, compiler output only):
+```json
+{
+  "action": "apply_patch",
+  "doc": "architecture",
+  "patch": "<compiler output>",
+  "patch_mode": "unified"
+}
+```
 
 ## 🚀 Why Scribe MCP?
 
@@ -49,18 +90,27 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2️⃣ Launch MCP Server (Primary Integration Path)
-```bash
-# Start the MCP server for Claude/Claude Code integration
-python -m scribe_mcp.server
-```
+### 2️⃣ Add Scribe MCP Server to Claude Code, Codex
+- Codex CLI registration example:
+  ```bash
+  codex mcp add scribe \
+    --env SCRIBE_STORAGE_BACKEND=sqlite \
+    -- bash -lc 'cd /home/path/to/scribe_mcp && exec python -m server'
+  ```
+
 
 Once connected from Claude / Codex MCP:
 
 - Use **`set_project`** to register/select a project and bootstrap dev_plan docs (pass `root=/abs/path/to/repo` to work in any repo).
 - Use **`append_entry`** for all logging (single/bulk).
-- Use **`manage_docs`** for architecture/phase/checklist updates.
+- Use **`manage_docs`** for architecture/phase/checklist updates.  **2.1.1** introduces diff edits.
 - Use **`read_recent` / `list_projects`** to resume context after compaction.
+
+**Automatic log routing (BUG / SECURITY)**
+- `status=bug` (or a bug emoji) will also write to `BUG_LOG.md` when required meta is present (`severity`, `component`, `status`).
+- Security events can also tee to `SECURITY_LOG.md` (example: use a security emoji, or `--meta security_event=true,impact=...,status=...`).
+- If required meta is missing, Scribe returns a teaching reminder instead of inventing data.
+
 
 ### 3️⃣ (Optional) Manual CLI Logging
 
@@ -86,10 +136,6 @@ python -m scribe_mcp.scripts.scribe "Completed authentication module" --status s
 python -m scribe_mcp.scripts.scribe "Fixed JWT token expiry bug" --status bug --meta severity=high,component=security
 ```
 
-**Automatic log routing (BUG / SECURITY)**
-- `status=bug` (or a bug emoji) will also write to `BUG_LOG.md` when required meta is present (`severity`, `component`, `status`).
-- Security events can also tee to `SECURITY_LOG.md` (example: use a security emoji, or `--meta security_event=true,impact=...,status=...`).
-- If required meta is missing, Scribe returns a teaching reminder instead of inventing data.
 
 **Research Workflows:**
 ```bash

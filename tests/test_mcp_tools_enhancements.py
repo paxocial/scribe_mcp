@@ -58,6 +58,7 @@ class TestManageDocsEnumValidation:
             assert len(corrected) == 6  # (doc, action, section, content, template, metadata)
             # Verify action was corrected to a valid value
             assert corrected[1] in ["replace_section", "append", "status_update", "list_sections", "batch",
+                                  "apply_patch", "replace_range",
                                   "create_research_doc", "create_bug_report", "create_review_report", "create_agent_report_card"]
 
     def test_invalid_action_gets_corrected(self):

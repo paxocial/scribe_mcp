@@ -34,6 +34,7 @@ class LoggingToolMixin:
         explicit_project: Optional[str] = None,
         require_project: bool = True,
         state_snapshot: Optional[Dict[str, Any]] = None,
+        reminder_variables: Optional[Dict[str, Any]] = None,
     ) -> LoggingContext:
         """Resolve project, reminders, and state snapshot for a logging tool."""
         if not getattr(self, "server_module", None):
@@ -46,6 +47,7 @@ class LoggingToolMixin:
             explicit_project=explicit_project,
             require_project=require_project,
             state_snapshot=state_snapshot,
+            reminder_variables=reminder_variables,
         )
 
     @staticmethod

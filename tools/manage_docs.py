@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Callable, Awaitable, List
@@ -13,6 +14,7 @@ from scribe_mcp import server as server_module
 from scribe_mcp.server import app
 from scribe_mcp.doc_management.manager import apply_doc_change, DocumentOperationError, SECTION_MARKER
 from scribe_mcp.tools.append_entry import append_entry
+from scribe_mcp.utils.frontmatter import parse_frontmatter
 from scribe_mcp.shared.logging_utils import (
     LoggingContext,
     ProjectResolutionError,
@@ -71,6 +73,12 @@ def _heal_manage_docs_parameters(
     doc: str,
     section: Optional[str] = None,
     content: Optional[str] = None,
+    patch: Optional[str] = None,
+    patch_source_hash: Optional[str] = None,
+    edit: Optional[Dict[str, Any] | str] = None,
+    patch_mode: Optional[str] = None,
+    start_line: Optional[int] = None,
+    end_line: Optional[int] = None,
     template: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
     dry_run: bool = False,
@@ -86,17 +94,21 @@ def _heal_manage_docs_parameters(
     valid_actions = {
         "replace_section",
         "append",
+        "apply_patch",
+        "replace_range",
+        "normalize_headers",
+        "generate_toc",
         "status_update",
         "batch",
         "list_sections",
+        "list_checklist_items",
+        "create_doc",
+        "validate_crosslinks",
         "create_research_doc",
         "create_bug_report",
         "create_review_report",
         "create_agent_report_card",
     }
-
-    # Define valid docs for enum correction
-    valid_docs = {"architecture", "phase_plan", "checklist", "implementation"}
 
     healed_params = {}
 
@@ -110,14 +122,12 @@ def _heal_manage_docs_parameters(
         healing_messages.append(f"Auto-corrected action from '{original_action}' to '{healed_action}'")
     healed_params["action"] = healed_action
 
-    # Heal doc parameter
+    # Heal doc parameter (string normalization only; no enum correction)
     original_doc = doc
-    healed_doc = BulletproofParameterCorrector.correct_enum_parameter(
-        original_doc, valid_docs, "doc", "architecture"
-    )
+    healed_doc = str(original_doc).strip() if original_doc is not None else ""
     if healed_doc != original_doc:
         healing_applied = True
-        healing_messages.append(f"Auto-corrected doc from '{original_doc}' to '{healed_doc}'")
+        healing_messages.append(f"Auto-normalized doc from '{original_doc}' to '{healed_doc}'")
     healed_params["doc"] = healed_doc
 
     # Heal section parameter (string normalization)
@@ -141,6 +151,79 @@ def _heal_manage_docs_parameters(
         healed_params["content"] = healed_content
     else:
         healed_params["content"] = None
+
+    # Heal patch parameter (string normalization)
+    if patch is not None:
+        original_patch = patch
+        healed_patch = str(patch)
+        if healed_patch != original_patch:
+            healing_applied = True
+            healing_messages.append("Auto-corrected patch parameter to string type")
+        healed_params["patch"] = healed_patch
+    else:
+        healed_params["patch"] = None
+
+    # Heal patch_source_hash parameter (string normalization)
+    if patch_source_hash is not None:
+        original_hash = patch_source_hash
+        healed_hash = str(patch_source_hash).strip()
+        if healed_hash != original_hash:
+            healing_applied = True
+            healing_messages.append("Auto-corrected patch_source_hash parameter to string type")
+        healed_params["patch_source_hash"] = healed_hash
+    else:
+        healed_params["patch_source_hash"] = None
+
+    # Heal edit parameter (JSON parsing when provided as string)
+    healed_params["edit"] = None
+    if edit is not None:
+        if isinstance(edit, str):
+            try:
+                healed_params["edit"] = json.loads(edit)
+                healing_applied = True
+                healing_messages.append("Auto-parsed edit JSON string into dict")
+            except json.JSONDecodeError:
+                healed_params["edit"] = None
+                healing_applied = True
+                healing_messages.append("Failed to parse edit JSON; ignoring edit payload")
+        elif isinstance(edit, dict):
+            healed_params["edit"] = edit
+        else:
+            healed_params["edit"] = None
+            healing_applied = True
+            healing_messages.append("Auto-corrected edit parameter to None")
+
+    # Heal patch_mode parameter (string normalization)
+    if patch_mode is not None:
+        original_mode = patch_mode
+        healed_mode = str(patch_mode).strip().lower()
+        if healed_mode != original_mode:
+            healing_applied = True
+            healing_messages.append("Auto-corrected patch_mode parameter to string type")
+        if healed_mode not in {"structured", "unified"}:
+            healing_applied = True
+            healing_messages.append("Invalid patch_mode; expected 'structured' or 'unified'")
+            healed_mode = None
+        healed_params["patch_mode"] = healed_mode
+    else:
+        healed_params["patch_mode"] = None
+
+    def _coerce_line_number(value: Optional[int], label: str) -> Optional[int]:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        try:
+            coerced = int(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+        healing_messages.append(f"Auto-corrected {label} to integer {coerced}")
+        return coerced
+
+    healed_params["start_line"] = _coerce_line_number(start_line, "start_line")
+    healed_params["end_line"] = _coerce_line_number(end_line, "end_line")
 
     # Heal template parameter (string normalization)
     if template is not None:
@@ -450,6 +533,12 @@ async def manage_docs(
     doc: str,
     section: Optional[str] = None,
     content: Optional[str] = None,
+    patch: Optional[str] = None,
+    patch_source_hash: Optional[str] = None,
+    edit: Optional[Dict[str, Any] | str] = None,
+    patch_mode: Optional[str] = None,
+    start_line: Optional[int] = None,
+    end_line: Optional[int] = None,
     template: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
     dry_run: bool = False,
@@ -458,12 +547,75 @@ async def manage_docs(
 ) -> Dict[str, Any]:
     """Apply structured updates to architecture/phase/checklist documents and create research/bug documents."""
     state_snapshot = await server_module.state_manager.record_tool("manage_docs")
+    # Apply Phase 1 exception healing to all parameters
+    try:
+        healed_params, healing_applied, healing_messages = _heal_manage_docs_parameters(
+            action=action, doc=doc, section=section, content=content,
+            patch=patch, patch_source_hash=patch_source_hash,
+            edit=edit, patch_mode=patch_mode, start_line=start_line, end_line=end_line,
+            template=template, metadata=metadata, dry_run=dry_run,
+            doc_name=doc_name, target_dir=target_dir
+        )
+
+        # Update parameters with healed values
+        action = healed_params["action"]
+        doc = healed_params["doc"]
+        section = healed_params["section"]
+        content = healed_params["content"]
+        patch = healed_params["patch"]
+        patch_source_hash = healed_params["patch_source_hash"]
+        edit = healed_params["edit"]
+        patch_mode = healed_params["patch_mode"]
+        start_line = healed_params["start_line"]
+        end_line = healed_params["end_line"]
+        template = healed_params["template"]
+        metadata = healed_params["metadata"]
+        dry_run = healed_params["dry_run"]
+        doc_name = healed_params["doc_name"]
+        target_dir = healed_params["target_dir"]
+
+    except Exception as healing_error:
+        # If healing fails completely, use safe defaults
+        healed_params = {
+            "action": "replace_section", "doc": "architecture", "section": None,
+            "content": None, "patch": None, "patch_source_hash": None, "edit": None, "patch_mode": None,
+            "start_line": None, "end_line": None,
+            "template": None, "metadata": {}, "dry_run": False,
+            "doc_name": None, "target_dir": None
+        }
+        healing_applied = False
+        healing_messages = [f"Parameter healing failed: {str(healing_error)}, using safe defaults"]
+        action = healed_params["action"]
+        doc = healed_params["doc"]
+        section = healed_params["section"]
+        content = healed_params["content"]
+        patch = healed_params["patch"]
+        patch_source_hash = healed_params["patch_source_hash"]
+        edit = healed_params["edit"]
+        patch_mode = healed_params["patch_mode"]
+        start_line = healed_params["start_line"]
+        end_line = healed_params["end_line"]
+        template = healed_params["template"]
+        metadata = healed_params["metadata"]
+        dry_run = healed_params["dry_run"]
+        doc_name = healed_params["doc_name"]
+        target_dir = healed_params["target_dir"]
+
+    scaffold_flag = False
+    if isinstance(metadata, dict):
+        raw_scaffold = metadata.get("scaffold")
+        if isinstance(raw_scaffold, bool):
+            scaffold_flag = raw_scaffold
+        elif isinstance(raw_scaffold, str):
+            scaffold_flag = raw_scaffold.strip().lower() in {"true", "1", "yes"}
+
     try:
         context = await _MANAGE_DOCS_HELPER.prepare_context(
             tool_name="manage_docs",
             agent_id=None,
             require_project=True,
             state_snapshot=state_snapshot,
+            reminder_variables={"action": action, "scaffold": scaffold_flag},
         )
     except ProjectResolutionError as exc:
         payload = _MANAGE_DOCS_HELPER.translate_project_error(exc)
@@ -479,44 +631,6 @@ async def manage_docs(
         agent_id = await agent_identity.get_or_create_agent_id()
 
     backend = server_module.storage_backend
-
-    # Apply Phase 1 exception healing to all parameters
-    try:
-        healed_params, healing_applied, healing_messages = _heal_manage_docs_parameters(
-            action=action, doc=doc, section=section, content=content,
-            template=template, metadata=metadata, dry_run=dry_run,
-            doc_name=doc_name, target_dir=target_dir
-        )
-
-        # Update parameters with healed values
-        action = healed_params["action"]
-        doc = healed_params["doc"]
-        section = healed_params["section"]
-        content = healed_params["content"]
-        template = healed_params["template"]
-        metadata = healed_params["metadata"]
-        dry_run = healed_params["dry_run"]
-        doc_name = healed_params["doc_name"]
-        target_dir = healed_params["target_dir"]
-
-    except Exception as healing_error:
-        # If healing fails completely, use safe defaults
-        healed_params = {
-            "action": "replace_section", "doc": "architecture", "section": None,
-            "content": None, "template": None, "metadata": {}, "dry_run": False,
-            "doc_name": None, "target_dir": None
-        }
-        healing_applied = False
-        healing_messages = [f"Parameter healing failed: {str(healing_error)}, using safe defaults"]
-        action = healed_params["action"]
-        doc = healed_params["doc"]
-        section = healed_params["section"]
-        content = healed_params["content"]
-        template = healed_params["template"]
-        metadata = healed_params["metadata"]
-        dry_run = healed_params["dry_run"]
-        doc_name = healed_params["doc_name"]
-        target_dir = healed_params["target_dir"]
 
     # Handle research, bug, review, and agent report card creation
     if action in ["create_research_doc", "create_bug_report", "create_review_report", "create_agent_report_card"]:
@@ -535,9 +649,25 @@ async def manage_docs(
         )
 
     if action == "list_sections":
+        allowed_docs = set((project.get("docs") or {}).keys())
+        if doc not in allowed_docs:
+            response = {"ok": False, "error": f"DOC_NOT_FOUND: doc '{doc}' is not registered"}
+            return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
         return await _handle_list_sections(
             project,
             doc=doc,
+            helper=_MANAGE_DOCS_HELPER,
+            context=context,
+        )
+    if action == "list_checklist_items":
+        allowed_docs = set((project.get("docs") or {}).keys())
+        if doc not in allowed_docs:
+            response = {"ok": False, "error": f"DOC_NOT_FOUND: doc '{doc}' is not registered"}
+            return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
+        return await _handle_list_checklist_items(
+            project,
+            doc=doc,
+            metadata=metadata if isinstance(metadata, dict) else {},
             helper=_MANAGE_DOCS_HELPER,
             context=context,
         )
@@ -550,6 +680,22 @@ async def manage_docs(
             context=context,
         )
 
+    allowed_doc_actions = {
+        "replace_section",
+        "append",
+        "status_update",
+        "apply_patch",
+        "replace_range",
+        "normalize_headers",
+        "generate_toc",
+        "validate_crosslinks",
+    }
+    if action in allowed_doc_actions:
+        allowed_docs = set((project.get("docs") or {}).keys())
+        if doc not in allowed_docs:
+            response = {"ok": False, "error": f"DOC_NOT_FOUND: doc '{doc}' is not registered"}
+            return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
+
     try:
         change = await apply_doc_change(
             project,
@@ -557,6 +703,12 @@ async def manage_docs(
             action=action,
             section=section,
             content=content,
+            patch=patch,
+            patch_source_hash=patch_source_hash,
+            edit=edit,
+            patch_mode=patch_mode,
+            start_line=start_line,
+            end_line=end_line,
             template=template,
             metadata=metadata,
             dry_run=dry_run,
@@ -569,7 +721,7 @@ async def manage_docs(
         return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
 
     storage_record = None
-    if backend and not dry_run:
+    if backend and not dry_run and action != "validate_crosslinks":
         try:
             storage_record = await _get_or_create_storage_project(backend, project)
             await backend.record_doc_change(
@@ -600,7 +752,7 @@ async def manage_docs(
                 pass
 
     log_error = None
-    if not dry_run:
+    if not dry_run and action != "validate_crosslinks":
         # Use bulletproof metadata normalization
         healed_metadata, metadata_healed, metadata_messages = _normalize_metadata_with_healing(metadata)
         log_meta = healed_metadata
@@ -623,6 +775,7 @@ async def manage_docs(
         except Exception as exc:
             log_error = str(exc)
 
+    registry_warning = None
     response: Dict[str, Any] = {
         "ok": change.success,
         "doc": doc,
@@ -632,6 +785,34 @@ async def manage_docs(
         "dry_run": dry_run,
         "diff": change.diff_preview,
     }
+    if change.extra:
+        response["extra"] = change.extra
+
+    if action == "create_doc" and change.success and isinstance(metadata, dict):
+        register_doc = bool(metadata.get("register_doc"))
+        register_key = metadata.get("register_as") or metadata.get("doc_name")
+        if register_doc:
+            if not register_key:
+                return _MANAGE_DOCS_HELPER.apply_context_payload(
+                    _MANAGE_DOCS_HELPER.error_response(
+                        "register_doc requires metadata.register_as or metadata.doc_name"
+                    ),
+                    context,
+                )
+            docs_mapping = dict(project.get("docs") or {})
+            docs_mapping[str(register_key)] = str(change.path)
+            project["docs"] = docs_mapping
+            try:
+                await server_module.state_manager.set_current_project(
+                    project.get("name"),
+                    project,
+                    agent_id=agent_id,
+                )
+            except Exception as exc:
+                registry_warning = f"Registry update failed: {exc}"
+
+    if registry_warning:
+        response.setdefault("warnings", []).append(registry_warning)
 
     # Add error information if operation failed
     if not change.success and change.error_message:
@@ -666,6 +847,12 @@ def manage_docs_main():
                 doc=args.doc,
                 section=args.section,
                 content=args.content,
+                patch=args.patch,
+                patch_source_hash=args.patch_source_hash,
+                edit=args.edit,
+                patch_mode=args.patch_mode,
+                start_line=args.start_line,
+                end_line=args.end_line,
                 template=args.template,
                 metadata=args.metadata,
                 dry_run=args.dry_run,
@@ -717,7 +904,20 @@ Examples:
 
     parser.add_argument(
         "action",
-        choices=["replace_section", "append", "status_update"],
+        choices=[
+            "replace_section",
+            "append",
+            "status_update",
+            "apply_patch",
+            "replace_range",
+            "list_sections",
+            "list_checklist_items",
+            "batch",
+            "create_research_doc",
+            "create_bug_report",
+            "create_review_report",
+            "create_agent_report_card",
+        ],
         help="Action to perform on the document"
     )
 
@@ -735,6 +935,38 @@ Examples:
     parser.add_argument(
         "--content",
         help="Content to add/replace"
+    )
+
+    parser.add_argument(
+        "--patch",
+        help="Unified diff patch to apply"
+    )
+
+    parser.add_argument(
+        "--patch-source-hash",
+        help="SHA256 hash of the file content used to generate the patch"
+    )
+
+    parser.add_argument(
+        "--edit",
+        help="Structured edit payload as JSON string"
+    )
+
+    parser.add_argument(
+        "--patch-mode",
+        help="Patch mode for apply_patch (structured or unified)"
+    )
+
+    parser.add_argument(
+        "--start-line",
+        type=int,
+        help="Start line (1-based) for replace_range"
+    )
+
+    parser.add_argument(
+        "--end-line",
+        type=int,
+        help="End line (1-based) for replace_range"
     )
 
     parser.add_argument(
@@ -761,7 +993,23 @@ Examples:
         print("❌ Error: --section is required for replace_section and status_update actions")
         return 1
 
-    if not args.content and not args.template:
+    if args.action == "apply_patch" and not (args.patch or args.content):
+        if not args.edit:
+            print("❌ Error: --edit is required for apply_patch structured mode")
+            return 1
+
+    if args.action == "apply_patch" and (args.patch or args.content) and not args.patch_mode:
+        print("❌ Error: --patch-mode is required when providing a patch")
+        return 1
+    if args.action == "apply_patch" and args.patch_mode and args.patch_mode not in {"structured", "unified"}:
+        print("❌ Error: --patch-mode must be 'structured' or 'unified'")
+        return 1
+
+    if args.action == "replace_range" and (args.start_line is None or args.end_line is None):
+        print("❌ Error: --start-line and --end-line are required for replace_range")
+        return 1
+
+    if args.action not in ["apply_patch", "replace_range", "create_doc", "validate_crosslinks", "normalize_headers", "generate_toc"] and not args.content and not args.template:
         print("❌ Error: Either --content or --template must be provided")
         return 1
 
@@ -775,7 +1023,18 @@ Examples:
             print(f"❌ Error: Invalid JSON in metadata: {args.metadata}")
             return 1
 
+    edit = None
+    if args.edit:
+        try:
+            import json
+            edit = json.loads(args.edit)
+        except json.JSONDecodeError:
+            print(f"❌ Error: Invalid JSON in edit payload: {args.edit}")
+            return 1
+
     # Run the operation
+    args.edit = edit
+    args.patch_mode = args.patch_mode
     return asyncio.run(_run_manage_docs(args))
 
 
@@ -802,12 +1061,21 @@ async def _handle_list_sections(
         )
 
     text = await asyncio.to_thread(path.read_text, encoding="utf-8")
+    parsed = parse_frontmatter(text)
+    body_lines = parsed.body.splitlines()
+    body_line_offset = len(parsed.frontmatter_raw.splitlines()) if parsed.has_frontmatter else 0
     sections: List[Dict[str, Any]] = []
-    for line_no, line in enumerate(text.splitlines(), start=1):
+    for line_no, line in enumerate(body_lines, start=1):
         stripped = line.strip()
         if stripped.startswith("<!-- ID:") and stripped.endswith("-->"):
             section_id = stripped[len("<!-- ID:"): -len("-->")].strip()
-            sections.append({"id": section_id, "line": line_no})
+            sections.append(
+                {
+                    "id": section_id,
+                    "line": line_no,
+                    "file_line": line_no + body_line_offset,
+                }
+            )
 
     return helper.apply_context_payload(
         {
@@ -815,6 +1083,96 @@ async def _handle_list_sections(
             "doc": doc,
             "path": str(path),
             "sections": sections,
+            "body_line_offset": body_line_offset,
+            "frontmatter_line_count": body_line_offset,
+        },
+        context,
+    )
+
+
+async def _handle_list_checklist_items(
+    project: Dict[str, Any],
+    doc: str,
+    metadata: Dict[str, Any],
+    helper: LoggingToolMixin,
+    context: LoggingContext,
+) -> Dict[str, Any]:
+    """Return checklist items with line numbers for replace_range usage."""
+    docs_mapping = project.get("docs") or {}
+    path_str = docs_mapping.get(doc)
+    if not path_str:
+        return helper.apply_context_payload(
+            helper.error_response(f"Document '{doc}' is not registered for project '{project.get('name')}'."),
+            context,
+        )
+
+    path = Path(path_str)
+    if not path.exists():
+        return helper.apply_context_payload(
+            helper.error_response(f"Document path '{path}' does not exist."),
+            context,
+        )
+
+    if doc != "checklist":
+        return helper.apply_context_payload(
+            helper.error_response("list_checklist_items is only supported for checklist documents."),
+            context,
+        )
+
+    query_text = metadata.get("text")
+    case_sensitive = metadata.get("case_sensitive", True)
+    require_match = metadata.get("require_match", False)
+
+    text = await asyncio.to_thread(path.read_text, encoding="utf-8")
+    parsed = parse_frontmatter(text)
+    body_lines = parsed.body.splitlines()
+    body_line_offset = len(parsed.frontmatter_raw.splitlines()) if parsed.has_frontmatter else 0
+    items: List[Dict[str, Any]] = []
+    matches: List[Dict[str, Any]] = []
+    pattern = re.compile(r"^- \[(?P<mark>[ xX])\]\s*(?P<text>.*)$")
+
+    for line_no, line in enumerate(body_lines, start=1):
+        match = pattern.match(line.strip())
+        if not match:
+            continue
+        item_text = match.group("text")
+        status = "checked" if match.group("mark").lower() == "x" else "unchecked"
+        entry = {
+            "line": line_no,
+            "start_line": line_no,
+            "end_line": line_no,
+            "file_line": line_no + body_line_offset,
+            "status": status,
+            "text": item_text,
+            "raw": line,
+        }
+        items.append(entry)
+        if query_text is None:
+            matches.append(entry)
+        else:
+            if case_sensitive:
+                if item_text == query_text:
+                    matches.append(entry)
+            else:
+                if item_text.lower() == str(query_text).lower():
+                    matches.append(entry)
+
+    if require_match and query_text and not matches:
+        return helper.apply_context_payload(
+            helper.error_response(f"No checklist items matched text: {query_text}"),
+            context,
+        )
+
+    return helper.apply_context_payload(
+        {
+            "ok": True,
+            "doc": doc,
+            "path": str(path),
+            "total_items": len(items),
+            "items": items,
+            "matches": matches,
+            "body_line_offset": body_line_offset,
+            "frontmatter_line_count": body_line_offset,
         },
         context,
     )

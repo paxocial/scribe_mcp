@@ -545,11 +545,15 @@ class BulletproofParameterCorrector:
 
                 # Correct value
                 if isinstance(value, str):
-                    # Escape comparison operators and sanitize
-                    value = BulletproofParameterCorrector._escape_comparison_operators(value)
-                    value = value.replace("\n", " ").replace("\r", " ").replace("|", ";")
-                    if len(value) > 500:
-                        value = value[:497] + "..."
+                    preserve_keys = {"body", "snippet", "content"}
+                    if key in preserve_keys:
+                        value = value
+                    else:
+                        # Escape comparison operators and sanitize
+                        value = BulletproofParameterCorrector._escape_comparison_operators(value)
+                        value = value.replace("\n", " ").replace("\r", " ").replace("|", ";")
+                        if len(value) > 500:
+                            value = value[:497] + "..."
                 elif not isinstance(value, (int, float, bool, list, dict)):
                     try:
                         value = str(value)
@@ -1265,7 +1269,8 @@ class BulletproofParameterCorrector:
             action_value = params['action']
             allowed_actions = {
                 'replace_section', 'append', 'status_update', 'create_research_doc',
-                'create_bug_report', 'create_review_report', 'create_agent_report_card'
+                'create_bug_report', 'create_review_report', 'create_agent_report_card',
+                'apply_patch', 'replace_range'
             }
             corrected['action'] = BulletproofParameterCorrector.correct_enum_parameter(
                 action_value, allowed_actions, 'action', 'append'
@@ -1299,7 +1304,8 @@ class BulletproofParameterCorrector:
             if corrected['action'] in ['replace_section', 'append'] and not corrected['content'].strip():
                 corrected['content'] = "Default content: No content provided."
         else:
-            corrected['content'] = "Default content: No content provided."
+            if corrected['action'] not in ['apply_patch', 'replace_range']:
+                corrected['content'] = "Default content: No content provided."
 
         # Handle metadata parameter for bug reports and research docs
         if 'metadata' in params or 'meta' in params:

@@ -95,6 +95,36 @@
     }
   },
   "teaching_rules": {
+    "manage_docs_replace_section_scaffold": {
+      "triggers": ["tool=manage_docs", "action=replace_section", "scaffold=true"],
+      "reminder_key": "teaching.manage_docs_scaffold_mode",
+      "cooldown_minutes": 30
+    },
+    "manage_docs_replace_section_preference": {
+      "triggers": ["tool=manage_docs", "action=replace_section", "scaffold=false"],
+      "reminder_key": "teaching.manage_docs_precision_preferred",
+      "cooldown_minutes": 30
+    },
+    "manage_docs_normalize_headers": {
+      "triggers": ["tool=manage_docs", "action=normalize_headers"],
+      "reminder_key": "teaching.manage_docs_normalize_headers",
+      "cooldown_minutes": 30
+    },
+    "manage_docs_generate_toc": {
+      "triggers": ["tool=manage_docs", "action=generate_toc"],
+      "reminder_key": "teaching.manage_docs_generate_toc",
+      "cooldown_minutes": 30
+    },
+    "manage_docs_create_doc": {
+      "triggers": ["tool=manage_docs", "action=create_doc"],
+      "reminder_key": "teaching.manage_docs_create_doc",
+      "cooldown_minutes": 30
+    },
+    "manage_docs_validate_crosslinks": {
+      "triggers": ["tool=manage_docs", "action=validate_crosslinks"],
+      "reminder_key": "teaching.manage_docs_validate_crosslinks",
+      "cooldown_minutes": 30
+    },
     "list_projects_compact": {
       "triggers": ["tool=list_projects", "not_compact=true", "total_items > 3"],
       "reminder_key": "teaching.how_to_use",
