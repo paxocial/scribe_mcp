@@ -102,7 +102,16 @@ pip install -r requirements.txt
     --env SCRIBE_STORAGE_BACKEND=sqlite \
     -- bash -lc 'cd /home/path/to/scribe_mcp && exec python -m server'
   ```
-
+- Claude Code registration example:
+  ```bash
+  claude mcp add scribe \
+    --env SCRIBE_STORAGE_BACKEND=sqlite \
+    -- bash -lc 'cd /home/path/to/scribe_mcp && exec python -m server'
+  ```
+  For Global MCP
+  ```bash
+    claude mcp add scribe --scope user --env SCRIBE_STORAGE_BACKEND=sqlite -- bash -lc 'cd /home/austin/projects/MCP_SPINE/scribe_mcp && exec python -m server'
+  ```
 
 Once connected from Claude / Codex MCP:
 

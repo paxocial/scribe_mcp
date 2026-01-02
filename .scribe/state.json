@@ -1,5 +1,5 @@
 {
-  "current_project": "scribe_sentinel_concurrency_v1",
+  "current_project": "scribe_mcp",
   "projects": {
     "scribe_mcp": {
       "name": "scribe_mcp",
@@ -37,11 +37,15 @@
     }
   },
   "recent_projects": [
-    "scribe_sentinel_concurrency_v1",
-    "scribe_mcp"
+    "scribe_mcp",
+    "scribe_sentinel_concurrency_v1"
   ],
   "session_projects": {},
   "recent_tools": [
+    {
+      "name": "list_projects",
+      "ts": "2026-01-02 13:09:15 UTC"
+    },
     {
       "name": "append_entry",
       "ts": "2026-01-02 11:49:22 UTC"
@@ -63,17 +67,13 @@
       "ts": "2026-01-02 11:14:04 UTC"
     },
     {
-      "name": "list_projects",
-      "ts": "2026-01-02 11:12:22 UTC"
-    },
-    {
       "name": "vector_search",
       "ts": "2026-01-02 09:20:27 UTC"
     }
   ],
-  "last_activity_at": "2026-01-02 11:49:22 UTC",
-  "session_started_at": "2026-01-02 09:20:27 UTC",
-  "version": 23,
-  "last_updated_by": "Scribe",
-  "operation_timestamp": "2026-01-02 11:14:04 UTC"
+  "last_activity_at": "2026-01-02 13:09:15 UTC",
+  "session_started_at": "2026-01-02 13:08:37 UTC",
+  "version": 37,
+  "last_updated_by": null,
+  "operation_timestamp": "2026-01-02 13:09:15 UTC"
 }
