@@ -6,6 +6,78 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## 🎯 ACTIVE PROJECT ORCHESTRATION WORKFLOW
+
+> **Current Project**: `scribe_tool_output_refinement`
+> **Orchestrator**: Claude Code (Lead) + Human
+> **Protocol**: Research → Architect → Review → Code → Review
+
+### Protocol Sequence (Mandatory)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  1️⃣ RESEARCH PHASE                                              │
+│     Agent: scribe-research-analyst                              │
+│     Input: Initial context + skeleton docs                      │
+│     Output: RESEARCH_*.md reports in research/ folder           │
+│     Scribe: agent="ResearchAgent"                               │
+├─────────────────────────────────────────────────────────────────┤
+│  2️⃣ ARCHITECT PHASE                                             │
+│     Agent: scribe-architect                                     │
+│     Input: Research reports + initial context                   │
+│     Output: Full ARCHITECTURE_GUIDE.md, PHASE_PLAN.md,          │
+│             CHECKLIST.md                                        │
+│     Scribe: agent="ArchitectAgent"                              │
+├─────────────────────────────────────────────────────────────────┤
+│  3️⃣ PRE-IMPLEMENTATION REVIEW                                   │
+│     Agent: scribe-review-agent                                  │
+│     Input: All docs from phases 1-2                             │
+│     Output: Review report, agent grades (≥93% to pass)          │
+│     Scribe: agent="ReviewAgent"                                 │
+├─────────────────────────────────────────────────────────────────┤
+│  4️⃣ IMPLEMENTATION PHASE                                        │
+│     Agent: scribe-coder                                         │
+│     Input: Approved architecture + phase plan                   │
+│     Output: Working code, tests, IMPLEMENTATION_REPORT.md       │
+│     Scribe: agent="CoderAgent" (every 3 edits or less!)         │
+├─────────────────────────────────────────────────────────────────┤
+│  5️⃣ FINAL REVIEW                                                │
+│     Agent: scribe-review-agent                                  │
+│     Input: Implementation + all docs                            │
+│     Output: Final grades, approval/rejection                    │
+│     Scribe: agent="ReviewAgent"                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Agent Scribe Requirements (Non-Negotiable)
+
+| Agent | Scribe Name | Must Log |
+|-------|-------------|----------|
+| Orchestrator (Claude Code) | `Orchestrator` | Phase transitions, agent dispatches, decisions |
+| Research Agent | `ResearchAgent` | Findings, analysis, sources, confidence |
+| Architect Agent | `ArchitectAgent` | Design decisions, trade-offs, constraints |
+| Review Agent | `ReviewAgent` | Grades, pass/fail, issues found |
+| Coder Agent | `CoderAgent` | Every 3 edits, test results, bugs |
+| Bug Hunter | `BugHunterAgent` | Bug lifecycle, root cause, fixes |
+
+### Orchestrator Responsibilities
+
+1. **Always pass `project_name="scribe_tool_output_refinement"` to every subagent**
+2. **Log phase transitions** with `append_entry(agent="Orchestrator")`
+3. **Enforce quality gates** - no progression without ≥93% review score
+4. **Re-dispatch failing agents** to FIX existing docs (never replace)
+5. **Coordinate handoffs** between agents with clear context
+
+### Current Phase Status
+
+- [ ] Phase 1: Research - PENDING
+- [ ] Phase 2: Architecture - PENDING
+- [ ] Phase 3: Pre-Implementation Review - PENDING
+- [ ] Phase 4: Implementation - PENDING
+- [ ] Phase 5: Final Review - PENDING
+
+---
+
 ## 🚨 COMMANDMENTS - CRITICAL RULES
  ### MCP Tool Usage Policy
   - You have full access to every tool exposed by the MCP server.
