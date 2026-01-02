@@ -35,6 +35,7 @@ doc_logger = logging.getLogger(__name__)
 FRAGMENT_DIR = (template_root().parent / "fragments").resolve()
 SECTION_MARKER = "<!-- ID: {section} -->"
 _HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+_HEADER_LINE_PATTERN = re.compile(r"^(#{1,6})\s+(.*\S.*)$")
 PATCH_MODE_STRUCTURED = "structured"
 PATCH_MODE_UNIFIED = "unified"
 PATCH_MODE_ALIASES = {"diff": PATCH_MODE_UNIFIED}
@@ -335,15 +336,20 @@ async def apply_doc_change(
             elif action == "replace_range":
                 resolved_start = start_line
                 resolved_end = end_line
-                if (resolved_start is None or resolved_end is None) and isinstance(metadata, dict):
+                if isinstance(metadata, dict):
                     if resolved_start is None and "start_line" in metadata:
-                        resolved_start = int(metadata["start_line"])
+                        resolved_start = metadata["start_line"]
                     if resolved_end is None and "end_line" in metadata:
-                        resolved_end = int(metadata["end_line"])
-                if resolved_start is None or resolved_end is None:
-                    raise DocumentOperationError("replace_range requires start_line and end_line")
+                        resolved_end = metadata["end_line"]
+                if resolved_start is not None:
+                    resolved_start = int(resolved_start)
+                if resolved_end is not None:
+                    resolved_end = int(resolved_end)
                 updated_body = _replace_range_text(
-                    original_body, int(resolved_start), int(resolved_end), content or ""
+                    original_body,
+                    resolved_start,
+                    resolved_end,
+                    content or "",
                 )
             elif action == "create_doc":
                 overwrite = bool(metadata.get("overwrite")) if isinstance(metadata, dict) else False
@@ -1306,10 +1312,26 @@ def _is_patch_context_error(error_message: str) -> bool:
     )
 
 
-def _replace_range_text(original_text: str, start_line: int, end_line: int, replacement: str) -> str:
-    """Replace inclusive line range [start_line, end_line] (1-based)."""
+def _replace_range_text(
+    original_text: str,
+    start_line: Optional[int],
+    end_line: Optional[int],
+    replacement: str,
+) -> str:
+    """Replace inclusive line range [start_line, end_line] (1-based) or homologous section."""
+    allow_header_fallback = start_line is not None and end_line is not None
+    header_replacement = _replace_section_by_header(
+        original_text, replacement, allow_missing_header_fallback=allow_header_fallback
+    )
+    if header_replacement is not None:
+        return header_replacement
+
+    if start_line is None or end_line is None:
+        raise DocumentOperationError("replace_range requires start_line and end_line")
+
     if start_line < 1 or end_line < start_line:
         raise DocumentOperationError(f"Invalid range: start_line={start_line} end_line={end_line}")
+
     lines = original_text.splitlines(keepends=True)
     if start_line > len(lines) + 1:
         raise DocumentOperationError("start_line out of range")
@@ -1321,6 +1343,113 @@ def _replace_range_text(original_text: str, start_line: int, end_line: int, repl
         repl += "\n"
     new_lines = lines[: start_line - 1] + ([repl] if repl else []) + lines[end_line:]
     return "".join(new_lines)
+
+
+def _replace_section_by_header(
+    original_text: str,
+    replacement: str,
+    *,
+    allow_missing_header_fallback: bool = False,
+) -> Optional[str]:
+    """Replace a Markdown header section when the replacement starts with a header.
+
+    Section replacement is attempted before falling back to numeric ranges. When a header
+    is present, it must match exactly (level and title) and only level ≥ 2 is considered.
+    Headers inside fenced code blocks are ignored, so replacements remain deterministic.
+    If the header is missing or ambiguous and fallback is allowed (both start/end provided),
+    no error is raised so the caller can continue with the provided numeric range.
+    """
+    header_info = _extract_replacement_header(replacement)
+    if header_info is None:
+        return None
+
+    level, title = header_info
+    header_repr = f"{('#' * level)} {title}"
+    headers = _collect_markdown_headers(original_text)
+    matching_sections = [
+        header for header in headers if header["level"] == level and header["title"] == title
+    ]
+
+    if not matching_sections:
+        if allow_missing_header_fallback:
+            return None
+        raise DocumentOperationError(f"SECTION_HEADER_NOT_FOUND: {header_repr} is missing")
+    if len(matching_sections) > 1:
+        line_numbers = ", ".join(str(section["line_number"]) for section in matching_sections)
+        raise DocumentOperationError(
+            f"SECTION_HEADER_AMBIGUOUS: {header_repr} matches multiple sections (lines {line_numbers})"
+        )
+
+    target = matching_sections[0]
+    section_end = len(original_text)
+    for header in headers:
+        if header["start"] <= target["start"]:
+            continue
+        if header["level"] <= level:
+            section_end = header["start"]
+            break
+
+    insertion = replacement
+    if insertion and not insertion.endswith("\n"):
+        insertion += "\n"
+
+    return original_text[: target["start"]] + insertion + original_text[section_end:]
+
+
+def _collect_markdown_headers(text: str) -> list[dict[str, Any]]:
+    """Return metadata for every Markdown header in `text`, skipping fenced code blocks."""
+    headers: list[dict[str, Any]] = []
+    lines = text.splitlines(keepends=True)
+    in_fence = False
+    position = 0
+
+    for idx, line in enumerate(lines):
+        line_start = position
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            position += len(line)
+            continue
+        if in_fence:
+            position += len(line)
+            continue
+
+        match = _HEADER_LINE_PATTERN.match(stripped)
+        if match:
+            level = len(match.group(1))
+            title = match.group(2).strip()
+            if title:
+                headers.append(
+                    {
+                        "level": level,
+                        "title": title,
+                        "start": line_start,
+                        "line_number": idx + 1,
+                    }
+                )
+
+        position += len(line)
+
+    return headers
+
+
+def _extract_replacement_header(content: str) -> Optional[tuple[int, str]]:
+    """Return (level, title) if the content starts with a Markdown header (## or deeper)."""
+    for line in content.splitlines():
+        trimmed_line = line.strip()
+        if not trimmed_line:
+            continue
+        match = _HEADER_LINE_PATTERN.match(line.lstrip())
+        if not match:
+            return None
+        level = len(match.group(1))
+        if level < 2:
+            return None
+        title = match.group(2).strip()
+        if not title:
+            return None
+        return level, title
+    return None
 
 
 def _replace_block_text(original_text: str, anchor: str, replacement: str) -> str:

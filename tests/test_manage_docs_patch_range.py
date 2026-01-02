@@ -455,6 +455,52 @@ async def test_replace_range_dry_run_parity(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_replace_range_header_supersedes_explicit_range(tmp_path: Path) -> None:
+    project = await _setup_project(tmp_path)
+    architecture_path = Path(project["docs"]["architecture"])
+    architecture_path.write_text(
+        """## A) Config Loading Audit
+alpha detail
+
+## B) manage_docs Precision Audit
+old section content
+
+## C) manage_docs Secondary
+extra detail
+""",
+        encoding="utf-8",
+    )
+
+    replacement = """## B) manage_docs Precision Audit
+replaced line 1
+replaced line 2
+"""
+
+    change = await apply_doc_change(
+        project,
+        doc="architecture",
+        action="replace_range",
+        section=None,
+        content=replacement,
+        patch=None,
+        patch_source_hash=None,
+        start_line=99,
+        end_line=100,
+        template=None,
+        metadata={},
+        dry_run=False,
+    )
+
+    assert change.success
+    parsed = parse_frontmatter(architecture_path.read_text(encoding="utf-8"))
+    body = parsed.body
+    assert "replaced line 1" in body
+    assert "old section content" not in body
+    assert body.count("## B) manage_docs Precision Audit") == 1
+    assert "## C) manage_docs Secondary" in body
+
+
+@pytest.mark.asyncio
 async def test_healing_before_reminders(tmp_path: Path) -> None:
     """Ensure healed scaffold/action values drive reminder selection."""
     project = await _setup_project(tmp_path)
