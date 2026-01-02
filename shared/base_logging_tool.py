@@ -56,8 +56,11 @@ class LoggingToolMixin:
         context: LoggingContext,
     ) -> Dict[str, Any]:
         """Attach reminders and recent projects to a tool response."""
-        response.setdefault("recent_projects", list(context.recent_projects))
-        response.setdefault("reminders", list(context.reminders))
+        # Ensure context appears at the end for readability.
+        recent_projects = response.pop("recent_projects", list(context.recent_projects))
+        reminders = response.pop("reminders", list(context.reminders))
+        response["recent_projects"] = recent_projects
+        response["reminders"] = reminders
         return response
 
     @staticmethod

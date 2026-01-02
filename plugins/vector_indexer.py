@@ -179,6 +179,35 @@ class VectorIndexer(HookPlugin):
         except Exception as e:
             plugin_logger.error(f"Failed to queue entry for vector indexing: {e}")
 
+    def enqueue_entry(
+        self,
+        entry_data: Dict[str, Any],
+        *,
+        wait: bool = False,
+        timeout: Optional[float] = None,
+    ) -> bool:
+        """Queue an entry for vector indexing, optionally waiting for space."""
+        if not self.initialized or not self.enabled:
+            return False
+
+        if not self.embedding_queue or not self._loop:
+            plugin_logger.warning("Embedding queue not available, skipping entry")
+            return False
+
+        if not wait:
+            self.post_append(entry_data)
+            return True
+
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                self._queue_entry_for_embedding_wait(entry_data, timeout),
+                self._loop,
+            )
+            return bool(future.result(timeout=timeout if timeout else None))
+        except Exception as exc:
+            plugin_logger.error(f"Failed to enqueue entry with backpressure: {exc}")
+            return False
+
     @staticmethod
     def _log_async_error(future: asyncio.Future) -> None:
         """Log exceptions from background scheduling."""
@@ -378,19 +407,7 @@ class VectorIndexer(HookPlugin):
             return
 
         try:
-            # Prepare entry data for embedding
-            embedding_task = {
-                'entry_id': entry_data.get('entry_id'),
-                'project_slug': entry_data.get('project_name', '').lower().replace(' ', '-'),
-                'text_content': entry_data.get('message', ''),
-                'agent_name': entry_data.get('agent', ''),
-                'timestamp_utc': entry_data.get('timestamp', ''),
-                'metadata_json': json.dumps(entry_data.get('meta', {})),
-                'embedding_model': self.vector_config.model,
-                'vector_dimension': self.vector_config.dimension,
-                'retry_count': 0,
-                'queued_at': utcnow()
-            }
+            embedding_task = self._prepare_embedding_task(entry_data)
 
             # Add to queue (non-blocking)
             self.embedding_queue.put_nowait(embedding_task)
@@ -399,6 +416,42 @@ class VectorIndexer(HookPlugin):
             plugin_logger.warning(f"Vector embedding queue full, dropping entry: {entry_data.get('entry_id')}")
         except Exception as e:
             plugin_logger.error(f"Failed to queue entry for embedding: {e}")
+
+    async def _queue_entry_for_embedding_wait(
+        self,
+        entry_data: Dict[str, Any],
+        timeout: Optional[float],
+    ) -> bool:
+        """Queue an entry for embedding, waiting for available capacity."""
+        if not self.embedding_queue:
+            return False
+
+        try:
+            embedding_task = self._prepare_embedding_task(entry_data)
+            if timeout:
+                await asyncio.wait_for(self.embedding_queue.put(embedding_task), timeout=timeout)
+            else:
+                await self.embedding_queue.put(embedding_task)
+            return True
+        except asyncio.TimeoutError:
+            return False
+        except Exception as e:
+            plugin_logger.error(f"Failed to queue entry with backpressure: {e}")
+            return False
+
+    def _prepare_embedding_task(self, entry_data: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            'entry_id': entry_data.get('entry_id'),
+            'project_slug': entry_data.get('project_name', '').lower().replace(' ', '-'),
+            'text_content': entry_data.get('message', ''),
+            'agent_name': entry_data.get('agent', ''),
+            'timestamp_utc': entry_data.get('timestamp', ''),
+            'metadata_json': json.dumps(entry_data.get('meta', {})),
+            'embedding_model': self.vector_config.model,
+            'vector_dimension': self.vector_config.dimension,
+            'retry_count': 0,
+            'queued_at': utcnow()
+        }
 
     async def _queue_worker(self) -> None:
         """Background worker for processing embedding queue."""
@@ -572,35 +625,28 @@ class VectorIndexer(HookPlugin):
             query_embedding = self.embedding_model.encode([query])
             query_embedding = query_embedding / np.linalg.norm(query_embedding, axis=1, keepdims=True)
 
-            # Search in FAISS index
-            k = min(k, self.vector_index.ntotal)
-            if k == 0:
+            total = int(self.vector_index.ntotal)
+            if total <= 0:
                 return []
 
-            distances, rowids = self.vector_index.search(query_embedding, k)
-
-            # Retrieve entry data from mapping database
-            results = []
-            with self._db_lock:
-                for i, rowid in enumerate(rowids[0]):
-                    distance = float(distances[0][i])
-
-                    # Get entry data
-                    cursor = self._db_conn.execute("""
-                        SELECT entry_id, project_slug, text_content, agent_name,
-                               timestamp_utc, metadata_json
-                        FROM vector_entries
-                        WHERE vector_rowid = ? AND repo_slug = ?
-                    """, (int(rowid), self.repo_slug))
-
-                    row = cursor.fetchone()
-                    if row:
-                        # Apply filters if provided
-                        if filters:
-                            if not self._apply_filters(row, filters):
-                                continue
-
-                        result = {
+            def _search_with_k(search_k: int) -> List[Dict[str, Any]]:
+                distances, rowids = self.vector_index.search(query_embedding, search_k)
+                results: List[Dict[str, Any]] = []
+                with self._db_lock:
+                    for i, rowid in enumerate(rowids[0]):
+                        distance = float(distances[0][i])
+                        cursor = self._db_conn.execute("""
+                            SELECT entry_id, project_slug, text_content, agent_name,
+                                   timestamp_utc, metadata_json
+                            FROM vector_entries
+                            WHERE vector_rowid = ? AND repo_slug = ?
+                        """, (int(rowid), self.repo_slug))
+                        row = cursor.fetchone()
+                        if not row:
+                            continue
+                        if filters and not self._apply_filters(row, filters):
+                            continue
+                        results.append({
                             'entry_id': row['entry_id'],
                             'project_slug': row['project_slug'],
                             'text_content': row['text_content'],
@@ -609,10 +655,22 @@ class VectorIndexer(HookPlugin):
                             'metadata_json': row['metadata_json'],
                             'similarity_score': distance,
                             'vector_rowid': int(rowid)
-                        }
-                        results.append(result)
+                        })
+                return results
 
-            return results
+            # Default behavior: no filters, standard top-k
+            if not filters:
+                search_k = min(max(1, int(k)), total)
+                return _search_with_k(search_k)
+
+            # Filtered search: overfetch to avoid starving filtered results
+            target_k = max(1, int(k))
+            search_k = min(total, max(target_k, 50))
+            while True:
+                results = _search_with_k(search_k)
+                if len(results) >= target_k or search_k >= total:
+                    return results[:target_k]
+                search_k = min(total, max(search_k * 2, search_k + 50))
 
         except Exception as e:
             plugin_logger.error(f"Vector search failed: {e}")
@@ -654,9 +712,29 @@ class VectorIndexer(HookPlugin):
         """Apply filters to search results."""
         try:
             # Project filter
-            if 'project_slug' in filters:
+            if 'project_slugs' in filters:
+                if row['project_slug'] not in set(filters['project_slugs']):
+                    return False
+            elif 'project_slug_prefix' in filters:
+                if not row['project_slug'].startswith(filters['project_slug_prefix']):
+                    return False
+            elif 'project_slug' in filters:
                 if row['project_slug'] != filters['project_slug']:
                     return False
+
+            meta = {}
+            needs_meta = any(key in filters for key in ('content_type', 'doc_type', 'file_path'))
+            metadata_json = None
+            if needs_meta:
+                try:
+                    metadata_json = row['metadata_json']
+                except Exception:
+                    metadata_json = None
+                if metadata_json:
+                    try:
+                        meta = json.loads(metadata_json)
+                    except (TypeError, json.JSONDecodeError):
+                        meta = {}
 
             # Time range filter
             if 'time_range' in filters:
@@ -677,11 +755,24 @@ class VectorIndexer(HookPlugin):
                 if row['agent_name'] != filters['agent_name']:
                     return False
 
+            # Content type filter (log/doc)
+            if 'content_type' in filters:
+                if meta.get('content_type') != filters['content_type']:
+                    return False
+
+            if 'doc_type' in filters:
+                if meta.get('doc_type') != filters['doc_type']:
+                    return False
+
+            if 'file_path' in filters:
+                if meta.get('file_path') != filters['file_path']:
+                    return False
+
             return True
 
         except Exception as e:
             plugin_logger.warning(f"Filter application failed: {e}")
-            return True  # Default to include if filtering fails
+            return False  # Default to exclude if filtering fails
 
     def rebuild_index(self) -> Dict[str, Any]:
         """Rebuild the entire vector index from scratch."""
@@ -731,25 +822,65 @@ class VectorIndexer(HookPlugin):
 
     def _stop_background_processing(self) -> None:
         """Stop background queue processing."""
-        if self.queue_worker_task and not self.queue_worker_task.done():
-            self.queue_worker_task.cancel()
+        if not self.queue_worker_task:
+            plugin_logger.info("Background processing stopped")
+            return
+
+        task = self.queue_worker_task
+        if task.done():
+            self.queue_worker_task = None
+            plugin_logger.info("Background processing stopped")
+            return
+
+        import asyncio
+        import concurrent.futures
+
+        if self._owns_loop and self._loop and not self._loop.is_closed():
+            def _cancel() -> None:
+                if not task.done():
+                    task.cancel()
+
+            self._loop.call_soon_threadsafe(_cancel)
+
+            async def _await_task() -> None:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
             try:
-                # Wait for task to finish
-                import asyncio
+                future = asyncio.run_coroutine_threadsafe(_await_task(), self._loop)
+                future.result(timeout=5)
+            except (concurrent.futures.TimeoutError, RuntimeError, asyncio.CancelledError):
+                pass
+            except Exception:
+                pass
+        else:
+            task.cancel()
+            try:
                 loop = asyncio.get_event_loop()
-                loop.run_until_complete(self.queue_worker_task)
+                loop.run_until_complete(task)
             except (asyncio.CancelledError, RuntimeError):
                 pass
 
+        self.queue_worker_task = None
         plugin_logger.info("Background processing stopped")
 
     def _start_background_processing(self) -> None:
         """Start background queue processing if not already running."""
-        if not self.queue_worker_task or self.queue_worker_task.done():
-            try:
-                import asyncio
-                loop = asyncio.get_event_loop()
-                self.queue_worker_task = loop.create_task(self._queue_worker())
-                plugin_logger.info("Background processing started")
-            except RuntimeError:
-                plugin_logger.warning("No event loop available, background processing disabled")
+        if self.queue_worker_task and not self.queue_worker_task.done():
+            return
+        if self._owns_loop and self._loop:
+            def _start() -> None:
+                if not self.queue_worker_task or self.queue_worker_task.done():
+                    self.queue_worker_task = self._loop.create_task(self._queue_worker())
+            self._loop.call_soon_threadsafe(_start)
+            plugin_logger.info("Background processing started (dedicated loop)")
+            return
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            self.queue_worker_task = loop.create_task(self._queue_worker())
+            plugin_logger.info("Background processing started")
+        except RuntimeError:
+            plugin_logger.warning("No event loop available, background processing disabled")

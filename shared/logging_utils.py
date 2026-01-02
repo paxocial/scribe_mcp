@@ -64,9 +64,29 @@ async def resolve_logging_context(
 
     project: Optional[Dict[str, Any]] = None
     recent_projects: List[str] = []
+    exec_context = None
+    if hasattr(server_module, "get_execution_context"):
+        try:
+            exec_context = server_module.get_execution_context()
+        except Exception:
+            exec_context = None
+
+    # Primary path: session-scoped project resolution (project mode only).
+    if exec_context and getattr(exec_context, "mode", None) == "project":
+        try:
+            state = await server_module.state_manager.load()
+            session_project = state.get_session_project(getattr(exec_context, "session_id", None))
+            if session_project:
+                project = dict(session_project)
+                recent_projects = [project.get("name")] if project.get("name") else []
+                for name in state.recent_projects:
+                    if name and name not in recent_projects:
+                        recent_projects.append(name)
+        except Exception:
+            pass
 
     # Primary path: agent-specific context if an agent_id is available.
-    if agent_id:
+    if agent_id and not project:
         from scribe_mcp.tools.agent_project_utils import get_agent_project_data  # Imported lazily to avoid circular import.
 
         project, recent_projects = await get_agent_project_data(agent_id)
@@ -79,6 +99,22 @@ async def resolve_logging_context(
         if project:
             # Maintain recent projects ordering with requested name first.
             recent_projects = [project["name"]]
+
+    # Sentinel mode must never resolve project context from global state.
+    if exec_context and getattr(exec_context, "mode", None) == "sentinel":
+        if require_project:
+            raise ProjectResolutionError(
+                "Project resolution forbidden in sentinel mode.",
+                recent_projects,
+            )
+        return LoggingContext(
+            tool_name=tool_name,
+            project=None,
+            recent_projects=recent_projects,
+            state_snapshot=state_snapshot,
+            reminders=[],
+            agent_id=agent_id,
+        )
 
     # Final fallback: use the state's active project snapshot.
     if not project:

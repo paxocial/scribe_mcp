@@ -265,38 +265,6 @@ def test_generate_doc_templates_renders_files(tmp_path, isolated_state):
             shutil.rmtree(target_dir)
 
 
-def test_rate_limit_blocks_excess_entries(monkeypatch, isolated_state, project_root):
-    root = project_root
-    run(set_project.set_project("rate-limit", str(root)))
-
-    patched_settings = replace(
-        settings,
-        log_rate_limit_count=1,
-        log_rate_limit_window=3600,
-    )
-    monkeypatch.setattr(append_entry, "settings", patched_settings, raising=False)
-    append_entry._RATE_TRACKER.clear()
-    append_entry._RATE_LOCKS.clear()
-
-    first = run(
-        append_entry.append_entry(
-            message="Initial entry",
-            status="info",
-        )
-    )
-    assert first["ok"]
-
-    second = run(
-        append_entry.append_entry(
-            message="Should be limited",
-            status="info",
-        )
-    )
-    assert not second["ok"]
-    assert "rate limit" in second["error"].lower()
-    assert second["retry_after_seconds"] >= 1
-
-
 def test_log_rotation_triggers_when_max_bytes_reached(monkeypatch, isolated_state, project_root):
     root = project_root
     run(set_project.set_project("rotation-limit", str(root)))

@@ -30,6 +30,11 @@ Structured edits are now the default path: agents express intent, the server com
 - `normalize_headers` supports ATX headers with or without space and Setext (`====` / `----`), skipping fenced code blocks. Output is canonical ATX.
 - `generate_toc` uses GitHub-style anchors (NFKD normalization, ASCII folding, emoji removal, punctuation collapse, de-duped suffixes).
 - Structural actions validate doc keys against the registry and fail hard on unknown docs (no silent redirects).
+- `read_file` tool provides repo-scoped file reads with scan/chunk/page/search modes and provenance logging.
+- `scribe_doctor` reports repo root, config, plugin status, and vector readiness for faster diagnostics.
+- `manage_docs` now supports semantic search via `action="search"` with `search_mode="semantic"`, including doc/log separation and `doc_k`/`log_k` overrides.
+- Vector indexing now prefers registry-managed docs only; log/rotated-log files are excluded from doc indexing.
+- Reindex supports `--rebuild` (clear index), `--safe` (low-thread fallback), and `--wait-for-drain` to block until embeddings are written.
 
 Example (structured default):
 ```json
@@ -104,6 +109,8 @@ Once connected from Claude / Codex MCP:
 - Use **`set_project`** to register/select a project and bootstrap dev_plan docs (pass `root=/abs/path/to/repo` to work in any repo).
 - Use **`append_entry`** for all logging (single/bulk).
 - Use **`manage_docs`** for architecture/phase/checklist updates.  **2.1.1** introduces diff edits.
+- Use **`read_file`** for safe, auditable file reads (scan/chunk/page/search).
+- Use **`scribe_doctor`** for readiness checks (repo root, config, vector index status).
 - Use **`read_recent` / `list_projects`** to resume context after compaction.
 
 **Automatic log routing (BUG / SECURITY)**

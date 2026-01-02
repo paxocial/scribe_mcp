@@ -208,6 +208,7 @@ def _validate_inputs(
         "batch",
         "apply_patch",
         "replace_range",
+        "replace_text",
         "normalize_headers",
         "generate_toc",
         "create_doc",
@@ -244,6 +245,13 @@ def _validate_inputs(
     if action == "replace_range":
         if start_line is None or end_line is None:
             raise DocumentValidationError("start_line and end_line are required for replace_range")
+
+    if action == "replace_text":
+        if metadata is None:
+            raise DocumentValidationError("metadata is required for replace_text")
+        validator.validate_metadata(metadata, "metadata")
+        if not metadata.get("find"):
+            raise DocumentValidationError("metadata.find is required for replace_text")
 
     if action == "create_doc":
         if metadata is None:

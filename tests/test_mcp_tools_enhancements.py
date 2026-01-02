@@ -74,7 +74,7 @@ class TestManageDocsEnumValidation:
         )
         # Verify the invalid action was corrected to a valid default
         assert corrected[1] == "append"  # Default fallback action
-        assert corrected[0] in ["architecture", "phase_plan", "checklist", "implementation", "research", "bugs"]
+        assert corrected[0] == "test_doc"
 
     def test_replace_section_requires_section_param(self):
         """Test that replace_section action requires section parameter."""

@@ -167,14 +167,22 @@ class PermissionChecker:
         if operation == "rotate" and not permissions.get("allow_rotate", True):
             return False
 
+        if operation == "append" and not permissions.get("allow_append", True):
+            return False
+
+        if operation == "read" and not permissions.get("allow_read", True):
+            return False
+
         if operation == "generate_docs" and not permissions.get("allow_generate_docs", True):
             return False
 
         if operation == "bulk_entries" and not permissions.get("allow_bulk_entries", True):
             return False
 
-        # Check project requirement
-        if operation in ["append", "read"] and permissions.get("require_project", False):
+        # Check project requirement (opt-out for internal file helpers)
+        if operation in ["append", "read", "rotate"] and permissions.get("require_project", False):
+            if context.get("enforce_project") is False:
+                return True
             if not context.get("project_name"):
                 return False
 
@@ -271,11 +279,11 @@ class MultiTenantSafety:
         sandbox = self.get_sandbox(repo_root)
         permission_checker = self.get_permission_checker(repo_root)
 
-        # Check permissions
-        permission_checker.validate_operation(operation, context)
-
-        # Sandbox the path
+        # Sandbox the path first so security errors surface before permission errors.
         safe_path = sandbox.sandbox_path(file_path)
+
+        # Check permissions after sandbox validation.
+        permission_checker.validate_operation(operation, context)
 
         return safe_path
 

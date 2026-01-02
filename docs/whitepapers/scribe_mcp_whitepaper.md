@@ -363,6 +363,18 @@ The Modern Tool Architecture provides a unified foundation for all Scribe MCP to
 - Structured operations: `replace_section`, `append`, `status_update`, `apply_patch`, `replace_range`, `normalize_headers`, `generate_toc`, `create_doc`, `validate_crosslinks` with validation
 - Automatic change tracking and audit logging via doc_updates log
 
+**Read + Diagnostics (v2.1.1 additions):**
+- `read_file`: Repo-scoped file access with scan/chunk/line/page/full_stream/search modes plus provenance logging for every read.
+- `scribe_doctor`: Readiness diagnostics (repo root, config paths, plugin status, vector index readiness).
+
+**Semantic Search (v2.1.1 additions):**
+- `manage_docs` supports `action="search"` with `search_mode="semantic"` (doc/log partitioned search in a single FAISS index).
+- Default behavior returns docs first, then logs; results are labeled with `content_type`.
+- Filters: `project_slug`, `project_slugs`, `project_slug_prefix`, `doc_type`, `file_path`, `time_start/time_end`.
+- Per-type limits: `vector_search_doc_k` / `vector_search_log_k` defaults, with overrides via `doc_k` / `log_k` and total `k`.
+- Registry-only doc indexing (logs/rotated logs excluded from doc ingestion).
+- Reindex controls: `scripts/reindex_vector.py --rebuild` for a clean index, `--safe` for low-thread fallback during native crashes, and `--wait-for-drain` to block until embeddings are written.
+
 ### Precision-First Document Mutation
 
 Scribe distinguishes between **structural scaffolding** and **precise modification**:

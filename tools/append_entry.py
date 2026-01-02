@@ -10,11 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List, Union
 import time
-from datetime import timedelta
 
 import asyncio
 
 from scribe_mcp import server as server_module
+from scribe_mcp.config.repo_config import RepoDiscovery
 from scribe_mcp.config.settings import settings
 from scribe_mcp.server import app
 from scribe_mcp.utils.bulk_processor import BulkProcessor, ParallelBulkProcessor
@@ -38,6 +38,7 @@ from scribe_mcp.shared.logging_utils import (
 from scribe_mcp.utils.parameter_validator import ToolValidator, BulletproofParameterCorrector
 from scribe_mcp.utils.config_manager import ConfigManager, resolve_fallback_chain, BulletproofFallbackManager
 from scribe_mcp.utils.error_handler import ErrorHandler, ExceptionHealer
+from scribe_mcp.security.sandbox import PermissionError as SandboxPermissionError
 
 # Import validation helpers for backwards-compatible test globals.
 from . import manage_docs_validation as _manage_docs_validation  # noqa: F401
@@ -62,6 +63,26 @@ _PARAMETER_CORRECTOR = BulletproofParameterCorrector()
 _EXCEPTION_HEALER = ExceptionHealer()
 _FALLBACK_MANAGER = BulletproofFallbackManager()
 _PROJECT_REGISTRY = ProjectRegistry()
+
+
+def _get_vector_indexer():
+    try:
+        from scribe_mcp.plugins.registry import get_plugin_registry
+        registry = get_plugin_registry()
+        for plugin in registry.plugins.values():
+            if getattr(plugin, "name", None) == "vector_indexer" and getattr(plugin, "initialized", False):
+                return plugin
+    except Exception:
+        return None
+    return None
+
+
+def _vector_log_indexing_enabled(repo_root: Path) -> bool:
+    try:
+        config = RepoDiscovery.load_config(repo_root)
+    except Exception:
+        return False
+    return bool(config.vector_index_logs)
 
 
 def _sanitize_message(message: str) -> str:
@@ -344,7 +365,7 @@ async def _process_single_entry(
     project: Dict[str, Any],
     recent: List[Dict[str, Any]],
     log_cache: Dict[str, Tuple[Path, Dict[str, Any]]],
-    meta_pairs: Tuple[Tuple[str, str], ...]
+    meta_pairs: Tuple[Tuple[str, str], ...],
 ) -> Dict[str, Any]:
     """
     Process a single log entry with enhanced error handling and fallbacks.
@@ -377,18 +398,7 @@ async def _process_single_entry(
                 )
                 message = fallback_result.get("message", "Message validation failed")
 
-        # Enforce rate limit with exception handling
-        try:
-            rate_error = await _enforce_rate_limit(project["name"])
-            if rate_error:
-                rate_error["recent_projects"] = list(recent)
-                return rate_error
-        except Exception as rate_error:
-            # Heal rate limiting errors
-            healed_rate = _EXCEPTION_HEALER.heal_rotation_error(rate_error, {"project": project["name"]})
-            if not healed_rate["success"]:
-                # Continue with warning if rate limiting fails
-                pass
+        # Rate limiting removed; logging must never be blocked.
 
         # Resolve emoji, agent, and timestamp with fallbacks
         try:
@@ -452,6 +462,7 @@ async def _process_single_entry(
                 meta_payload.update(fallback_meta.get("metadata", {}))
 
         meta_payload.setdefault("log_type", entry_log_type)
+        meta_payload.setdefault("content_type", "log")
 
         # Generate deterministic entry_id with error handling
         try:
@@ -473,6 +484,7 @@ async def _process_single_entry(
         # Compose and write line with enhanced error handling
         line = None  # Initialize to prevent UnboundLocalError
         repo_root = Path(project.get("root") or settings.project_root).resolve()
+        log_context = {"component": "logs", "project_name": project.get("name")}
         try:
             # Convert meta dict to meta_pairs tuple for _compose_line
             meta_pairs = tuple(meta_payload.items()) if meta_payload else ()
@@ -490,9 +502,22 @@ async def _process_single_entry(
             # mode already does this).
             await _rotate_if_needed(log_path, repo_root=repo_root)
 
-            line_id = await append_line(log_path, line, repo_root=repo_root)
+            line_id = await append_line(
+                log_path,
+                line,
+                repo_root=repo_root,
+                context=log_context,
+            )
 
         except Exception as write_error:
+            if isinstance(write_error, SandboxPermissionError):
+                return {
+                    "ok": False,
+                    "error": str(write_error),
+                    "suggestion": "Ensure sandbox permissions allow append and include project_name in context.",
+                    "recent_projects": list(recent),
+                    "debug_path": "append_permission_denied",
+                }
             # Try to heal write errors
             healed_write = _EXCEPTION_HEALER.heal_document_operation_error(
                 write_error, {"log_path": str(log_path), "line": line or "FAILED_TO_CREATE"}
@@ -502,13 +527,23 @@ async def _process_single_entry(
                 # Try alternative write method
                 try:
                     alternative_line = healed_write["healed_values"].get("line", line)
-                    line_id = await append_line(log_path, alternative_line, repo_root=repo_root)
+                    line_id = await append_line(
+                        log_path,
+                        alternative_line,
+                        repo_root=repo_root,
+                        context=log_context,
+                    )
                 except Exception:
                     # Emergency fallback - write to emergency log
                     emergency_root = repo_root
                     emergency_log_path = emergency_root / "emergency_entries.log"
                     emergency_line = f"[{timestamp}] [Agent: {resolved_agent}] {message}\n"
-                    line_id = await append_line(emergency_log_path, emergency_line, repo_root=repo_root)
+                    line_id = await append_line(
+                        emergency_log_path,
+                        emergency_line,
+                        repo_root=repo_root,
+                        context=log_context,
+                    )
                     meta_payload["emergency_write"] = True
             else:
                 # Ultimate fallback
@@ -614,6 +649,23 @@ async def _process_single_entry(
             except Exception:
                 # Database mirror failures should never block logging.
                 pass
+
+        # Queue entry for vector indexing (non-blocking).
+        try:
+            if _vector_log_indexing_enabled(repo_root):
+                vector_indexer = _get_vector_indexer()
+                if vector_indexer:
+                    vector_indexer.post_append({
+                        "entry_id": entry_id,
+                        "project_name": project.get("name", ""),
+                        "message": message,
+                        "agent": resolved_agent,
+                        "timestamp": timestamp,
+                        "meta": meta_payload,
+                    })
+        except Exception:
+            # Vector indexing failures should never block logging.
+            pass
 
         # Update project state with exception handling
         try:
@@ -1455,29 +1507,7 @@ def _validate_message(message: str) -> Optional[str]:
 
 
 async def _enforce_rate_limit(project_name: str) -> Optional[Dict[str, Any]]:
-    count = settings.log_rate_limit_count
-    window = settings.log_rate_limit_window
-    if count <= 0 or window <= 0:
-        return None
-
-    now = time.time()
-    async with _RATE_MAP_LOCK:
-        lock = _RATE_LOCKS.setdefault(project_name, asyncio.Lock())
-
-    async with lock:
-        bucket = _RATE_TRACKER[project_name]
-        while bucket and now - bucket[0] > window:
-            bucket.popleft()
-
-        if len(bucket) >= count:
-            retry_after = int(window - (now - bucket[0]))
-            return ErrorHandler.create_rate_limit_error(
-                retry_after_seconds=max(retry_after, 1),
-                window_description="project log rate limit"
-            )
-
-        bucket.append(now)
-        return None
+    return None
 
 
 def _resolve_log_target(
@@ -1547,7 +1577,12 @@ async def _tee_entry_to_log_type(
         project_name=project.get("name", "unknown"),
         meta_pairs=tuple(meta_copy.items()),
     )
-    await append_line(log_path, line, repo_root=repo_root)
+    await append_line(
+        log_path,
+        line,
+        repo_root=repo_root,
+        context={"component": "logs", "project_name": project.get("name")},
+    )
     return log_path, []
 
 
@@ -1784,7 +1819,12 @@ async def _process_single_item(
 
     # Write to file
     try:
-        await append_line(log_path, log_line, repo_root=Path(project.get("root") or settings.project_root).resolve())
+        await append_line(
+            log_path,
+            log_line,
+            repo_root=Path(project.get("root") or settings.project_root).resolve(),
+            context={"component": "logs", "project_name": project.get("name")},
+        )
         return {
             "success": True,
             "written_line": log_line,
@@ -1966,7 +2006,12 @@ async def _append_bulk_entries(
             )
 
             # Write to file immediately (ensures order)
-            await append_line(log_path, line, repo_root=Path(project.get("root") or settings.project_root).resolve())
+            await append_line(
+                log_path,
+                line,
+                repo_root=Path(project.get("root") or settings.project_root).resolve(),
+                context={"component": "logs", "project_name": project.get("name")},
+            )
             written_lines.append(line)
             paths_used.append(str(log_path))
 

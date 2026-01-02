@@ -13,6 +13,13 @@ This document provides comprehensive usage instructions for all available Scribe
 - `normalize_headers` now supports ATX headers with or without a space plus Setext (`====` / `----`), skipping fenced code blocks.
 - `generate_toc` uses GitHub-style anchors (NFKD normalization, ASCII folding, emoji removal, punctuation collapse, de-dup suffixes).
 - `create_doc` preserves multiline body content in metadata (`body`, `snippet`, `content`).
+- `read_file` adds repo-scoped scan/chunk/page/search modes with provenance logging for every read.
+- `scribe_doctor` provides environment readiness diagnostics (repo root, config, plugin status, vector readiness).
+- `manage_docs` adds semantic search via `action="search"` with `search_mode="semantic"` and doc/log separation.
+- Semantic search supports `project_slug`, `project_slugs`, `project_slug_prefix`, `doc_type`, `file_path`, `time_start/time_end`.
+- Per-type defaults: `vector_search_doc_k` / `vector_search_log_k` (overrides via `doc_k` / `log_k`).
+- Vector indexing uses registry-managed docs only; log/rotated-log files are excluded from doc indexing.
+- `scripts/reindex_vector.py` supports `--rebuild` for clean index rebuilds, `--safe` for low-thread fallback, and `--wait-for-drain` to block until embeddings are written.
 
 ## Quick Start (High Level)
 
@@ -536,6 +543,54 @@ await query_entries(
 
 ---
 
+### `read_file`
+**Purpose**: Repo-scoped file access with deterministic scan/chunk/page/search modes and read provenance logging.
+
+**Required Parameters:**
+- `path` (string): File path (absolute or repo-relative)
+
+**Optional Parameters:**
+- `mode`: `scan_only` (default), `chunk`, `line_range`, `page`, `full_stream`, `search`
+- `chunk_index`: Chunk index or list of indices (for `chunk` mode)
+- `start_line` / `end_line`: Explicit line range (for `line_range`)
+- `page_number` / `page_size`: Pagination controls (for `page`)
+- `start_chunk` / `max_chunks`: Streaming controls (for `full_stream`)
+- `search`: Search term (for `search` mode)
+- `search_mode`: `literal` (default) or `regex`
+- `context_lines`: Lines of context around matches (search mode)
+- `max_matches`: Max matches to return (search mode)
+
+**Example Usage:**
+```python
+# Scan file metadata only
+await read_file(path="docs/Scribe_Usage.md", mode="scan_only")
+
+# Read specific chunk
+await read_file(path="docs/Scribe_Usage.md", mode="chunk", chunk_index=[0])
+
+# Search within file
+await read_file(path="docs/Scribe_Usage.md", mode="search", search="semantic", search_mode="literal")
+```
+
+**Notes:**
+- Every read is logged with provenance (absolute path, hash, byte size, encoding, read mode).
+- Enforces repo scope by default; out-of-scope paths are denied.
+
+### `scribe_doctor`
+**Purpose**: Diagnostics for repo root, config resolution, plugin status, and vector readiness.
+
+**Example Usage:**
+```python
+await scribe_doctor()
+```
+
+**Returns:**
+- Repo root, cwd, config paths
+- Plugin status (including vector indexer availability)
+- Vector index metadata and queue depth (if enabled)
+
+---
+
 ## Documentation Management
 
 ### `manage_docs`
@@ -646,6 +701,46 @@ await manage_docs(
   "verification_passed": true,
   "dry_run": false
 }
+```
+
+### `manage_docs` semantic search
+**Purpose**: Semantic retrieval across registry-managed docs and logs (doc-first results by default).
+
+**Required Parameters:**
+- `action`: `"search"`
+- `doc`: `"*"` (search all) or specific doc key
+- `metadata.query`: search string
+- `metadata.search_mode`: `"semantic"`
+
+**Optional Filters:**
+- `content_type`: `"doc"` or `"log"` (default is both)
+- `project_slug` / `project_slugs` / `project_slug_prefix`
+- `doc_type`, `file_path`
+- `time_start` / `time_end`
+- `k` (total results), `doc_k` / `log_k` overrides
+- `min_similarity` (float)
+
+**Example Usage:**
+```python
+# Semantic search across docs + logs
+await manage_docs(
+    action="search",
+    doc="*",
+    metadata={"query": "ExecutionContext", "search_mode": "semantic", "k": 8}
+)
+
+# Doc-only semantic search scoped to a project
+await manage_docs(
+    action="search",
+    doc="*",
+    metadata={
+        "query": "ExecutionContext",
+        "search_mode": "semantic",
+        "content_type": "doc",
+        "project_slug": "scribe_sentinel_concurrency_v1",
+        "doc_k": 5
+    }
+)
 ```
 
 ### `generate_doc_templates`

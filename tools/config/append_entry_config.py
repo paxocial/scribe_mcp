@@ -79,7 +79,7 @@ class AppendEntryConfig:
     auto_detect_emoji: bool = True  # Auto-detect emoji in split content
 
     # Performance and rate limiting
-    rate_limit_count: int = 60  # Rate limit count per window
+    rate_limit_count: int = 0  # Rate limit count per window (0 disables)
     rate_limit_window: int = 60  # Rate limit window in seconds
     max_bytes: int = 1048576  # Maximum log file size (1MB default)
     storage_timeout: int = 30  # Storage operation timeout in seconds

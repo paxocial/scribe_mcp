@@ -1,3 +1,18 @@
+---
+id: scribe_sentinel_concurrency_v1-global_deployment_guide
+title: Global Scribe Deployment Guide
+doc_type: global_deployment_guide
+category: engineering
+status: draft
+version: '0.1'
+last_updated: '2026-01-02'
+maintained_by: Corta Labs
+created_by: Corta Labs
+owners: []
+related_docs: []
+tags: []
+summary: ''
+---
 # Global Scribe Deployment Guide
 
 This guide covers deploying Scribe as a **global MCP server** that can automatically discover and work with any repository without requiring per-repository installation.
@@ -23,7 +38,7 @@ Scribe automatically discovers repositories by looking for:
 - `go.mod` (Go projects)
 
 ### Per-Repository Configuration
-Each repository can have its own configuration via `.scribe/scribe.yaml`:
+Each repository can have its own configuration via `.scribe/config/scribe.yaml`:
 ```yaml
 repo_slug: my-project
 dev_plans_dir: docs/dev_plans
@@ -116,7 +131,7 @@ python scripts/scribe_cli.py init --force
 ```
 
 ### Configuration Options
-Create `.scribe/scribe.yaml` in your repository:
+Create `.scribe/config/scribe.yaml` in your repository:
 
 ```yaml
 # Repository identification
@@ -172,7 +187,7 @@ cd ~/projects/project-b
 For monorepos with multiple subprojects:
 
 ```yaml
-# .scribe/scribe.yaml
+# .scribe/config/scribe.yaml
 repo_slug: my-monorepo
 dev_plans_dir: docs/dev_plans
 permissions:
@@ -182,7 +197,7 @@ permissions:
 ### Scenario 3: Mixed Repositories
 Different repositories can have completely different configurations:
 
-**Frontend Project** (`.scribe/scribe.yaml`):
+**Frontend Project** (`.scribe/config/scribe.yaml`):
 ```yaml
 repo_slug: frontend-app
 default_emoji: "🎨"
@@ -191,7 +206,7 @@ permissions:
   allow_rotate: true
 ```
 
-**Backend Project** (`.scribe/scribe.yaml`):
+**Backend Project** (`.scribe/config/scribe.yaml`):
 ```yaml
 repo_slug: backend-api
 default_emoji: "⚙️"
@@ -326,10 +341,10 @@ mkdir .scribe
 
 ```bash
 # Validate YAML
-python -c "import yaml; yaml.safe_load(open('.scribe/scribe.yaml'))"
+python -c "import yaml; yaml.safe_load(open('.scribe/config/scribe.yaml'))"
 
 # Check permissions
-ls -la .scribe/scribe.yaml
+ls -la .scribe/config/scribe.yaml
 ```
 
 #### Permission Denied
@@ -360,7 +375,7 @@ Scribe logs to:
 ### From Embedded to Global
 1. Install Scribe globally once
 2. Remove embedded Scribe from repositories
-3. Add `.scribe/scribe.yaml` to repositories that need custom configuration
+3. Add `.scribe/config/scribe.yaml` to repositories that need custom configuration
 4. Update MCP client configuration to point to global installation
 
 ### Preserving Data

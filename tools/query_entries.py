@@ -35,8 +35,8 @@ from scribe_mcp.shared.logging_utils import (
 from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
 
 VALID_MESSAGE_MODES = {"substring", "regex", "exact"}
-VALID_SEARCH_SCOPES = {"project", "global", "all_projects", "research", "bugs", "all"}
-VALID_DOCUMENT_TYPES = {"progress", "research", "architecture", "bugs", "global"}
+VALID_SEARCH_SCOPES = {"project", "global", "all_projects", "research", "bugs", "all", "sentinel"}
+VALID_DOCUMENT_TYPES = {"progress", "research", "architecture", "bugs", "global", "sentinel_log"}
 
 # Global configuration manager for parameter handling
 _CONFIG_MANAGER = ConfigManager("query_entries")

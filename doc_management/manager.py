@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 # Import with absolute paths from scribe_mcp root
-from scribe_mcp.utils.files import async_atomic_write, ensure_parent
+from scribe_mcp.utils.files import async_atomic_write, ensure_parent, preflight_backup
+from scribe_mcp.config.repo_config import RepoDiscovery
 from scribe_mcp.utils.frontmatter import (
     apply_frontmatter_updates,
     build_frontmatter,
@@ -188,10 +189,19 @@ async def apply_doc_change(
                 raise DocumentOperationError(f"Failed to render content: {e}")
 
         # Apply the change based on action
+        extra: Dict[str, Any] = {}
         try:
             if action == "replace_section":
                 assert rendered_content is not None
-                updated_body = _replace_section(original_body, section, rendered_content)
+                allow_append = False
+                if isinstance(metadata, dict):
+                    allow_append = bool(metadata.get("allow_append") or metadata.get("scaffold"))
+                updated_body = _replace_section(
+                    original_body,
+                    section,
+                    rendered_content,
+                    allow_append=allow_append,
+                )
             elif action == "append":
                 assert rendered_content is not None
                 meta_payload = metadata if isinstance(metadata, dict) else {}
@@ -246,7 +256,14 @@ async def apply_doc_change(
                         raise DocumentOperationError(
                             "PATCH_MODE_STRUCTURED_REQUIRES_EDIT: provide edit payload"
                         )
-                    updated_candidate = _apply_structured_edit(original_body, edit)
+                    allow_append = False
+                    if isinstance(metadata, dict):
+                        allow_append = bool(metadata.get("allow_append") or metadata.get("scaffold"))
+                    updated_candidate = _apply_structured_edit(
+                        original_body,
+                        edit,
+                        allow_append=allow_append,
+                    )
                     patch_used = compile_unified_diff(
                         original_body,
                         updated_candidate,
@@ -351,11 +368,48 @@ async def apply_doc_change(
                     resolved_end,
                     content or "",
                 )
+            elif action == "replace_text":
+                if not isinstance(metadata, dict):
+                    raise DocumentOperationError(
+                        "REPLACE_TEXT_MISSING_METADATA: provide metadata with find/replace values"
+                    )
+                find_text = metadata.get("find")
+                if not isinstance(find_text, str) or not find_text:
+                    raise DocumentOperationError("REPLACE_TEXT_MISSING_FIND: metadata.find is required")
+                replace_text = metadata.get("replace")
+                if replace_text is None:
+                    replace_text = ""
+                match_mode = str(metadata.get("match_mode") or "literal").strip().lower()
+                if match_mode not in {"literal", "regex"}:
+                    raise DocumentOperationError(
+                        "REPLACE_TEXT_MATCH_MODE_INVALID: use literal or regex"
+                    )
+                replace_all = bool(metadata.get("replace_all", True))
+                scope = metadata.get("scope")
+                allow_no_match = bool(metadata.get("allow_no_match", False))
+
+                updated_body, hits = _replace_text_with_scope(
+                    original_body,
+                    find_text=find_text,
+                    replace_text=str(replace_text),
+                    match_mode=match_mode,
+                    replace_all=replace_all,
+                    scope=str(scope) if scope else None,
+                    allow_no_match=allow_no_match,
+                )
+                extra["replace_text"] = {
+                    "find": find_text,
+                    "replace_all": replace_all,
+                    "match_mode": match_mode,
+                    "scope": scope,
+                    "matches": hits,
+                }
             elif action == "create_doc":
                 overwrite = bool(metadata.get("overwrite")) if isinstance(metadata, dict) else False
                 if doc_path.exists() and not overwrite:
                     raise DocumentOperationError(
-                        "CREATE_DOC_EXISTS: target path already exists (use metadata.overwrite to replace)"
+                        "CREATE_DOC_EXISTS: target path already exists (use metadata.overwrite to replace or "
+                        "metadata.register_existing to register without overwrite)"
                     )
                 updated_body = _build_create_doc_body(content, metadata)
                 if isinstance(metadata, dict) and isinstance(metadata.get("frontmatter"), dict):
@@ -433,6 +487,30 @@ async def apply_doc_change(
 
         if not dry_run:
             try:
+                doc_snapshots_enabled = True
+                try:
+                    repo_config = RepoDiscovery.load_config(repo_root)
+                    doc_snapshots_enabled = bool(getattr(repo_config, "doc_snapshots", True))
+                except Exception:
+                    doc_snapshots_enabled = True
+
+                if doc_path.exists() and doc_snapshots_enabled:
+                    try:
+                        backup_path = await asyncio.to_thread(
+                            preflight_backup,
+                            doc_path,
+                            repo_root=repo_root,
+                            context={
+                                "component": "files",
+                                "op": "backup",
+                                "project_name": project.get("name"),
+                            },
+                        )
+                        frontmatter_extra.setdefault("preflight_backup", str(backup_path))
+                    except Exception as exc:
+                        raise DocumentOperationError(
+                            f"DOC_SNAPSHOT_FAILED: {exc}"
+                        ) from exc
                 # Write the file
                 await async_atomic_write(doc_path, updated_text, mode="w", repo_root=repo_root)
 
@@ -501,6 +579,16 @@ async def apply_doc_change(
                     )
 
                 raise DocumentOperationError(f"Failed to write document {doc_path}: {e}")
+
+        include_frontmatter_extra = bool(
+            isinstance(metadata, dict) and metadata.get("include_frontmatter_extra")
+        )
+        if not include_frontmatter_extra and frontmatter_extra:
+            frontmatter_extra = {
+                key: value
+                for key, value in frontmatter_extra.items()
+                if not key.startswith("frontmatter")
+            }
 
         return DocChangeResult(
             doc=doc,
@@ -812,10 +900,14 @@ async def _load_fragment(name: str) -> str:
     return await asyncio.to_thread(fragment.read_text, encoding="utf-8")
 
 
-def _replace_section(text: str, section: Optional[str], content: str) -> str:
+def _replace_section(text: str, section: Optional[str], content: str, *, allow_append: bool = False) -> str:
     marker = SECTION_MARKER.format(section=section)
     idx = text.find(marker)
     if idx == -1:
+        if not allow_append:
+            raise DocumentOperationError(
+                f"SECTION_ANCHOR_MISSING: '{section}' not found (set metadata.allow_append=true to append)"
+            )
         doc_logger.warning(
             "Section anchor missing; auto-appending '%s' to document.",
             section,
@@ -825,6 +917,10 @@ def _replace_section(text: str, section: Optional[str], content: str) -> str:
         if prefix:
             prefix = prefix + "\n\n"
         return prefix + marker + "\n" + content.strip() + "\n"
+    if text.find(marker, idx + 1) != -1:
+        raise DocumentOperationError(
+            f"SECTION_ANCHOR_AMBIGUOUS: '{section}' appears multiple times; resolve duplicates first"
+        )
     start = idx + len(marker)
     # Skip newline right after marker
     if start < len(text) and text[start] == "\r":
@@ -837,6 +933,95 @@ def _replace_section(text: str, section: Optional[str], content: str) -> str:
     new_block = marker + "\n" + content.strip() + "\n"
     replacement = text[:idx] + new_block + text[next_marker:]
     return replacement
+
+
+def _replace_text_literal(
+    text: str,
+    find_text: str,
+    replace_text: str,
+    *,
+    replace_all: bool,
+) -> tuple[str, int]:
+    if replace_all:
+        return text.replace(find_text, replace_text), text.count(find_text)
+    return text.replace(find_text, replace_text, 1), (1 if find_text in text else 0)
+
+
+def _replace_text_regex(
+    text: str,
+    pattern: str,
+    replace_text: str,
+    *,
+    replace_all: bool,
+) -> tuple[str, int]:
+    compiled = re.compile(pattern)
+    count = 0 if replace_all else 1
+    updated, hits = compiled.subn(replace_text, text, count=count)
+    return updated, hits
+
+
+def _replace_text_with_scope(
+    text: str,
+    *,
+    find_text: str,
+    replace_text: str,
+    match_mode: str,
+    replace_all: bool,
+    scope: Optional[str],
+    allow_no_match: bool,
+) -> tuple[str, int]:
+    target_text = text
+    prefix = ""
+    suffix = ""
+    marker = None
+
+    if scope:
+        normalized = scope.strip()
+        if normalized.startswith("section:"):
+            section_id = normalized.split(":", 1)[1].strip()
+            if not section_id:
+                raise DocumentOperationError("REPLACE_TEXT_SCOPE_INVALID: section id missing")
+            marker = SECTION_MARKER.format(section=section_id)
+            idx = text.find(marker)
+            if idx == -1:
+                raise DocumentOperationError(
+                    f"SECTION_ANCHOR_MISSING: '{section_id}' not found in replace_text scope"
+                )
+            if text.find(marker, idx + 1) != -1:
+                raise DocumentOperationError(
+                    f"SECTION_ANCHOR_AMBIGUOUS: '{section_id}' appears multiple times"
+                )
+            start = idx + len(marker)
+            if start < len(text) and text[start] == "\r":
+                start += 1
+            if start < len(text) and text[start] == "\n":
+                start += 1
+            next_marker = text.find("<!-- ID:", start)
+            if next_marker == -1:
+                next_marker = len(text)
+            prefix = text[:start]
+            target_text = text[start:next_marker]
+            suffix = text[next_marker:]
+
+    if match_mode == "regex":
+        updated, hits = _replace_text_regex(
+            target_text,
+            find_text,
+            replace_text,
+            replace_all=replace_all,
+        )
+    else:
+        updated, hits = _replace_text_literal(
+            target_text,
+            find_text,
+            replace_text,
+            replace_all=replace_all,
+        )
+
+    if hits == 0 and not allow_no_match:
+        raise DocumentOperationError("REPLACE_TEXT_NO_MATCH: no matches found")
+
+    return prefix + updated + suffix, hits
 
 
 def _append_block(text: str, content: str, section: Optional[str] = None, position: str = "after") -> str:
@@ -1663,7 +1848,12 @@ def _generate_toc_text(original_text: str) -> str:
     return rendered
 
 
-def _apply_structured_edit(original_text: str, edit: Dict[str, Any]) -> str:
+def _apply_structured_edit(
+    original_text: str,
+    edit: Dict[str, Any],
+    *,
+    allow_append: bool = False,
+) -> str:
     """Apply a structured edit specification to text and return updated content."""
     edit_type = str(edit.get("type") or "").strip().lower()
     if not edit_type:
@@ -1689,7 +1879,7 @@ def _apply_structured_edit(original_text: str, edit: Dict[str, Any]) -> str:
         content = edit.get("content", "")
         if not section:
             raise DocumentOperationError("STRUCTURED_EDIT_SECTION_REQUIRED: section is required")
-        return _replace_section(original_text, section, str(content))
+        return _replace_section(original_text, section, str(content), allow_append=allow_append)
 
     raise DocumentOperationError(f"STRUCTURED_EDIT_UNSUPPORTED: {edit_type}")
 
@@ -1832,11 +2022,21 @@ def _apply_frontmatter_pipeline(
 ) -> tuple[str, Dict[str, Any], int]:
     if metadata and metadata.get("frontmatter_disable") is True:
         line_count = len(parsed.frontmatter_raw.splitlines()) if parsed.has_frontmatter else 0
-        return (
-            (parsed.frontmatter_raw + updated_body) if parsed.has_frontmatter else updated_body,
-            {"frontmatter_updated": False},
-            line_count,
-        )
+        if parsed.has_frontmatter:
+            return (
+                parsed.frontmatter_raw + updated_body,
+                {"frontmatter_updated": False},
+                line_count,
+            )
+        updated_parsed = parse_frontmatter(updated_body)
+        if updated_parsed.has_frontmatter:
+            line_count = len(updated_parsed.frontmatter_raw.splitlines())
+            return (
+                updated_body,
+                {"frontmatter_updated": False},
+                line_count,
+            )
+        return updated_body, {"frontmatter_updated": False}, 0
 
     updates: Dict[str, Any] = {}
     if isinstance(metadata, dict) and isinstance(metadata.get("frontmatter"), dict):
@@ -1845,6 +2045,31 @@ def _apply_frontmatter_pipeline(
     updates["last_updated"] = date_str
 
     if not parsed.has_frontmatter:
+        updated_parsed = parse_frontmatter(updated_body)
+        if updated_parsed.has_frontmatter:
+            if updates:
+                frontmatter_raw, merged = apply_frontmatter_updates(
+                    updated_parsed.frontmatter_raw,
+                    updated_parsed.frontmatter_data,
+                    updates,
+                )
+                line_count = len(frontmatter_raw.splitlines())
+                new_text = frontmatter_raw + updated_parsed.body
+                return (
+                    new_text,
+                    {
+                        "frontmatter_updated": True,
+                        "frontmatter_created": False,
+                        "frontmatter": merged,
+                    },
+                    line_count,
+                )
+            line_count = len(updated_parsed.frontmatter_raw.splitlines())
+            return (
+                updated_body,
+                {"frontmatter_updated": False, "frontmatter_created": False},
+                line_count,
+            )
         defaults = _default_frontmatter(doc, project.get("name", ""), updated_body, date_str)
         defaults.update(updates)
         frontmatter_block = build_frontmatter(defaults)
@@ -2004,13 +2229,13 @@ def _validate_and_correct_inputs(
     action: str,
     section: Optional[str],
     content: Optional[str],
-    patch: Optional[str],
-    patch_source_hash: Optional[str],
-    edit: Optional[Dict[str, Any]],
-    start_line: Optional[int],
-    end_line: Optional[int],
-    template: Optional[str],
-    metadata: Optional[Dict[str, Any]],
+    patch: Optional[str] = None,
+    patch_source_hash: Optional[str] = None,
+    edit: Optional[Dict[str, Any]] = None,
+    start_line: Optional[int] = None,
+    end_line: Optional[int] = None,
+    template: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> tuple[str, str, Optional[str], Optional[str], Optional[str], Dict[str, Any]]:
     """
     Bulletproof parameter validation and correction that NEVER fails.
@@ -2028,8 +2253,8 @@ def _validate_and_correct_inputs(
             "type": str,
             "required": True,
             "allowed_values": {"replace_section", "append", "status_update", "list_sections", "batch",
-                             "apply_patch", "replace_range", "normalize_headers", "generate_toc", "create_doc", "validate_crosslinks",
-                             "create_research_doc", "create_bug_report", "create_review_report", "create_agent_report_card"},
+                             "apply_patch", "replace_range", "replace_text", "normalize_headers", "generate_toc", "create_doc", "validate_crosslinks",
+                             "search", "create_research_doc", "create_bug_report", "create_review_report", "create_agent_report_card"},
             "default": "append"
         },
         "section": {
@@ -2080,6 +2305,7 @@ def _validate_and_correct_inputs(
     strict_doc_actions = {
         "apply_patch",
         "replace_range",
+        "replace_text",
         "normalize_headers",
         "generate_toc",
         "validate_crosslinks",
@@ -2141,7 +2367,7 @@ def _validate_and_correct_inputs(
         corrected_template = None
     else:
         # For other actions, ensure we have either content or template
-        if corrected_action in {"apply_patch", "replace_range", "normalize_headers", "generate_toc", "create_doc", "validate_crosslinks"}:
+        if corrected_action in {"apply_patch", "replace_range", "replace_text", "normalize_headers", "generate_toc", "create_doc", "validate_crosslinks"}:
             if corrected_action == "apply_patch" and edit is not None:
                 if corrected_content in {"No message provided", "Empty message"}:
                     corrected_content = None

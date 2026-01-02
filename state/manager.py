@@ -21,6 +21,7 @@ class State:
     current_project: Optional[str]
     projects: Dict[str, Dict[str, Any]]
     recent_projects: List[str]
+    session_projects: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     recent_tools: List[Dict[str, str]] = field(default_factory=list)
     last_activity_at: Optional[str] = None
     session_started_at: Optional[str] = None
@@ -33,6 +34,11 @@ class State:
         if not name:
             return None
         return self.projects.get(name)
+
+    def get_session_project(self, session_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not session_id:
+            return None
+        return self.session_projects.get(session_id)
 
     def with_project(self, name: Optional[str], data: Optional[Dict[str, Any]]) -> "State":
         projects = dict(self.projects)
@@ -47,6 +53,7 @@ class State:
             current_project=name,
             projects=projects,
             recent_projects=recent,
+            session_projects=dict(self.session_projects),
             recent_tools=list(self.recent_tools),
             last_activity_at=self.last_activity_at,
             session_started_at=self.session_started_at,
@@ -73,6 +80,7 @@ class StateManager:
                 current_project=data.get("current_project"),
                 projects=data.get("projects", {}),
                 recent_projects=data.get("recent_projects", []),
+                session_projects=data.get("session_projects", {}),
                 recent_tools=_normalise_tool_history(data.get("recent_tools", [])),
                 last_activity_at=data.get("last_activity_at"),
                 session_started_at=data.get("session_started_at"),
@@ -122,6 +130,7 @@ class StateManager:
                 current_project=data.get("current_project"),
                 projects=data.get("projects", {}),
                 recent_projects=data.get("recent_projects", []),
+                session_projects=data.get("session_projects", {}),
                 recent_tools=limited,
                 last_activity_at=now,
                 session_started_at=warm_start,
@@ -132,12 +141,14 @@ class StateManager:
         name: Optional[str],
         project_data: Optional[Dict[str, Any]] = None,
         agent_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> State:
         """Persist the active project name and optional project metadata with atomic versioning."""
         async with self._lock:
             existing = await asyncio.to_thread(self._read_json)
             projects = existing.get("projects", {})
             recent = existing.get("recent_projects", [])
+            session_projects = existing.get("session_projects", {})
             recent_tools = _normalise_tool_history(existing.get("recent_tools", []))
             last_activity = existing.get("last_activity_at")
             session_started = existing.get("session_started_at")
@@ -148,6 +159,8 @@ class StateManager:
 
             if project_data:
                 projects[name] = project_data  # type: ignore[index]
+                if session_id:
+                    session_projects[str(session_id)] = project_data
             if name:
                 recent = [name] + [item for item in recent if item != name]
                 recent = recent[: settings.recent_projects_limit]
@@ -156,6 +169,7 @@ class StateManager:
                 "current_project": name,
                 "projects": projects,
                 "recent_projects": recent,
+                "session_projects": session_projects,
                 "recent_tools": recent_tools,
                 "last_activity_at": last_activity,
                 "session_started_at": session_started,
@@ -169,6 +183,7 @@ class StateManager:
                 current_project=name,
                 projects=projects,
                 recent_projects=recent,
+                session_projects=session_projects,
                 recent_tools=list(recent_tools),
                 last_activity_at=last_activity,
                 session_started_at=session_started,
@@ -247,6 +262,7 @@ class StateManager:
                     "current_project": state.current_project,
                     "projects": state.projects,
                     "recent_projects": state.recent_projects,
+                    "session_projects": state.session_projects,
                     "recent_tools": state.recent_tools,
                     "last_activity_at": state.last_activity_at,
                     "session_started_at": state.session_started_at,
@@ -271,6 +287,7 @@ class StateManager:
                 current_project=data.get("current_project"),
                 projects=projects,
                 recent_projects=data.get("recent_projects", []),
+                session_projects=data.get("session_projects", {}),
                 recent_tools=_normalise_tool_history(data.get("recent_tools", [])),
                 last_activity_at=data.get("last_activity_at"),
                 session_started_at=data.get("session_started_at"),

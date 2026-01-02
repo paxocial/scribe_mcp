@@ -44,7 +44,7 @@ class TestAppendEntryConfig:
         assert config.auto_detect_emoji is True
 
         # Test performance parameters
-        assert config.rate_limit_count == 60
+        assert config.rate_limit_count == 0
         assert config.rate_limit_window == 60
         assert config.max_bytes == 1048576
         assert config.storage_timeout == 30

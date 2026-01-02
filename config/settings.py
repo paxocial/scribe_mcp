@@ -73,9 +73,11 @@ class Settings:
     @classmethod
     def load(cls) -> "Settings":
         project_root = Path(os.environ.get("SCRIBE_ROOT", _default_root())).resolve()
-        state_path = Path(
-            os.environ.get("SCRIBE_STATE_PATH", "~/.scribe/state.json")
-        ).expanduser()
+        env_state_path = os.environ.get("SCRIBE_STATE_PATH")
+        if env_state_path:
+            state_path = Path(env_state_path).expanduser()
+        else:
+            state_path = (project_root / ".scribe" / "state.json").resolve()
 
         db_url = os.environ.get("SCRIBE_DB_URL")
         storage_backend = os.environ.get("SCRIBE_STORAGE_BACKEND")
@@ -105,7 +107,7 @@ class Settings:
         except ValueError:
             recent_limit = 5
 
-        log_rate_limit_count = max(0, _int_env("SCRIBE_LOG_RATE_LIMIT_COUNT", 60))
+        log_rate_limit_count = max(0, _int_env("SCRIBE_LOG_RATE_LIMIT_COUNT", 0))
         log_rate_limit_window = max(0, _int_env("SCRIBE_LOG_RATE_LIMIT_WINDOW", 60))
         log_max_bytes = max(0, _int_env("SCRIBE_LOG_MAX_BYTES", 512 * 1024))
         storage_timeout_seconds = max(0.1, float(os.environ.get("SCRIBE_STORAGE_TIMEOUT_SECONDS", "5")))

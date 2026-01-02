@@ -33,3 +33,4 @@ docs/claude_code_subagents/*
 docs/archived_projects/*
 docs/archived_global_logs/*
 docs/bugs/*
+*.preflight-*.bak

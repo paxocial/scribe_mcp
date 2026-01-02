@@ -360,6 +360,7 @@ async def read_recent(
         _progress_log_path(project),
         fetch_limit,
         repo_root=Path(project.get("root") or settings.project_root).resolve(),
+        context={"component": "logs", "project_name": project.get("name")},
     )
     all_lines = _apply_line_filters(all_lines, filters)
 

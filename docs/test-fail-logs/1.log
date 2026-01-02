@@ -1,0 +1,1701 @@
+================================================================ FAILURES ================================================================
+_____________________________________ test_append_line_blocks_outside_server_root_without_repo_root ______________________________________
+
+tmp_path = PosixPath('/tmp/pytest-of-austin/pytest-58/test_append_line_blocks_outsid0')
+
+    @pytest.mark.asyncio
+    async def test_append_line_blocks_outside_server_root_without_repo_root(tmp_path: Path) -> None:
+        repo_root = tmp_path / "external_repo"
+        log_path = repo_root / ".scribe" / "docs" / "dev_plans" / "x" / "PROGRESS_LOG.md"
+
+        with pytest.raises(SecurityError):
+>           await append_line(log_path, "blocked")
+
+tests/test_multi_repo_file_ops.py:17:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+utils/files.py:519: in append_line
+    path = _ensure_safe_path(
+utils/files.py:52: in _ensure_safe_path
+    return safe_file_operation(root, Path(path), operation=operation, context=context or {"component": "files"})
+security/sandbox.py:358: in safe_file_operation
+    return get_safety_instance().safe_file_operation(repo_root, file_path, operation, context)
+security/sandbox.py:281: in safe_file_operation
+    permission_checker.validate_operation(operation, context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <scribe_mcp.security.sandbox.PermissionChecker object at 0x72ad8d9c0b50>, operation = 'append', context = {'component': 'logs'}
+
+    def validate_operation(self, operation: str, context: Dict[str, Any] = None) -> None:
+        """
+        Validate an operation, raising an exception if not allowed.
+
+        Args:
+            operation: Operation type
+            context: Additional context
+
+        Raises:
+            PermissionError: If operation is not allowed
+        """
+        if not self.check_permission(operation, context):
+>           raise PermissionError(f"Operation '{operation}' is not allowed for this repository")
+E           scribe_mcp.security.sandbox.PermissionError: Operation 'append' is not allowed for this repository
+
+security/sandbox.py:203: PermissionError
+______________________________________ test_repo_root_override_allows_cross_repo_append_read_rotate ______________________________________
+
+tmp_path = PosixPath('/tmp/pytest-of-austin/pytest-58/test_repo_root_override_allows0')
+
+    @pytest.mark.asyncio
+    async def test_repo_root_override_allows_cross_repo_append_read_rotate(tmp_path: Path) -> None:
+        repo_root = tmp_path / "external_repo"
+        log_path = repo_root / ".scribe" / "docs" / "dev_plans" / "x" / "PROGRESS_LOG.md"
+
+>       await append_line(log_path, "hello", repo_root=repo_root)
+
+tests/test_multi_repo_file_ops.py:25:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+utils/files.py:519: in append_line
+    path = _ensure_safe_path(
+utils/files.py:52: in _ensure_safe_path
+    return safe_file_operation(root, Path(path), operation=operation, context=context or {"component": "files"})
+security/sandbox.py:358: in safe_file_operation
+    return get_safety_instance().safe_file_operation(repo_root, file_path, operation, context)
+security/sandbox.py:281: in safe_file_operation
+    permission_checker.validate_operation(operation, context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <scribe_mcp.security.sandbox.PermissionChecker object at 0x72ad8d804250>, operation = 'append', context = {'component': 'logs'}
+
+    def validate_operation(self, operation: str, context: Dict[str, Any] = None) -> None:
+        """
+        Validate an operation, raising an exception if not allowed.
+
+        Args:
+            operation: Operation type
+            context: Additional context
+
+        Raises:
+            PermissionError: If operation is not allowed
+        """
+        if not self.check_permission(operation, context):
+>           raise PermissionError(f"Operation '{operation}' is not allowed for this repository")
+E           scribe_mcp.security.sandbox.PermissionError: Operation 'append' is not allowed for this repository
+
+security/sandbox.py:203: PermissionError
+_______________________________________________ test_read_file_search_default_max_matches ________________________________________________
+
+tmp_path = PosixPath('/tmp/pytest-of-austin/pytest-58/test_read_file_search_default_0')
+
+    @pytest.mark.asyncio
+    async def test_read_file_search_default_max_matches(tmp_path):
+        token = _install_execution_context(tmp_path)
+        try:
+            target = tmp_path / "sample.txt"
+            target.write_text("\n".join("needle" for _ in range(_DEFAULT_MAX_MATCHES + 25)), encoding="utf-8")
+
+>           result = await read_file(path=str(target), mode="search", search="needle")
+
+tests/test_read_file_tool.py:36:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tools/read_file.py:614: in read_file
+    await log_read(
+tools/read_file.py:427: in log_read
+    append_sentinel_event(
+utils/sentinel_logs.py:107: in append_sentinel_event
+    _bounded_append(jsonl_path, line, repo_root=repo_root)
+utils/sentinel_logs.py:35: in _bounded_append
+    with file_lock(path, mode="a+", timeout=timeout_seconds, repo_root=repo_root) as handle:
+../../../miniconda3/envs/uap/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+utils/files.py:95: in file_lock
+    lock_file.touch(exist_ok=True)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = PosixPath('/tmp/pytest-of-austin/pytest-58/test_read_file_search_default_0/.scribe/sentinel/2026-01-02/sentinel.jsonl.lock')
+mode = 438, exist_ok = True
+
+    def touch(self, mode=0o666, exist_ok=True):
+        """
+        Create this file with the given access mode, if it doesn't exist.
+        """
+
+        if exist_ok:
+            # First try to bump modification time
+            # Implementation note: GNU touch uses the UTIME_NOW option of
+            # the utimensat() / futimens() functions.
+            try:
+                os.utime(self, None)
+            except OSError:
+                # Avoid exception chaining
+                pass
+            else:
+                return
+        flags = os.O_CREAT | os.O_WRONLY
+        if not exist_ok:
+            flags |= os.O_EXCL
+>       fd = os.open(self, flags, mode)
+E       FileNotFoundError: [Errno 2] No such file or directory: '/tmp/pytest-of-austin/pytest-58/test_read_file_search_default_0/.scribe/sentinel/2026-01-02/sentinel.jsonl.lock'
+
+../../../miniconda3/envs/uap/lib/python3.11/pathlib.py:1108: FileNotFoundError
+_______________________________________________ test_read_file_invalid_regex_returns_error _______________________________________________
+
+path = PosixPath('/tmp/pytest-of-austin/pytest-58/test_read_file_invalid_regex_r0/sample.txt'), encoding = 'utf-8', pattern = '('
+regex = True, context_lines = 0, max_matches = 200
+
+    def _search_file(
+        path: Path,
+        encoding: str,
+        pattern: str,
+        regex: bool,
+        context_lines: int,
+        max_matches: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        matches: List[Dict[str, Any]] = []
+        matcher = None
+        if regex:
+            try:
+>               matcher = re.compile(pattern)
+
+tools/read_file.py:293:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+../../../miniconda3/envs/uap/lib/python3.11/re/__init__.py:227: in compile
+    return _compile(pattern, flags)
+../../../miniconda3/envs/uap/lib/python3.11/re/__init__.py:294: in _compile
+    p = _compiler.compile(pattern, flags)
+../../../miniconda3/envs/uap/lib/python3.11/re/_compiler.py:745: in compile
+    p = _parser.parse(p, flags)
+../../../miniconda3/envs/uap/lib/python3.11/re/_parser.py:989: in parse
+    p = _parse_sub(source, state, flags & SRE_FLAG_VERBOSE, 0)
+../../../miniconda3/envs/uap/lib/python3.11/re/_parser.py:464: in _parse_sub
+    itemsappend(_parse(source, state, verbose, nested + 1,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+source = <re._parser.Tokenizer object at 0x72ad8ced68d0>, state = <re._parser.State object at 0x72ad8ced6690>, verbose = 0, nested = 1
+first = True
+
+    def _parse(source, state, verbose, nested, first=False):
+        # parse a simple pattern
+        subpattern = SubPattern(state)
+
+        # precompute constants into local variables
+        subpatternappend = subpattern.append
+        sourceget = source.get
+        sourcematch = source.match
+        _len = len
+        _ord = ord
+
+        while True:
+
+            this = source.next
+            if this is None:
+                break # end of pattern
+            if this in "|)":
+                break # end of subpattern
+            sourceget()
+
+            if verbose:
+                # skip whitespace and comments
+                if this in WHITESPACE:
+                    continue
+                if this == "#":
+                    while True:
+                        this = sourceget()
+                        if this is None or this == "\n":
+                            break
+                    continue
+
+            if this[0] == "\\":
+                code = _escape(source, this, state)
+                subpatternappend(code)
+
+            elif this not in SPECIAL_CHARS:
+                subpatternappend((LITERAL, _ord(this)))
+
+            elif this == "[":
+                here = source.tell() - 1
+                # character set
+                set = []
+                setappend = set.append
+    ##          if sourcematch(":"):
+    ##              pass # handle character classes
+                if source.next == '[':
+                    import warnings
+                    warnings.warn(
+                        'Possible nested set at position %d' % source.tell(),
+                        FutureWarning, stacklevel=nested + 6
+                    )
+                negate = sourcematch("^")
+                # check remaining characters
+                while True:
+                    this = sourceget()
+                    if this is None:
+                        raise source.error("unterminated character set",
+                                           source.tell() - here)
+                    if this == "]" and set:
+                        break
+                    elif this[0] == "\\":
+                        code1 = _class_escape(source, this)
+                    else:
+                        if set and this in '-&~|' and source.next == this:
+                            import warnings
+                            warnings.warn(
+                                'Possible set %s at position %d' % (
+                                    'difference' if this == '-' else
+                                    'intersection' if this == '&' else
+                                    'symmetric difference' if this == '~' else
+                                    'union',
+                                    source.tell() - 1),
+                                FutureWarning, stacklevel=nested + 6
+                            )
+                        code1 = LITERAL, _ord(this)
+                    if sourcematch("-"):
+                        # potential range
+                        that = sourceget()
+                        if that is None:
+                            raise source.error("unterminated character set",
+                                               source.tell() - here)
+                        if that == "]":
+                            if code1[0] is IN:
+                                code1 = code1[1][0]
+                            setappend(code1)
+                            setappend((LITERAL, _ord("-")))
+                            break
+                        if that[0] == "\\":
+                            code2 = _class_escape(source, that)
+                        else:
+                            if that == '-':
+                                import warnings
+                                warnings.warn(
+                                    'Possible set difference at position %d' % (
+                                        source.tell() - 2),
+                                    FutureWarning, stacklevel=nested + 6
+                                )
+                            code2 = LITERAL, _ord(that)
+                        if code1[0] != LITERAL or code2[0] != LITERAL:
+                            msg = "bad character range %s-%s" % (this, that)
+                            raise source.error(msg, len(this) + 1 + len(that))
+                        lo = code1[1]
+                        hi = code2[1]
+                        if hi < lo:
+                            msg = "bad character range %s-%s" % (this, that)
+                            raise source.error(msg, len(this) + 1 + len(that))
+                        setappend((RANGE, (lo, hi)))
+                    else:
+                        if code1[0] is IN:
+                            code1 = code1[1][0]
+                        setappend(code1)
+
+                set = _uniq(set)
+                # XXX: <fl> should move set optimization to compiler!
+                if _len(set) == 1 and set[0][0] is LITERAL:
+                    # optimization
+                    if negate:
+                        subpatternappend((NOT_LITERAL, set[0][1]))
+                    else:
+                        subpatternappend(set[0])
+                else:
+                    if negate:
+                        set.insert(0, (NEGATE, None))
+                    # charmap optimization can't be added here because
+                    # global flags still are not known
+                    subpatternappend((IN, set))
+
+            elif this in REPEAT_CHARS:
+                # repeat previous item
+                here = source.tell()
+                if this == "?":
+                    min, max = 0, 1
+                elif this == "*":
+                    min, max = 0, MAXREPEAT
+
+                elif this == "+":
+                    min, max = 1, MAXREPEAT
+                elif this == "{":
+                    if source.next == "}":
+                        subpatternappend((LITERAL, _ord(this)))
+                        continue
+
+                    min, max = 0, MAXREPEAT
+                    lo = hi = ""
+                    while source.next in DIGITS:
+                        lo += sourceget()
+                    if sourcematch(","):
+                        while source.next in DIGITS:
+                            hi += sourceget()
+                    else:
+                        hi = lo
+                    if not sourcematch("}"):
+                        subpatternappend((LITERAL, _ord(this)))
+                        source.seek(here)
+                        continue
+
+                    if lo:
+                        min = int(lo)
+                        if min >= MAXREPEAT:
+                            raise OverflowError("the repetition number is too large")
+                    if hi:
+                        max = int(hi)
+                        if max >= MAXREPEAT:
+                            raise OverflowError("the repetition number is too large")
+                        if max < min:
+                            raise source.error("min repeat greater than max repeat",
+                                               source.tell() - here)
+                else:
+                    raise AssertionError("unsupported quantifier %r" % (char,))
+                # figure out which item to repeat
+                if subpattern:
+                    item = subpattern[-1:]
+                else:
+                    item = None
+                if not item or item[0][0] is AT:
+                    raise source.error("nothing to repeat",
+                                       source.tell() - here + len(this))
+                if item[0][0] in _REPEATCODES:
+                    raise source.error("multiple repeat",
+                                       source.tell() - here + len(this))
+                if item[0][0] is SUBPATTERN:
+                    group, add_flags, del_flags, p = item[0][1]
+                    if group is None and not add_flags and not del_flags:
+                        item = p
+                if sourcematch("?"):
+                    # Non-Greedy Match
+                    subpattern[-1] = (MIN_REPEAT, (min, max, item))
+                elif sourcematch("+"):
+                    # Possessive Match (Always Greedy)
+                    subpattern[-1] = (POSSESSIVE_REPEAT, (min, max, item))
+                else:
+                    # Greedy Match
+                    subpattern[-1] = (MAX_REPEAT, (min, max, item))
+
+            elif this == ".":
+                subpatternappend((ANY, None))
+
+            elif this == "(":
+                start = source.tell() - 1
+                capture = True
+                atomic = False
+                name = None
+                add_flags = 0
+                del_flags = 0
+                if sourcematch("?"):
+                    # options
+                    char = sourceget()
+                    if char is None:
+                        raise source.error("unexpected end of pattern")
+                    if char == "P":
+                        # python extensions
+                        if sourcematch("<"):
+                            # named group: skip forward to end of name
+                            name = source.getuntil(">", "group name")
+                            source.checkgroupname(name, 1, nested)
+                        elif sourcematch("="):
+                            # named backreference
+                            name = source.getuntil(")", "group name")
+                            source.checkgroupname(name, 1, nested)
+                            gid = state.groupdict.get(name)
+                            if gid is None:
+                                msg = "unknown group name %r" % name
+                                raise source.error(msg, len(name) + 1)
+                            if not state.checkgroup(gid):
+                                raise source.error("cannot refer to an open group",
+                                                   len(name) + 1)
+                            state.checklookbehindgroup(gid, source)
+                            subpatternappend((GROUPREF, gid))
+                            continue
+
+                        else:
+                            char = sourceget()
+                            if char is None:
+                                raise source.error("unexpected end of pattern")
+                            raise source.error("unknown extension ?P" + char,
+                                               len(char) + 2)
+                    elif char == ":":
+                        # non-capturing group
+                        capture = False
+                    elif char == "#":
+                        # comment
+                        while True:
+                            if source.next is None:
+                                raise source.error("missing ), unterminated comment",
+                                                   source.tell() - start)
+                            if sourceget() == ")":
+                                break
+                        continue
+
+                    elif char in "=!<":
+                        # lookahead assertions
+                        dir = 1
+                        if char == "<":
+                            char = sourceget()
+                            if char is None:
+                                raise source.error("unexpected end of pattern")
+                            if char not in "=!":
+                                raise source.error("unknown extension ?<" + char,
+                                                   len(char) + 2)
+                            dir = -1 # lookbehind
+                            lookbehindgroups = state.lookbehindgroups
+                            if lookbehindgroups is None:
+                                state.lookbehindgroups = state.groups
+                        p = _parse_sub(source, state, verbose, nested + 1)
+                        if dir < 0:
+                            if lookbehindgroups is None:
+                                state.lookbehindgroups = None
+                        if not sourcematch(")"):
+                            raise source.error("missing ), unterminated subpattern",
+                                               source.tell() - start)
+                        if char == "=":
+                            subpatternappend((ASSERT, (dir, p)))
+                        else:
+                            subpatternappend((ASSERT_NOT, (dir, p)))
+                        continue
+
+                    elif char == "(":
+                        # conditional backreference group
+                        condname = source.getuntil(")", "group name")
+                        if condname.isidentifier():
+                            source.checkgroupname(condname, 1, nested)
+                            condgroup = state.groupdict.get(condname)
+                            if condgroup is None:
+                                msg = "unknown group name %r" % condname
+                                raise source.error(msg, len(condname) + 1)
+                        else:
+                            try:
+                                condgroup = int(condname)
+                                if condgroup < 0:
+                                    raise ValueError
+                            except ValueError:
+                                msg = "bad character in group name %r" % condname
+                                raise source.error(msg, len(condname) + 1) from None
+                            if not condgroup:
+                                raise source.error("bad group number",
+                                                   len(condname) + 1)
+                            if condgroup >= MAXGROUPS:
+                                msg = "invalid group reference %d" % condgroup
+                                raise source.error(msg, len(condname) + 1)
+                            if condgroup not in state.grouprefpos:
+                                state.grouprefpos[condgroup] = (
+                                    source.tell() - len(condname) - 1
+                                )
+                            if not (condname.isdecimal() and condname.isascii()):
+                                import warnings
+                                warnings.warn(
+                                    "bad character in group name %s at position %d" %
+                                    (repr(condname) if source.istext else ascii(condname),
+                                     source.tell() - len(condname) - 1),
+                                    DeprecationWarning, stacklevel=nested + 6
+                                )
+                        state.checklookbehindgroup(condgroup, source)
+                        item_yes = _parse(source, state, verbose, nested + 1)
+                        if source.match("|"):
+                            item_no = _parse(source, state, verbose, nested + 1)
+                            if source.next == "|":
+                                raise source.error("conditional backref with more than two branches")
+                        else:
+                            item_no = None
+                        if not source.match(")"):
+                            raise source.error("missing ), unterminated subpattern",
+                                               source.tell() - start)
+                        subpatternappend((GROUPREF_EXISTS, (condgroup, item_yes, item_no)))
+                        continue
+
+                    elif char == ">":
+                        # non-capturing, atomic group
+                        capture = False
+                        atomic = True
+                    elif char in FLAGS or char == "-":
+                        # flags
+                        flags = _parse_flags(source, state, char)
+                        if flags is None:  # global flags
+                            if not first or subpattern:
+                                raise source.error('global flags not at the start '
+                                                   'of the expression',
+                                                   source.tell() - start)
+                            verbose = state.flags & SRE_FLAG_VERBOSE
+                            continue
+
+                        add_flags, del_flags = flags
+                        capture = False
+                    else:
+                        raise source.error("unknown extension ?" + char,
+                                           len(char) + 1)
+
+                # parse group contents
+                if capture:
+                    try:
+                        group = state.opengroup(name)
+                    except error as err:
+                        raise source.error(err.msg, len(name) + 1) from None
+                else:
+                    group = None
+                sub_verbose = ((verbose or (add_flags & SRE_FLAG_VERBOSE)) and
+                               not (del_flags & SRE_FLAG_VERBOSE))
+                p = _parse_sub(source, state, sub_verbose, nested + 1)
+                if not source.match(")"):
+>                   raise source.error("missing ), unterminated subpattern",
+                                       source.tell() - start)
+E                   re.error: missing ), unterminated subpattern at position 0
+
+../../../miniconda3/envs/uap/lib/python3.11/re/_parser.py:874: error
+
+The above exception was the direct cause of the following exception:
+
+path = '/tmp/pytest-of-austin/pytest-58/test_read_file_invalid_regex_r0/sample.txt', mode = 'search', chunk_index = None
+start_chunk = None, max_chunks = None, start_line = None, end_line = None, page_number = None, page_size = None, search = '('
+search_mode = 'regex', context_lines = 0, max_matches = 200
+
+    @app.tool()
+    async def read_file(
+        path: str,
+        mode: str = "scan_only",
+        chunk_index: Optional[List[int]] = None,
+        start_chunk: Optional[int] = None,
+        max_chunks: Optional[int] = None,
+        start_line: Optional[int] = None,
+        end_line: Optional[int] = None,
+        page_number: Optional[int] = None,
+        page_size: Optional[int] = None,
+        search: Optional[str] = None,
+        search_mode: str = "literal",
+        context_lines: int = 0,
+        max_matches: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        exec_context = server_module.get_execution_context()
+        if exec_context is None:
+            return {"ok": False, "error": "ExecutionContext missing"}
+
+        repo_root = Path(exec_context.repo_root)
+        requested_mode = mode.lower()
+        target = Path(path).expanduser()
+        if not target.is_absolute():
+            target = (repo_root / target).resolve()
+        else:
+            target = target.resolve()
+        try:
+            rel_path = str(target.relative_to(repo_root))
+        except ValueError:
+            rel_path = None
+
+        audit_meta = {
+            "execution_id": exec_context.execution_id,
+            "session_id": exec_context.session_id,
+            "intent": exec_context.intent,
+            "agent_kind": exec_context.agent_identity.agent_kind,
+            "agent_instance_id": exec_context.agent_identity.instance_id,
+            "agent_sub_id": exec_context.agent_identity.sub_id,
+            "agent_display_name": exec_context.agent_identity.display_name,
+            "agent_model": exec_context.agent_identity.model,
+        }
+
+        async def get_reminders(read_mode: str) -> List[Dict[str, Any]]:
+            try:
+                context = await resolve_logging_context(
+                    tool_name="read_file",
+                    server_module=server_module,
+                    agent_id=exec_context.agent_identity.instance_id,
+                    require_project=False,
+                    reminder_variables={"read_mode": read_mode},
+                )
+                return list(context.reminders or [])
+            except Exception:
+                return []
+
+        async def finalize_response(payload: Dict[str, Any], read_mode: str) -> Dict[str, Any]:
+            payload.setdefault("mode", read_mode)
+            payload["reminders"] = await get_reminders(read_mode)
+            return payload
+
+        async def log_read(event_type: str, data: Dict[str, Any], *, include_md: bool = True) -> None:
+            payload = {**audit_meta, **data}
+            if exec_context.mode == "sentinel":
+                append_sentinel_event(
+                    exec_context,
+                    event_type=event_type,
+                    data=payload,
+                    log_type="sentinel",
+                    include_md=include_md,
+                )
+            else:
+                await _log_project_read(
+                    exec_context,
+                    message=event_type,
+                    meta=payload,
+                )
+
+        policy_error = _enforce_path_policy(target, repo_root)
+        if policy_error:
+            await log_read(
+                "scope_violation",
+                {"reason": policy_error, "path": str(target)},
+                include_md=True,
+            )
+            return await finalize_response({
+                "ok": False,
+                "error": "read_file denied",
+                "reason": policy_error,
+                "absolute_path": str(target),
+                "repo_relative_path": rel_path,
+            }, requested_mode)
+
+        if not target.exists() or not target.is_file():
+            await log_read(
+                "read_file_error",
+                {"reason": "file_not_found", "path": str(target)},
+                include_md=True,
+            )
+            return await finalize_response({
+                "ok": False,
+                "error": "file not found",
+                "absolute_path": str(target),
+                "repo_relative_path": rel_path,
+            }, requested_mode)
+
+        scan = _scan_file(target)
+        scan_payload = {
+            "absolute_path": str(target),
+            "repo_relative_path": rel_path,
+            **scan,
+        }
+
+        encoding = scan["encoding"]
+        response: Dict[str, Any] = {"ok": True, "scan": scan_payload, "mode": mode}
+        mode = mode.lower()
+        if chunk_index is None and mode == "chunk":
+            chunk_index = [0]
+        elif isinstance(chunk_index, (int, str)):
+            chunk_index = [int(chunk_index)]
+
+        if mode == "scan_only":
+            await log_read("read_file", {"read_mode": "scan_only", **scan_payload}, include_md=True)
+            return await finalize_response(response, "scan_only")
+
+        if mode == "chunk":
+            if not chunk_index:
+                return await finalize_response({
+                    "ok": False,
+                    "error": "chunk_index required for chunk mode",
+                    "absolute_path": str(target),
+                    "repo_relative_path": rel_path,
+                }, "chunk")
+            try:
+                wanted = {int(x) for x in chunk_index}
+            except (TypeError, ValueError):
+                return await finalize_response({
+                    "ok": False,
+                    "error": "chunk_index must be integers",
+                    "absolute_path": str(target),
+                    "repo_relative_path": rel_path,
+                }, "chunk")
+            max_wanted = max(wanted) if wanted else -1
+            remaining = set(wanted)
+            chunks: List[Dict[str, Any]] = []
+            for chunk in _iter_chunks(target, encoding):
+                index = chunk["chunk_index"]
+                if index in remaining:
+                    chunks.append(chunk)
+                    remaining.remove(index)
+                if not remaining and index >= max_wanted:
+                    break
+            response["chunks"] = chunks
+            await log_read(
+                "read_file",
+                {"read_mode": "chunk", "chunk_index": sorted(wanted), **scan_payload},
+                include_md=True,
+            )
+            return await finalize_response(response, "chunk")
+
+        if mode == "line_range":
+            if start_line is None or end_line is None:
+                return await finalize_response({"ok": False, "error": "start_line and end_line required for line_range"}, "line_range")
+            if start_line < 1 or end_line < start_line:
+                return await finalize_response({"ok": False, "error": "invalid line range"}, "line_range")
+            chunk = _extract_line_range(target, encoding, int(start_line), int(end_line))
+            response["chunk"] = chunk
+            await log_read(
+                "read_file",
+                {"read_mode": "line_range", "line_start": start_line, "line_end": end_line, **scan_payload},
+                include_md=True,
+            )
+            return await finalize_response(response, "line_range")
+
+        if mode == "page":
+            if page_number is None:
+                return await finalize_response({"ok": False, "error": "page_number required for page mode"}, "page")
+            size = int(page_size or settings.default_page_size)
+            start = (int(page_number) - 1) * size + 1
+            end = start + size - 1
+            chunk = _extract_line_range(target, encoding, start, end)
+            response["chunk"] = chunk
+            response["page_number"] = page_number
+            response["page_size"] = size
+            await log_read(
+                "read_file",
+                {"read_mode": "page", "page_number": page_number, "page_size": size, **scan_payload},
+                include_md=True,
+            )
+            return await finalize_response(response, "page")
+
+        if mode == "full_stream":
+            if start_chunk is not None and start_chunk < 0:
+                return await finalize_response({"ok": False, "error": "start_chunk must be >= 0"}, "full_stream")
+            if max_chunks is not None and max_chunks <= 0:
+                return await finalize_response({"ok": False, "error": "max_chunks must be >= 1"}, "full_stream")
+            start_index = int(start_chunk if start_chunk is not None else (chunk_index[0] if chunk_index else 0))
+            max_chunk_count = int(max_chunks if max_chunks is not None else (page_size or 1))
+            chunks: List[Dict[str, Any]] = []
+            for chunk in _iter_chunks(target, encoding):
+                if chunk["chunk_index"] < start_index:
+                    continue
+                if len(chunks) >= max_chunk_count:
+                    break
+                chunks.append(chunk)
+            next_index = None
+            if chunks:
+                next_index = chunks[-1]["chunk_index"] + 1
+                if next_index >= scan["estimated_chunk_count"]:
+                    next_index = None
+            response["chunks"] = chunks
+            response["next_chunk_index"] = next_index
+            await log_read(
+                "read_file",
+                {"read_mode": "full_stream", "start_chunk": start_index, "max_chunks": max_chunk_count, **scan_payload},
+                include_md=True,
+            )
+            return await finalize_response(response, "full_stream")
+
+        if mode == "search":
+            if not search:
+                return await finalize_response({"ok": False, "error": "search pattern required for search mode"}, "search")
+            if max_matches is None:
+                max_matches = _DEFAULT_MAX_MATCHES
+            if max_matches <= 0:
+                return await finalize_response({"ok": False, "error": "max_matches must be >= 1"}, "search")
+            regex = search_mode.lower() == "regex"
+            try:
+>               matches = _search_file(target, encoding, search, regex, int(context_lines), max_matches)
+
+tools/read_file.py:591:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = PosixPath('/tmp/pytest-of-austin/pytest-58/test_read_file_invalid_regex_r0/sample.txt'), encoding = 'utf-8', pattern = '('
+regex = True, context_lines = 0, max_matches = 200
+
+    def _search_file(
+        path: Path,
+        encoding: str,
+        pattern: str,
+        regex: bool,
+        context_lines: int,
+        max_matches: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        matches: List[Dict[str, Any]] = []
+        matcher = None
+        if regex:
+            try:
+                matcher = re.compile(pattern)
+            except re.error as exc:
+>               raise ValueError(f"invalid regex: {exc}") from exc
+E               ValueError: invalid regex: missing ), unterminated subpattern at position 0
+
+tools/read_file.py:295: ValueError
+
+During handling of the above exception, another exception occurred:
+
+tmp_path = PosixPath('/tmp/pytest-of-austin/pytest-58/test_read_file_invalid_regex_r0')
+
+    @pytest.mark.asyncio
+    async def test_read_file_invalid_regex_returns_error(tmp_path):
+        token = _install_execution_context(tmp_path)
+        try:
+            target = tmp_path / "sample.txt"
+            target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+
+>           result = await read_file(path=str(target), mode="search", search="(", search_mode="regex")
+
+tests/test_read_file_tool.py:54:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tools/read_file.py:593: in read_file
+    await log_read(
+tools/read_file.py:427: in log_read
+    append_sentinel_event(
+utils/sentinel_logs.py:107: in append_sentinel_event
+    _bounded_append(jsonl_path, line, repo_root=repo_root)
+utils/sentinel_logs.py:35: in _bounded_append
+    with file_lock(path, mode="a+", timeout=timeout_seconds, repo_root=repo_root) as handle:
+../../../miniconda3/envs/uap/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+utils/files.py:95: in file_lock
+    lock_file.touch(exist_ok=True)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = PosixPath('/tmp/pytest-of-austin/pytest-58/test_read_file_invalid_regex_r0/.scribe/sentinel/2026-01-02/sentinel.jsonl.lock')
+mode = 438, exist_ok = True
+
+    def touch(self, mode=0o666, exist_ok=True):
+        """
+        Create this file with the given access mode, if it doesn't exist.
+        """
+
+        if exist_ok:
+            # First try to bump modification time
+            # Implementation note: GNU touch uses the UTIME_NOW option of
+            # the utimensat() / futimens() functions.
+            try:
+                os.utime(self, None)
+            except OSError:
+                # Avoid exception chaining
+                pass
+            else:
+                return
+        flags = os.O_CREAT | os.O_WRONLY
+        if not exist_ok:
+            flags |= os.O_EXCL
+>       fd = os.open(self, flags, mode)
+E       FileNotFoundError: [Errno 2] No such file or directory: '/tmp/pytest-of-austin/pytest-58/test_read_file_invalid_regex_r0/.scribe/sentinel/2026-01-02/sentinel.jsonl.lock'
+
+../../../miniconda3/envs/uap/lib/python3.11/pathlib.py:1108: FileNotFoundError
+________________________________________ TestSandboxBypassAttempts.test_path_traversal_with_dots _________________________________________
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478f7290>
+
+    def test_path_traversal_with_dots(self):
+        """Test that path traversal using ../ is blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Test various path traversal attempts
+            malicious_paths = [
+                "../etc/passwd",
+                "../../etc/passwd",
+                "../../../etc/passwd",
+                "../../../../etc/shadow",
+                "../root/.ssh/id_rsa",
+                "../../.ssh/authorized_keys",
+            ]
+
+            for malicious_path in malicious_paths:
+                full_path = repo_root / malicious_path
+                try:
+>                   safe_file_operation(repo_root, full_path, "read")
+
+tests/test_sandbox_bypass.py:38:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+security/sandbox.py:358: in safe_file_operation
+    return get_safety_instance().safe_file_operation(repo_root, file_path, operation, context)
+security/sandbox.py:281: in safe_file_operation
+    permission_checker.validate_operation(operation, context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <scribe_mcp.security.sandbox.PermissionChecker object at 0x72ad8d9dff90>, operation = 'read', context = None
+
+    def validate_operation(self, operation: str, context: Dict[str, Any] = None) -> None:
+        """
+        Validate an operation, raising an exception if not allowed.
+
+        Args:
+            operation: Operation type
+            context: Additional context
+
+        Raises:
+            PermissionError: If operation is not allowed
+        """
+        if not self.check_permission(operation, context):
+>           raise PermissionError(f"Operation '{operation}' is not allowed for this repository")
+E           scribe_mcp.security.sandbox.PermissionError: Operation 'read' is not allowed for this repository
+
+security/sandbox.py:203: PermissionError
+
+During handling of the above exception, another exception occurred:
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478f7290>
+
+    def test_path_traversal_with_dots(self):
+        """Test that path traversal using ../ is blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Test various path traversal attempts
+            malicious_paths = [
+                "../etc/passwd",
+                "../../etc/passwd",
+                "../../../etc/passwd",
+                "../../../../etc/shadow",
+                "../root/.ssh/id_rsa",
+                "../../.ssh/authorized_keys",
+            ]
+
+            for malicious_path in malicious_paths:
+                full_path = repo_root / malicious_path
+                try:
+                    safe_file_operation(repo_root, full_path, "read")
+                    self.fail(f"Should have blocked path traversal: {malicious_path}")
+                except SecurityError:
+                    pass  # Expected - good
+                except Exception as e:
+>                   self.fail(f"Unexpected error for {malicious_path}: {e}")
+
+tests/test_sandbox_bypass.py:43:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478f7290>
+message = "Unexpected error for ../etc/passwd: Operation 'read' is not allowed for this repository"
+
+    def fail(self, message):
+        """Simple failure method."""
+>       raise AssertionError(message)
+E       AssertionError: Unexpected error for ../etc/passwd: Operation 'read' is not allowed for this repository
+
+tests/test_sandbox_bypass.py:251: AssertionError
+____________________________________________ TestSandboxBypassAttempts.test_symlink_hijacking ____________________________________________
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478f6a50>
+
+    def test_symlink_hijacking(self):
+        """Test that symlink hijacking attempts are blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Create external file we want to access
+            external_file = Path(temp_dir) / "external" / "secret.txt"
+            external_file.parent.mkdir(parents=True)
+            external_file.write_text("secret data")
+
+            # Create symlink inside repo pointing to external file
+            internal_symlink = repo_root / "safe_looking_link.txt"
+            internal_symlink.symlink_to(external_file)
+
+            # Try to access through symlink - should be blocked
+            try:
+>               safe_file_operation(repo_root, internal_symlink, "read")
+
+tests/test_sandbox_bypass.py:62:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+security/sandbox.py:358: in safe_file_operation
+    return get_safety_instance().safe_file_operation(repo_root, file_path, operation, context)
+security/sandbox.py:281: in safe_file_operation
+    permission_checker.validate_operation(operation, context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <scribe_mcp.security.sandbox.PermissionChecker object at 0x72af4c540650>, operation = 'read', context = None
+
+    def validate_operation(self, operation: str, context: Dict[str, Any] = None) -> None:
+        """
+        Validate an operation, raising an exception if not allowed.
+
+        Args:
+            operation: Operation type
+            context: Additional context
+
+        Raises:
+            PermissionError: If operation is not allowed
+        """
+        if not self.check_permission(operation, context):
+>           raise PermissionError(f"Operation '{operation}' is not allowed for this repository")
+E           scribe_mcp.security.sandbox.PermissionError: Operation 'read' is not allowed for this repository
+
+security/sandbox.py:203: PermissionError
+
+During handling of the above exception, another exception occurred:
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478f6a50>
+
+    def test_symlink_hijacking(self):
+        """Test that symlink hijacking attempts are blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Create external file we want to access
+            external_file = Path(temp_dir) / "external" / "secret.txt"
+            external_file.parent.mkdir(parents=True)
+            external_file.write_text("secret data")
+
+            # Create symlink inside repo pointing to external file
+            internal_symlink = repo_root / "safe_looking_link.txt"
+            internal_symlink.symlink_to(external_file)
+
+            # Try to access through symlink - should be blocked
+            try:
+                safe_file_operation(repo_root, internal_symlink, "read")
+                self.fail("Should have blocked symlink escape")
+            except SecurityError:
+                pass  # Expected - good
+            except Exception as e:
+>               self.fail(f"Unexpected error for symlink test: {e}")
+
+tests/test_sandbox_bypass.py:67:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478f6a50>
+message = "Unexpected error for symlink test: Operation 'read' is not allowed for this repository"
+
+    def fail(self, message):
+        """Simple failure method."""
+>       raise AssertionError(message)
+E       AssertionError: Unexpected error for symlink test: Operation 'read' is not allowed for this repository
+
+tests/test_sandbox_bypass.py:251: AssertionError
+__________________________________________ TestSandboxBypassAttempts.test_absolute_path_escape ___________________________________________
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478f5d10>
+
+    def test_absolute_path_escape(self):
+        """Test that absolute paths outside repo are blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Test absolute paths outside repository
+            forbidden_paths = [
+                "/etc/passwd",
+                "/etc/shadow",
+                "/root/.ssh/id_rsa",
+                "/home/user/.bashrc",
+            ]
+
+            for forbidden_path in forbidden_paths:
+                path_obj = Path(forbidden_path)
+                try:
+>                   safe_file_operation(repo_root, path_obj, "read")
+
+tests/test_sandbox_bypass.py:86:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+security/sandbox.py:358: in safe_file_operation
+    return get_safety_instance().safe_file_operation(repo_root, file_path, operation, context)
+security/sandbox.py:281: in safe_file_operation
+    permission_checker.validate_operation(operation, context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <scribe_mcp.security.sandbox.PermissionChecker object at 0x72ad8ce4bbd0>, operation = 'read', context = None
+
+    def validate_operation(self, operation: str, context: Dict[str, Any] = None) -> None:
+        """
+        Validate an operation, raising an exception if not allowed.
+
+        Args:
+            operation: Operation type
+            context: Additional context
+
+        Raises:
+            PermissionError: If operation is not allowed
+        """
+        if not self.check_permission(operation, context):
+>           raise PermissionError(f"Operation '{operation}' is not allowed for this repository")
+E           scribe_mcp.security.sandbox.PermissionError: Operation 'read' is not allowed for this repository
+
+security/sandbox.py:203: PermissionError
+
+During handling of the above exception, another exception occurred:
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478f5d10>
+
+    def test_absolute_path_escape(self):
+        """Test that absolute paths outside repo are blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Test absolute paths outside repository
+            forbidden_paths = [
+                "/etc/passwd",
+                "/etc/shadow",
+                "/root/.ssh/id_rsa",
+                "/home/user/.bashrc",
+            ]
+
+            for forbidden_path in forbidden_paths:
+                path_obj = Path(forbidden_path)
+                try:
+                    safe_file_operation(repo_root, path_obj, "read")
+                    self.fail(f"Should have blocked absolute path: {forbidden_path}")
+                except SecurityError:
+                    pass  # Expected - good
+                except Exception as e:
+>                   self.fail(f"Unexpected error for {forbidden_path}: {e}")
+
+tests/test_sandbox_bypass.py:91:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478f5d10>
+message = "Unexpected error for /etc/passwd: Operation 'read' is not allowed for this repository"
+
+    def fail(self, message):
+        """Simple failure method."""
+>       raise AssertionError(message)
+E       AssertionError: Unexpected error for /etc/passwd: Operation 'read' is not allowed for this repository
+
+tests/test_sandbox_bypass.py:251: AssertionError
+_____________________________________ TestSandboxBypassAttempts.test_environment_variable_injection ______________________________________
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478fc350>
+
+    def test_environment_variable_injection(self):
+        """Test that environment variable injection attempts are blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Test paths that include environment variables
+            env_injection_attempts = [
+                "$HOME/.ssh/id_rsa",
+                "${HOME}/.ssh/authorized_keys",
+            ]
+
+            for injection_attempt in env_injection_attempts:
+                try:
+                    # Expand path as a user might
+                    expanded_path = Path(injection_attempt).expanduser()
+
+                    # Try to access through expanded path
+>                   safe_file_operation(repo_root, expanded_path, "read")
+
+tests/test_sandbox_bypass.py:133:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+security/sandbox.py:358: in safe_file_operation
+    return get_safety_instance().safe_file_operation(repo_root, file_path, operation, context)
+security/sandbox.py:281: in safe_file_operation
+    permission_checker.validate_operation(operation, context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <scribe_mcp.security.sandbox.PermissionChecker object at 0x72ad8d9cb110>, operation = 'read', context = None
+
+    def validate_operation(self, operation: str, context: Dict[str, Any] = None) -> None:
+        """
+        Validate an operation, raising an exception if not allowed.
+
+        Args:
+            operation: Operation type
+            context: Additional context
+
+        Raises:
+            PermissionError: If operation is not allowed
+        """
+        if not self.check_permission(operation, context):
+>           raise PermissionError(f"Operation '{operation}' is not allowed for this repository")
+E           scribe_mcp.security.sandbox.PermissionError: Operation 'read' is not allowed for this repository
+
+security/sandbox.py:203: PermissionError
+
+During handling of the above exception, another exception occurred:
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478fc350>
+
+    def test_environment_variable_injection(self):
+        """Test that environment variable injection attempts are blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Test paths that include environment variables
+            env_injection_attempts = [
+                "$HOME/.ssh/id_rsa",
+                "${HOME}/.ssh/authorized_keys",
+            ]
+
+            for injection_attempt in env_injection_attempts:
+                try:
+                    # Expand path as a user might
+                    expanded_path = Path(injection_attempt).expanduser()
+
+                    # Try to access through expanded path
+                    safe_file_operation(repo_root, expanded_path, "read")
+                    self.fail(f"Should have blocked env injection: {injection_attempt}")
+                except (OSError, RuntimeError, SecurityError):
+                    pass  # Expected - good
+                except Exception as e:
+>                   self.fail(f"Unexpected error for env test: {e}")
+
+tests/test_sandbox_bypass.py:138:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478fc350>
+message = "Unexpected error for env test: Operation 'read' is not allowed for this repository"
+
+    def fail(self, message):
+        """Simple failure method."""
+>       raise AssertionError(message)
+E       AssertionError: Unexpected error for env test: Operation 'read' is not allowed for this repository
+
+tests/test_sandbox_bypass.py:251: AssertionError
+___________________________________________ TestSandboxBypassAttempts.test_device_file_access ____________________________________________
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478fd6d0>
+
+    def test_device_file_access(self):
+        """Test that access to device files is blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Test attempts to access device files
+            device_paths = [
+                "/dev/null",
+                "/dev/zero",
+                "/dev/random",
+            ]
+
+            for device_path in device_paths:
+                path_obj = Path(device_path)
+                if path_obj.exists():  # Only test existing device files
+                    try:
+>                       safe_file_operation(repo_root, path_obj, "read")
+
+tests/test_sandbox_bypass.py:157:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+security/sandbox.py:358: in safe_file_operation
+    return get_safety_instance().safe_file_operation(repo_root, file_path, operation, context)
+security/sandbox.py:281: in safe_file_operation
+    permission_checker.validate_operation(operation, context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <scribe_mcp.security.sandbox.PermissionChecker object at 0x72ad8cd48250>, operation = 'read', context = None
+
+    def validate_operation(self, operation: str, context: Dict[str, Any] = None) -> None:
+        """
+        Validate an operation, raising an exception if not allowed.
+
+        Args:
+            operation: Operation type
+            context: Additional context
+
+        Raises:
+            PermissionError: If operation is not allowed
+        """
+        if not self.check_permission(operation, context):
+>           raise PermissionError(f"Operation '{operation}' is not allowed for this repository")
+E           scribe_mcp.security.sandbox.PermissionError: Operation 'read' is not allowed for this repository
+
+security/sandbox.py:203: PermissionError
+
+During handling of the above exception, another exception occurred:
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478fd6d0>
+
+    def test_device_file_access(self):
+        """Test that access to device files is blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Test attempts to access device files
+            device_paths = [
+                "/dev/null",
+                "/dev/zero",
+                "/dev/random",
+            ]
+
+            for device_path in device_paths:
+                path_obj = Path(device_path)
+                if path_obj.exists():  # Only test existing device files
+                    try:
+                        safe_file_operation(repo_root, path_obj, "read")
+                        self.fail(f"Should have blocked device access: {device_path}")
+                    except SecurityError:
+                        pass  # Expected - good
+                    except Exception as e:
+>                       self.fail(f"Unexpected error for device test: {e}")
+
+tests/test_sandbox_bypass.py:162:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478fd6d0>
+message = "Unexpected error for device test: Operation 'read' is not allowed for this repository"
+
+    def fail(self, message):
+        """Simple failure method."""
+>       raise AssertionError(message)
+E       AssertionError: Unexpected error for device test: Operation 'read' is not allowed for this repository
+
+tests/test_sandbox_bypass.py:251: AssertionError
+_______________________________________ TestSandboxBypassAttempts.test_temporary_directory_escape ________________________________________
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478fdd50>
+
+    def test_temporary_directory_escape(self):
+        """Test that attempts to escape through temporary directories are blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Create temp directory outside repo
+            external_temp = Path(temp_dir) / "external_temp"
+            external_temp.mkdir()
+
+            # Try to access external temp
+            escape_attempts = [
+                f"../../../{external_temp.name}/malicious",
+            ]
+
+            for escape_attempt in escape_attempts:
+                path_obj = Path(escape_attempt)
+                try:
+>                   safe_file_operation(repo_root, path_obj, "read")
+
+tests/test_sandbox_bypass.py:182:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+security/sandbox.py:358: in safe_file_operation
+    return get_safety_instance().safe_file_operation(repo_root, file_path, operation, context)
+security/sandbox.py:281: in safe_file_operation
+    permission_checker.validate_operation(operation, context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <scribe_mcp.security.sandbox.PermissionChecker object at 0x72ad8e2cb650>, operation = 'read', context = None
+
+    def validate_operation(self, operation: str, context: Dict[str, Any] = None) -> None:
+        """
+        Validate an operation, raising an exception if not allowed.
+
+        Args:
+            operation: Operation type
+            context: Additional context
+
+        Raises:
+            PermissionError: If operation is not allowed
+        """
+        if not self.check_permission(operation, context):
+>           raise PermissionError(f"Operation '{operation}' is not allowed for this repository")
+E           scribe_mcp.security.sandbox.PermissionError: Operation 'read' is not allowed for this repository
+
+security/sandbox.py:203: PermissionError
+
+During handling of the above exception, another exception occurred:
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478fdd50>
+
+    def test_temporary_directory_escape(self):
+        """Test that attempts to escape through temporary directories are blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Create temp directory outside repo
+            external_temp = Path(temp_dir) / "external_temp"
+            external_temp.mkdir()
+
+            # Try to access external temp
+            escape_attempts = [
+                f"../../../{external_temp.name}/malicious",
+            ]
+
+            for escape_attempt in escape_attempts:
+                path_obj = Path(escape_attempt)
+                try:
+                    safe_file_operation(repo_root, path_obj, "read")
+                    self.fail(f"Should have blocked temp escape: {escape_attempt}")
+                except (OSError, FileNotFoundError, SecurityError):
+                    pass  # Expected - good
+                except Exception as e:
+>                   self.fail(f"Unexpected error for temp escape test: {e}")
+
+tests/test_sandbox_bypass.py:187:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478fdd50>
+message = "Unexpected error for temp escape test: Operation 'read' is not allowed for this repository"
+
+    def fail(self, message):
+        """Simple failure method."""
+>       raise AssertionError(message)
+E       AssertionError: Unexpected error for temp escape test: Operation 'read' is not allowed for this repository
+
+tests/test_sandbox_bypass.py:251: AssertionError
+_________________________________________ TestSandboxBypassAttempts.test_unicode_encoding_bypass _________________________________________
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478fe3d0>
+
+    def test_unicode_encoding_bypass(self):
+        """Test that Unicode encoding bypass attempts are blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Various encoding bypass attempts
+            bypass_attempts = [
+                "../etc/passwd\x00.txt",  # Null byte injection
+                "..%2fetc%2fpasswd",  # URL encoding
+            ]
+
+            for bypass_attempt in bypass_attempts:
+                full_path = repo_root / bypass_attempt
+                try:
+>                   safe_file_operation(repo_root, full_path, "read")
+
+tests/test_sandbox_bypass.py:204:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+security/sandbox.py:358: in safe_file_operation
+    return get_safety_instance().safe_file_operation(repo_root, file_path, operation, context)
+security/sandbox.py:281: in safe_file_operation
+    permission_checker.validate_operation(operation, context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <scribe_mcp.security.sandbox.PermissionChecker object at 0x72ad8d922b50>, operation = 'read', context = None
+
+    def validate_operation(self, operation: str, context: Dict[str, Any] = None) -> None:
+        """
+        Validate an operation, raising an exception if not allowed.
+
+        Args:
+            operation: Operation type
+            context: Additional context
+
+        Raises:
+            PermissionError: If operation is not allowed
+        """
+        if not self.check_permission(operation, context):
+>           raise PermissionError(f"Operation '{operation}' is not allowed for this repository")
+E           scribe_mcp.security.sandbox.PermissionError: Operation 'read' is not allowed for this repository
+
+security/sandbox.py:203: PermissionError
+
+During handling of the above exception, another exception occurred:
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478fe3d0>
+
+    def test_unicode_encoding_bypass(self):
+        """Test that Unicode encoding bypass attempts are blocked."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            config = RepoConfig.defaults_for_repo(repo_root)
+
+            # Various encoding bypass attempts
+            bypass_attempts = [
+                "../etc/passwd\x00.txt",  # Null byte injection
+                "..%2fetc%2fpasswd",  # URL encoding
+            ]
+
+            for bypass_attempt in bypass_attempts:
+                full_path = repo_root / bypass_attempt
+                try:
+                    safe_file_operation(repo_root, full_path, "read")
+                    self.fail(f"Should have blocked Unicode bypass: {bypass_attempt}")
+                except (OSError, SecurityError):
+                    pass  # Expected - good
+                except Exception as e:
+>                   self.fail(f"Unexpected error for Unicode test: {e}")
+
+tests/test_sandbox_bypass.py:209:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <test_sandbox_bypass.TestSandboxBypassAttempts object at 0x72af478fe3d0>
+message = "Unexpected error for Unicode test: Operation 'read' is not allowed for this repository"
+
+    def fail(self, message):
+        """Simple failure method."""
+>       raise AssertionError(message)
+E       AssertionError: Unexpected error for Unicode test: Operation 'read' is not allowed for this repository
+
+tests/test_sandbox_bypass.py:251: AssertionError
+___________________________________________ test_log_rotation_triggers_when_max_bytes_reached ____________________________________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x72ad8cc54110>
+isolated_state = <scribe_mcp.state.manager.StateManager object at 0x72ad8cf27150>
+project_root = PosixPath('/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/ccd78bd5-904e-418f-821f-6475e6efea2c')
+
+    def test_log_rotation_triggers_when_max_bytes_reached(monkeypatch, isolated_state, project_root):
+        root = project_root
+        run(set_project.set_project("rotation-limit", str(root)))
+
+        # First, create a large log file that exceeds the threshold
+        result = run(append_entry.append_entry(
+            message="Initial large entry that exceeds max bytes threshold when combined with metadata" * 10,
+            status="info",
+            meta={"test": "large" * 20}
+        ))
+        assert result["ok"]
+        log_path = Path(result["path"])
+
+        # Manually patch the log to be larger than threshold
+        initial_content = log_path.read_text(encoding="utf-8")
+        large_content = initial_content + "\n" + "Large content to exceed max bytes" * 100
+        log_path.write_text(large_content, encoding="utf-8")
+
+        # Now set a very low threshold and patch settings
+        patched_settings = replace(
+            settings,
+            log_max_bytes=100,  # Set higher than 10 to avoid edge cases but still low
+        )
+        monkeypatch.setattr(append_entry, "settings", patched_settings, raising=False)
+        append_entry._RATE_TRACKER.clear()
+        append_entry._RATE_LOCKS.clear()
+
+        # Add another entry - this should trigger rotation
+        result = run(
+            append_entry.append_entry(
+                message="Entry that should trigger rotation",
+                status="info",
+            )
+        )
+        assert result["ok"]
+
+        # Check for archive files
+        archives = list(log_path.parent.glob(f"{log_path.name}.*.md"))
+>       assert archives, "Expected rotated archive file to be created"
+E       AssertionError: Expected rotated archive file to be created
+E       assert []
+
+tests/test_tools.py:306: AssertionError
+____________________________________ TestEnhancedRotationEngine.test_enhanced_rotation_with_integrity ____________________________________
+
+isolated_state = <test_tools.TestEnhancedRotationEngine object at 0x72af4776f290>
+project_root = PosixPath('/home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/be646793-b825-4701-a199-b845594d4c1a')
+
+    def test_enhanced_rotation_with_integrity(isolated_state, project_root):
+        """Test enhanced rotation with SHA-256 integrity verification."""
+        # Set up project
+        root = project_root
+        result = run(
+            set_project.set_project(
+                name="enhanced-rotation-test",
+                root=str(root),
+                defaults={"emoji": "🧪", "agent": "TestAgent"},
+            )
+        )
+        assert result["ok"]
+
+        # Add test entries
+        run(
+            append_entry.append_entry(
+                message="Test entry 1 before rotation",
+                status="info",
+                meta={"phase": "1", "test": "true"}
+            )
+        )
+        run(
+            append_entry.append_entry(
+                message="Test entry 2 before rotation",
+                status="success",
+                meta={"phase": "1", "test": "true"}
+            )
+        )
+
+        # Test dry run rotation
+        dry_run_result = run(
+            rotate_log.rotate_log(dry_run=True)
+        )
+        assert dry_run_result["ok"]
+        assert dry_run_result["dry_run"] is True
+        assert "rotation_id" in dry_run_result
+        assert "file_hash" in dry_run_result
+        assert "entry_count" in dry_run_result
+        assert "sequence_number" in dry_run_result
+
+        # Test actual enhanced rotation
+        rotation_result = run(
+            rotate_log.rotate_log(suffix="test-enhanced", confirm=True)
+        )
+        if not rotation_result["ok"]:
+            print(f"Rotation failed with error: {rotation_result.get('error', 'Unknown error')}")
+            print(f"Full rotation result: {rotation_result}")
+        assert rotation_result["ok"]
+
+        print(f"✅ Rotation successful!")
+        print(f"   Archive path: {rotation_result.get('archive_path', 'N/A')}")
+        print(f"   Archive hash: {rotation_result.get('archive_hash', 'N/A')}")
+        print(f"   Entry count: {rotation_result.get('entry_count', 'N/A')}")
+>       assert rotation_result["rotation_completed"] is True
+E       assert None is True
+
+tests/test_tools.py:365: AssertionError
+---------------------------------------------------------- Captured stdout call ----------------------------------------------------------
+✅ Rotation successful!
+   Archive path: /home/austin/projects/MCP_SPINE/scribe_mcp/tmp_tests/be646793-b825-4701-a199-b845594d4c1a/.scribe/docs/dev_plans/enhanced_rotation_test/PROGRESS_LOG.test-enhanced.md
+   Archive hash: None
+   Entry count: None
+______________________________________ TestVectorIntegration.test_complete_vector_indexing_workflow ______________________________________
+
+self = <test_vector_integration.TestVectorIntegration object at 0x72ad8e26e7d0>, temp_repo_with_config = PosixPath('/tmp/tmp36e6xebd')
+mock_settings = <MagicMock spec='Settings' id='126089719277072'>
+
+    async def test_complete_vector_indexing_workflow(self, temp_repo_with_config, mock_settings):
+        """Test complete workflow from plugin initialization to search."""
+        with patch('scribe_mcp.plugins.registry.settings', mock_settings), \
+             patch('scribe_mcp.plugins.vector_indexer.settings', mock_settings), \
+             patch('scribe_mcp.plugins.vector_indexer.load_vector_config') as mock_load_config:
+
+            # Set project_root dynamically for sandbox validation
+            mock_settings.project_root = temp_repo_with_config
+
+            # Mock vector config
+            mock_config_obj = MagicMock()
+            mock_config_obj.enabled = True
+            mock_config_obj.backend = "faiss"
+            mock_config_obj.dimension = 384
+            mock_config_obj.model = "all-MiniLM-L6-v2"
+            mock_config_obj.gpu = False
+            mock_config_obj.queue_max = 100
+            mock_config_obj.batch_size = 5
+            mock_load_config.return_value = mock_config_obj
+
+            # Initialize plugins
+            config = MagicMock(spec=RepoConfig)
+            config.repo_root = temp_repo_with_config
+            config.plugins_dir = temp_repo_with_config / "plugins"
+            config.plugin_config = {"enabled": True}
+            config.repo_slug = "tmp"  # Add repo_slug
+
+            initialize_plugins(config)
+
+            # Get plugin registry and check vector indexer is loaded
+            registry = get_plugin_registry(temp_repo_with_config)
+>           assert "vector_indexer" in registry.plugins
+E           AssertionError: assert 'vector_indexer' in {}
+E            +  where {} = <scribe_mcp.plugins.registry.PluginRegistry object at 0x72ad8d829590>.plugins
+
+tests/test_vector_integration.py:116: AssertionError
+----------------------------------------------------------- Captured log call ------------------------------------------------------------
+ERROR    scribe_mcp.plugins.registry:registry.py:253 Sandbox violation for plugin vector_indexer: Operation 'read' is not allowed for this repository
+============================================================ warnings summary ============================================================
+../../../miniconda3/envs/uap/lib/python3.11/site-packages/starlette/formparsers.py:12
+  /home/austin/miniconda3/envs/uap/lib/python3.11/site-packages/starlette/formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    import multipart
+
+../../../miniconda3/envs/uap/lib/python3.11/site-packages/faiss/loader.py:28
+  /home/austin/miniconda3/envs/uap/lib/python3.11/site-packages/faiss/loader.py:28: DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.
+    if LooseVersion(numpy.__version__) >= "1.19":
+
+tests/test_dual_parameter_integration.py::test_append_entry_integration
+tests/test_dual_parameter_support.py::test_dual_parameter_support
+  /home/austin/miniconda3/envs/uap/lib/python3.11/site-packages/_pytest/python.py:183: PytestUnhandledCoroutineWarning: async def functions are not natively supported and have been skipped.
+  You need to install a suitable plugin for your async framework, for example:
+    - anyio
+    - pytest-asyncio
+    - pytest-tornasync
+    - pytest-trio
+    - pytest-twisted
+    warnings.warn(PytestUnhandledCoroutineWarning(msg.format(nodeid)))
+
+tests/test_dual_parameter_logic.py::test_dual_parameter_logic
+  /home/austin/miniconda3/envs/uap/lib/python3.11/site-packages/_pytest/python.py:198: PytestReturnNotNoneWarning: Expected None, but tests/test_dual_parameter_logic.py::test_dual_parameter_logic returned False, which will be an error in a future version of pytest.  Did you mean to use `assert` instead of `return`?
+    warnings.warn(
+
+tests/test_dual_parameter_simple.py::test_dual_parameter_simple
+  /home/austin/miniconda3/envs/uap/lib/python3.11/site-packages/_pytest/python.py:198: PytestReturnNotNoneWarning: Expected None, but tests/test_dual_parameter_simple.py::test_dual_parameter_simple returned True, which will be an error in a future version of pytest.  Did you mean to use `assert` instead of `return`?
+    warnings.warn(
+
+tests/test_read_file_tool.py::test_read_file_search_default_max_matches
+tests/test_read_file_tool.py::test_read_file_invalid_regex_returns_error
+  /home/austin/projects/MCP_SPINE/scribe_mcp/utils/sentinel_logs.py:106: RuntimeWarning: coroutine 'ensure_parent' was never awaited
+    ensure_parent(jsonl_path, repo_root=repo_root)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================================================== short test summary info =========================================================
+FAILED tests/test_multi_repo_file_ops.py::test_append_line_blocks_outside_server_root_without_repo_root - scribe_mcp.security.sandbox.PermissionError: Operation 'append' is not allowed for this repository
+FAILED tests/test_multi_repo_file_ops.py::test_repo_root_override_allows_cross_repo_append_read_rotate - scribe_mcp.security.sandbox.PermissionError: Operation 'append' is not allowed for this repository
+FAILED tests/test_read_file_tool.py::test_read_file_search_default_max_matches - FileNotFoundError: [Errno 2] No such file or directory: '/tmp/pytest-of-austin/pytest-58/test_read_file_search_default_0/.scribe/sent...
+FAILED tests/test_read_file_tool.py::test_read_file_invalid_regex_returns_error - FileNotFoundError: [Errno 2] No such file or directory: '/tmp/pytest-of-austin/pytest-58/test_read_file_invalid_regex_r0/.scribe/sent...
+FAILED tests/test_sandbox_bypass.py::TestSandboxBypassAttempts::test_path_traversal_with_dots - AssertionError: Unexpected error for ../etc/passwd: Operation 'read' is not allowed for this repository
+FAILED tests/test_sandbox_bypass.py::TestSandboxBypassAttempts::test_symlink_hijacking - AssertionError: Unexpected error for symlink test: Operation 'read' is not allowed for this repository
+FAILED tests/test_sandbox_bypass.py::TestSandboxBypassAttempts::test_absolute_path_escape - AssertionError: Unexpected error for /etc/passwd: Operation 'read' is not allowed for this repository
+FAILED tests/test_sandbox_bypass.py::TestSandboxBypassAttempts::test_environment_variable_injection - AssertionError: Unexpected error for env test: Operation 'read' is not allowed for this repository
+FAILED tests/test_sandbox_bypass.py::TestSandboxBypassAttempts::test_device_file_access - AssertionError: Unexpected error for device test: Operation 'read' is not allowed for this repository
+FAILED tests/test_sandbox_bypass.py::TestSandboxBypassAttempts::test_temporary_directory_escape - AssertionError: Unexpected error for temp escape test: Operation 'read' is not allowed for this repository
+FAILED tests/test_sandbox_bypass.py::TestSandboxBypassAttempts::test_unicode_encoding_bypass - AssertionError: Unexpected error for Unicode test: Operation 'read' is not allowed for this repository
+FAILED tests/test_tools.py::test_log_rotation_triggers_when_max_bytes_reached - AssertionError: Expected rotated archive file to be created
+FAILED tests/test_tools.py::TestEnhancedRotationEngine::test_enhanced_rotation_with_integrity - assert None is True
+FAILED tests/test_vector_integration.py::TestVectorIntegration::test_complete_vector_indexing_workflow - AssertionError: assert 'vector_indexer' in {}
+============================= 14 failed, 708 passed, 6 skipped, 7 deselected, 8 warnings in 89.25s (0:01:29) =============================
+(uap) austin@Nicolas:~/projects/MCP_SPINE/scribe_mcp$

@@ -12,6 +12,7 @@ import pytest
 
 from scribe_mcp.doc_management.manager import (
     apply_doc_change,
+    DocumentOperationError,
     SECTION_MARKER,
     _replace_section,
     _toggle_checklist_status,
@@ -210,6 +211,7 @@ async def test_manage_docs_renders_jinja_content_and_custom_templates(tmp_path: 
     assert change.verification_passed
     updated_text = architecture_path.read_text(encoding="utf-8")
     assert "**Project:** Test Project | Note: Upgraded via test" in updated_text
+    assert list(architecture_path.parent.glob("ARCHITECTURE_GUIDE.preflight-*.bak"))
 
     # Append additional content via a custom template stored under .scribe/templates
     custom_templates_dir = project_root / ".scribe" / "templates"
@@ -620,10 +622,23 @@ async def test_special_document_templates_and_agent_card_storage(tmp_path: Path)
 
 def test_replace_section_auto_inserts_anchor() -> None:
     original = "# Document\n"
-    result = _replace_section(original, "auto_section", "Healed content block")
+    result = _replace_section(original, "auto_section", "Healed content block", allow_append=True)
     marker = SECTION_MARKER.format(section="auto_section")
     assert marker in result
     assert "Healed content block" in result
+
+
+def test_replace_section_missing_anchor_requires_allow_append() -> None:
+    original = "# Document\n"
+    with pytest.raises(DocumentOperationError):
+        _replace_section(original, "missing_section", "Content")
+
+
+def test_replace_section_duplicate_anchor_fails() -> None:
+    marker = SECTION_MARKER.format(section="dup_section")
+    original = f"{marker}\nFirst\n\n{marker}\nSecond\n"
+    with pytest.raises(DocumentOperationError):
+        _replace_section(original, "dup_section", "Content")
 
 
 def test_toggle_checklist_status_metadata_only_updates_proof() -> None:

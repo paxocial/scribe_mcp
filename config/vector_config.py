@@ -126,14 +126,14 @@ def load_vector_config(repo_root: Optional[Path] = None) -> VectorConfig:
     for config_path in config_paths:
         config = VectorConfig.from_file(config_path)
         if config is not None:
-            return config
+            return merge_with_env_overrides(config)
 
     # Create default config if none found
     default_path = repo_root / ".scribe_vectors" / "vector.json"
     default_config = VectorConfig.create_default(default_path)
     import logging
     logging.getLogger(__name__).info(f"Created default vector config at {default_path}")
-    return default_config
+    return merge_with_env_overrides(default_config)
 
 
 def _detect_repo_root() -> Optional[Path]:

@@ -49,7 +49,9 @@ def _ensure_safe_path(
     Validate path access against the repo sandbox before performing operations.
     """
     root = (repo_root or settings.project_root).resolve()
-    return safe_file_operation(root, Path(path), operation=operation, context=context or {"component": "files"})
+    context_payload = dict(context or {"component": "files"})
+    context_payload.setdefault("enforce_project", False)
+    return safe_file_operation(root, Path(path), operation=operation, context=context_payload)
 
 
 class FileLockError(Exception):
@@ -173,19 +175,25 @@ class WriteAheadLog:
     to the main file. On startup, any uncommitted operations are replayed.
     """
 
-    def __init__(self, log_path: Union[str, Path], repo_root: Optional[Path] = None):
+    def __init__(
+        self,
+        log_path: Union[str, Path],
+        repo_root: Optional[Path] = None,
+        context: Optional[Dict[str, Any]] = None,
+    ):
         self.repo_root = repo_root
+        self.context = context or {"component": "wal"}
         safe_log = _ensure_safe_path(
             log_path,
             operation="append",
-            context={"component": "wal"},
+            context=self.context,
             repo_root=self.repo_root,
         )
         self.log_path = safe_log
         self.journal_path = _ensure_safe_path(
             safe_log.with_suffix(safe_log.suffix + '.journal'),
             operation="append",
-            context={"component": "wal", "type": "journal"},
+            context={**self.context, "type": "journal"},
             repo_root=self.repo_root,
         )
 
@@ -369,7 +377,12 @@ async def async_atomic_write(
     await asyncio.to_thread(atomic_write, file_path, content, mode, repo_root)
 
 
-def preflight_backup(file_path: Union[str, Path], repo_root: Optional[Path] = None) -> Path:
+def preflight_backup(
+    file_path: Union[str, Path],
+    *,
+    repo_root: Optional[Path] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> Path:
     """
     Create a preflight backup of the file.
 
@@ -382,7 +395,7 @@ def preflight_backup(file_path: Union[str, Path], repo_root: Optional[Path] = No
     file_path = _ensure_safe_path(
         file_path,
         operation="read",
-        context={"component": "files", "op": "backup"},
+        context=context or {"component": "files", "op": "backup"},
         repo_root=repo_root,
     )
 
@@ -474,13 +487,39 @@ def verify_file_integrity(
         }
 
 
-async def ensure_parent(path: Path, repo_root: Optional[Path] = None) -> None:
+async def ensure_parent(
+    path: Path,
+    *,
+    repo_root: Optional[Path] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> None:
     """Create parent directories for the given path if missing."""
-    safe_path = _ensure_safe_path(path, operation="mkdir", context={"component": "files"}, repo_root=repo_root)
-    await asyncio.to_thread(safe_path.parent.mkdir, parents=True, exist_ok=True)
+    await asyncio.to_thread(ensure_parent_sync, path, repo_root=repo_root, context=context)
 
 
-async def append_line(path: Path, line: str, use_wal: bool = True, repo_root: Optional[Path] = None) -> None:
+def ensure_parent_sync(
+    path: Path,
+    *,
+    repo_root: Optional[Path] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Create parent directories for the given path if missing (sync)."""
+    safe_path = _ensure_safe_path(
+        path,
+        operation="mkdir",
+        context=context or {"component": "files"},
+        repo_root=repo_root,
+    )
+    safe_path.parent.mkdir(parents=True, exist_ok=True)
+
+
+async def append_line(
+    path: Path,
+    line: str,
+    use_wal: bool = True,
+    repo_root: Optional[Path] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> None:
     """
     Bulletproof append a single line to the provided file path.
 
@@ -489,19 +528,34 @@ async def append_line(path: Path, line: str, use_wal: bool = True, repo_root: Op
         line: Line content to append
         use_wal: Whether to use Write-Ahead Log for crash safety
     """
-    path = _ensure_safe_path(path, operation="append", context={"component": "logs"}, repo_root=repo_root)
-    await ensure_parent(path, repo_root=repo_root)
+    path = _ensure_safe_path(
+        path,
+        operation="append",
+        context=context or {"component": "logs"},
+        repo_root=repo_root,
+    )
+    await ensure_parent(path, repo_root=repo_root, context=context)
 
     if use_wal:
-        await asyncio.to_thread(_write_line_with_wal, path, line, repo_root)
+        await asyncio.to_thread(_write_line_with_wal, path, line, repo_root, context)
     else:
-        await asyncio.to_thread(_write_line, path, line, True, repo_root)
+        await asyncio.to_thread(_write_line, path, line, True, repo_root, context)
 
 
-def _write_line_with_wal(path: Path, line: str, repo_root: Optional[Path] = None) -> None:
+def _write_line_with_wal(
+    path: Path,
+    line: str,
+    repo_root: Optional[Path] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> None:
     """Write line with Write-Ahead Log for crash safety."""
-    path = _ensure_safe_path(path, operation="append", context={"component": "wal"}, repo_root=repo_root)
-    wal = WriteAheadLog(path, repo_root=repo_root)
+    path = _ensure_safe_path(
+        path,
+        operation="append",
+        context=context or {"component": "wal"},
+        repo_root=repo_root,
+    )
+    wal = WriteAheadLog(path, repo_root=repo_root, context=context)
 
     # Journal the operation first
     entry_id = wal.write_entry({
@@ -526,7 +580,13 @@ def _write_line_with_wal(path: Path, line: str, repo_root: Optional[Path] = None
         raise
 
 
-def _write_line(path: Path, line: str, use_lock: bool = True, repo_root: Optional[Path] = None) -> None:
+def _write_line(
+    path: Path,
+    line: str,
+    use_lock: bool = True,
+    repo_root: Optional[Path] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> None:
     """
     Write line with optional file locking for safety.
 
@@ -535,7 +595,12 @@ def _write_line(path: Path, line: str, use_lock: bool = True, repo_root: Optiona
         line: Line content to write
         use_lock: Whether to use file locking
     """
-    path = _ensure_safe_path(path, operation="append", context={"component": "logs"}, repo_root=repo_root)
+    path = _ensure_safe_path(
+        path,
+        operation="append",
+        context=context or {"component": "logs"},
+        repo_root=repo_root,
+    )
     if use_lock:
         with file_lock(path, 'a', repo_root=repo_root) as handle:
             handle.write(line)
@@ -550,14 +615,34 @@ def _write_line(path: Path, line: str, use_lock: bool = True, repo_root: Optiona
                 handle.write("\n")
 
 
-async def read_tail(path: Path, count: int, repo_root: Optional[Path] = None) -> List[str]:
+async def read_tail(
+    path: Path,
+    count: int,
+    repo_root: Optional[Path] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> List[str]:
     """Return the last `count` lines from `path`."""
-    safe_path = _ensure_safe_path(path, operation="read", context={"component": "logs", "op": "tail"}, repo_root=repo_root)
-    return await asyncio.to_thread(_read_tail_sync, safe_path, count, repo_root)
+    safe_path = _ensure_safe_path(
+        path,
+        operation="read",
+        context=context or {"component": "logs", "op": "tail"},
+        repo_root=repo_root,
+    )
+    return await asyncio.to_thread(_read_tail_sync, safe_path, count, repo_root, context)
 
 
-def _read_tail_sync(path: Path, count: int, repo_root: Optional[Path] = None) -> List[str]:
-    path = _ensure_safe_path(path, operation="read", context={"component": "logs", "op": "tail"}, repo_root=repo_root)
+def _read_tail_sync(
+    path: Path,
+    count: int,
+    repo_root: Optional[Path] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    path = _ensure_safe_path(
+        path,
+        operation="read",
+        context=context or {"component": "logs", "op": "tail"},
+        repo_root=repo_root,
+    )
     if count <= 0:
         return []
     try:
@@ -608,7 +693,7 @@ async def rotate_file(
         return archive
 
     # Pre-flight backup
-    backup_path = await asyncio.to_thread(preflight_backup, path, repo_root)
+    backup_path = await asyncio.to_thread(preflight_backup, path, repo_root=repo_root)
 
     # Lock order: journal → log
     log_lock_acquired = False

@@ -249,6 +249,7 @@ async def set_project(
 
     # Use AgentContextManager for agent-scoped project context
     agent_manager = server_module.get_agent_context_manager()
+    session_id: Optional[str] = None
     if agent_manager:
         try:
             # Ensure agent has an active session
@@ -282,6 +283,7 @@ async def set_project(
         name,
         project_data,
         agent_id=agent_id,
+        session_id=session_id,
     )
     recent_projects = list(state.recent_projects)
 

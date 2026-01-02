@@ -430,3 +430,88 @@ class TestVectorIndexerEdgeCases:
             assert indexer._apply_filters(mock_row, time_filter_outside) is False
 
             indexer.cleanup()
+
+    def test_search_overfetches_for_filtered_results(self):
+        """Ensure filtered semantic search overfetches to return matching entries."""
+        import json
+        import sqlite3
+        import threading
+        import numpy as np
+
+        indexer = VectorIndexer()
+        indexer.initialized = True
+        indexer.enabled = True
+        indexer.repo_slug = "tmp"
+        indexer._db_lock = threading.Lock()
+
+        # Minimal in-memory mapping database
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        db.execute("""
+            CREATE TABLE vector_entries (
+                entry_id TEXT,
+                project_slug TEXT,
+                repo_slug TEXT,
+                vector_rowid INTEGER,
+                text_content TEXT,
+                agent_name TEXT,
+                timestamp_utc TEXT,
+                metadata_json TEXT,
+                embedding_model TEXT,
+                vector_dimension INTEGER
+            )
+        """)
+        for rowid in range(5):
+            db.execute(
+                "INSERT INTO vector_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    f"log-{rowid}",
+                    "proj",
+                    "tmp",
+                    rowid,
+                    "log entry",
+                    "Agent",
+                    "2026-01-01 00:00:00 UTC",
+                    json.dumps({"content_type": "log"}),
+                    "model",
+                    3,
+                ),
+            )
+        db.execute(
+            "INSERT INTO vector_entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "doc-1",
+                "proj",
+                "tmp",
+                5,
+                "doc entry",
+                "Agent",
+                "2026-01-01 00:00:00 UTC",
+                json.dumps({"content_type": "doc"}),
+                "model",
+                3,
+            ),
+        )
+        db.commit()
+        indexer._db_conn = db
+
+        class _FakeIndex:
+            ntotal = 6
+
+            def search(self, _query_embedding, k):
+                k = min(k, self.ntotal)
+                distances = np.zeros((1, k), dtype="float32")
+                rowids = np.arange(k, dtype="int64").reshape(1, -1)
+                return distances, rowids
+
+        class _FakeModel:
+            def encode(self, _texts):
+                return np.ones((1, 3), dtype="float32")
+
+        indexer.vector_index = _FakeIndex()
+        indexer.embedding_model = _FakeModel()
+
+        results = indexer.search_similar("doc query", k=1, filters={"content_type": "doc"})
+        assert len(results) == 1
+        assert results[0]["entry_id"] == "doc-1"
+        db.close()

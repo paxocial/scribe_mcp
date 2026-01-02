@@ -12,9 +12,17 @@ from typing import Any, Dict, Optional, Callable, Awaitable, List
 
 from scribe_mcp import server as server_module
 from scribe_mcp.server import app
-from scribe_mcp.doc_management.manager import apply_doc_change, DocumentOperationError, SECTION_MARKER
+from scribe_mcp.config.repo_config import RepoDiscovery
+from scribe_mcp.config.vector_config import load_vector_config
+from scribe_mcp.doc_management.manager import (
+    apply_doc_change,
+    DocumentOperationError,
+    SECTION_MARKER,
+    _resolve_create_doc_path,
+)
 from scribe_mcp.tools.append_entry import append_entry
 from scribe_mcp.utils.frontmatter import parse_frontmatter
+from scribe_mcp.utils.time import format_utc
 from scribe_mcp.shared.logging_utils import (
     LoggingContext,
     ProjectResolutionError,
@@ -24,7 +32,6 @@ from scribe_mcp.utils.parameter_validator import BulletproofParameterCorrector
 from scribe_mcp.utils.error_handler import HealingErrorHandler
 from scribe_mcp.utils.config_manager import ConfigManager
 from scribe_mcp.shared.base_logging_tool import LoggingToolMixin
-from scribe_mcp.shared.project_registry import ProjectRegistry
 from scribe_mcp.shared.project_registry import ProjectRegistry
 
 
@@ -88,6 +95,7 @@ def _heal_manage_docs_parameters(
     """Heal all manage_docs parameters using Phase 1 exception handling."""
     healing_messages = []
     healing_applied = False
+    invalid_action = False
 
     # Define valid actions for enum correction (include batch and list_sections
     # so they are preserved instead of being auto-corrected to another verb).
@@ -96,6 +104,7 @@ def _heal_manage_docs_parameters(
         "append",
         "apply_patch",
         "replace_range",
+        "replace_text",
         "normalize_headers",
         "generate_toc",
         "status_update",
@@ -104,6 +113,7 @@ def _heal_manage_docs_parameters(
         "list_checklist_items",
         "create_doc",
         "validate_crosslinks",
+        "search",
         "create_research_doc",
         "create_bug_report",
         "create_review_report",
@@ -112,15 +122,17 @@ def _heal_manage_docs_parameters(
 
     healed_params = {}
 
-    # Heal action parameter
+    # Validate action parameter (no auto-correction to avoid accidental edits)
     original_action = action
-    healed_action = BulletproofParameterCorrector.correct_enum_parameter(
-        original_action, valid_actions, "action", "replace_section"
-    )
-    if healed_action != original_action:
+    healed_action = str(original_action).strip() if original_action is not None else ""
+    if healed_action not in valid_actions:
+        invalid_action = True
         healing_applied = True
-        healing_messages.append(f"Auto-corrected action from '{original_action}' to '{healed_action}'")
+        healing_messages.append(
+            f"Invalid action '{original_action}'. Use one of: {', '.join(sorted(valid_actions))}."
+        )
     healed_params["action"] = healed_action
+    healed_params["invalid_action"] = invalid_action
 
     # Heal doc parameter (string normalization only; no enum correction)
     original_doc = doc
@@ -299,6 +311,353 @@ def _add_healing_info_to_response(
 def _hash_text(content: str) -> str:
     """Return a deterministic hash for stored document content."""
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _chunk_text_for_vector(text: str, max_chars: int = 4000) -> List[str]:
+    if not text:
+        return []
+
+    def _split_into_sections(raw: str) -> List[str]:
+        lines = raw.splitlines()
+        sections: List[List[str]] = []
+        current: List[str] = []
+        for line in lines:
+            if line.lstrip().startswith("#"):
+                if current:
+                    sections.append(current)
+                current = [line]
+            else:
+                current.append(line)
+        if current:
+            sections.append(current)
+        return ["\n".join(section).strip() for section in sections if "\n".join(section).strip()]
+
+    def _split_section(section: str) -> List[str]:
+        section = section.strip()
+        if not section:
+            return []
+        if len(section) <= max_chars:
+            return [section]
+
+        lines = section.splitlines()
+        heading = lines[0].strip() if lines and lines[0].lstrip().startswith("#") else None
+        body = "\n".join(lines[1:]).strip() if heading else section
+        paragraphs = [p.strip() for p in body.split("\n\n") if p.strip()]
+
+        chunks: List[str] = []
+        buffer: List[str] = []
+        buffer_len = 0
+        header_len = len(heading) + 2 if heading else 0
+        limit = max(1, max_chars - header_len)
+
+        for paragraph in paragraphs:
+            addition = len(paragraph) + (2 if buffer else 0)
+            if buffer_len + addition > limit and buffer:
+                chunk = "\n\n".join(buffer)
+                if heading:
+                    chunk = f"{heading}\n\n{chunk}"
+                chunks.append(chunk)
+                buffer = [paragraph]
+                buffer_len = len(paragraph)
+                continue
+            buffer.append(paragraph)
+            buffer_len += addition
+
+        if buffer:
+            chunk = "\n\n".join(buffer)
+            if heading:
+                chunk = f"{heading}\n\n{chunk}"
+            chunks.append(chunk)
+
+        return chunks
+
+    sections = _split_into_sections(text)
+    chunks: List[str] = []
+    for section in sections:
+        chunks.extend(_split_section(section))
+    return chunks
+
+
+def _generate_doc_entry_id(path: Path, chunk_index: int, content_hash: str) -> str:
+    seed = f"{path}|{chunk_index}|{content_hash}"
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:32]
+
+
+_LOG_DOC_KEYS = {
+    "progress_log",
+    "doc_log",
+    "security_log",
+    "bug_log",
+}
+
+_LOG_DOC_FILENAMES = {
+    "PROGRESS_LOG.md",
+    "DOC_LOG.md",
+    "SECURITY_LOG.md",
+    "BUG_LOG.md",
+    "GLOBAL_PROGRESS_LOG.md",
+}
+
+
+def _is_rotated_log_filename(name: str) -> bool:
+    upper = name.upper()
+    for base in _LOG_DOC_FILENAMES:
+        if upper.startswith(f"{base.upper()}."):
+            return True
+    return False
+
+
+def _should_skip_doc_index(doc_key: Optional[str], path: Path) -> bool:
+    name = path.name
+    upper = name.upper()
+    if doc_key and doc_key.lower() in _LOG_DOC_KEYS:
+        return True
+    if name in _LOG_DOC_FILENAMES:
+        return True
+    if upper.endswith("_LOG.MD"):
+        return True
+    if _is_rotated_log_filename(name):
+        return True
+    return False
+
+
+def _get_vector_search_defaults(repo_root: Optional[Path]) -> tuple[int, int]:
+    default_doc_k = 5
+    default_log_k = 3
+    if not repo_root:
+        return default_doc_k, default_log_k
+    try:
+        config = RepoDiscovery.load_config(repo_root)
+    except Exception:
+        return default_doc_k, default_log_k
+    try:
+        default_doc_k = max(0, int(config.vector_search_doc_k))
+    except (TypeError, ValueError):
+        default_doc_k = 5
+    try:
+        default_log_k = max(0, int(config.vector_search_log_k))
+    except (TypeError, ValueError):
+        default_log_k = 3
+    return default_doc_k, default_log_k
+
+
+def _parse_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_semantic_limits(
+    *,
+    search_meta: Dict[str, Any],
+    repo_root: Optional[Path],
+) -> Dict[str, Any]:
+    default_doc_k, default_log_k = _get_vector_search_defaults(repo_root)
+    k_override = _parse_int(search_meta.get("k"))
+    doc_k_override = _parse_int(search_meta.get("doc_k"))
+    log_k_override = _parse_int(search_meta.get("log_k"))
+
+    if k_override is None:
+        total_k = max(0, default_doc_k + default_log_k)
+    else:
+        total_k = max(0, k_override)
+
+    doc_k = default_doc_k if doc_k_override is None else max(0, doc_k_override)
+    log_k = default_log_k if log_k_override is None else max(0, log_k_override)
+
+    if doc_k > total_k:
+        doc_k = total_k
+    remaining = max(0, total_k - doc_k)
+    if log_k > remaining:
+        log_k = remaining
+
+    return {
+        "total_k": total_k,
+        "doc_k": doc_k,
+        "log_k": log_k,
+        "default_doc_k": default_doc_k,
+        "default_log_k": default_log_k,
+        "k_override": k_override,
+        "doc_k_override": doc_k_override,
+        "log_k_override": log_k_override,
+    }
+
+
+def _get_vector_indexer():
+    try:
+        from scribe_mcp.plugins.registry import get_plugin_registry
+        registry = get_plugin_registry()
+        for plugin in registry.plugins.values():
+            if getattr(plugin, "name", None) == "vector_indexer" and getattr(plugin, "initialized", False):
+                return plugin
+    except Exception:
+        return None
+    return None
+
+
+def _vector_indexing_enabled(repo_root: Optional[Path]) -> bool:
+    if not repo_root:
+        return False
+    try:
+        config = RepoDiscovery.load_config(repo_root)
+    except Exception:
+        return False
+    return bool(config.vector_index_docs)
+
+
+def _vector_search_enabled(repo_root: Optional[Path], content_type: str) -> bool:
+    if not repo_root:
+        return False
+    try:
+        config = RepoDiscovery.load_config(repo_root)
+    except Exception:
+        return False
+    if not (config.plugin_config or {}).get("enabled", False):
+        return False
+    vector_config = load_vector_config(repo_root)
+    if not vector_config.enabled:
+        return False
+    if content_type == "log":
+        return bool(config.vector_index_logs)
+    return bool(config.vector_index_docs)
+
+
+def _normalize_doc_search_mode(value: Optional[str]) -> str:
+    if not value:
+        return "exact"
+    normalized = value.strip().lower()
+    if normalized in {"exact", "literal"}:
+        return "exact"
+    if normalized in {"fuzzy", "approx"}:
+        return "fuzzy"
+    if normalized in {"semantic", "vector"}:
+        return "semantic"
+    return normalized
+
+
+def _iter_doc_search_targets(project: Dict[str, Any], doc: str) -> List[tuple[str, Path]]:
+    docs_mapping = project.get("docs") or {}
+    if doc in {"*", "all"}:
+        return [(key, Path(path)) for key, path in docs_mapping.items()]
+    if doc not in docs_mapping:
+        return []
+    return [(doc, Path(docs_mapping[doc]))]
+
+
+def _search_doc_lines(
+    *,
+    text: str,
+    query: str,
+    mode: str,
+    fuzzy_threshold: float,
+) -> List[Dict[str, Any]]:
+    results: List[Dict[str, Any]] = []
+    lines = text.splitlines()
+    if mode == "exact":
+        for idx, line in enumerate(lines, start=1):
+            if query in line:
+                results.append({"line": idx, "snippet": line})
+        return results
+
+    if mode == "fuzzy":
+        import difflib
+
+        for idx, line in enumerate(lines, start=1):
+            score = difflib.SequenceMatcher(None, query, line).ratio()
+            if score >= fuzzy_threshold:
+                results.append({"line": idx, "snippet": line, "score": round(score, 4)})
+        return results
+
+    return results
+
+
+async def _index_doc_for_vector(
+    *,
+    project: Dict[str, Any],
+    doc: str,
+    change_path: Path,
+    after_hash: str,
+    agent_id: str,
+    metadata: Optional[Dict[str, Any]],
+    wait_for_queue: bool = False,
+    queue_timeout: Optional[float] = None,
+) -> None:
+    repo_root = project.get("root")
+    if isinstance(repo_root, str):
+        repo_root = Path(repo_root)
+    if not _vector_indexing_enabled(repo_root):
+        return
+
+    vector_indexer = _get_vector_indexer()
+    if not vector_indexer:
+        return
+
+    if _should_skip_doc_index(doc, change_path):
+        return
+
+    try:
+        raw_text = await asyncio.to_thread(change_path.read_text, encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return
+
+    frontmatter = {}
+    body = raw_text
+    try:
+        parsed = parse_frontmatter(raw_text)
+        if parsed.has_frontmatter:
+            frontmatter = parsed.frontmatter_data
+            body = parsed.body
+    except ValueError:
+        body = raw_text
+
+    content = body.strip()
+    if not content:
+        return
+
+    title = frontmatter.get("title")
+    doc_type = frontmatter.get("doc_type")
+    chunks = _chunk_text_for_vector(content)
+    if not chunks:
+        return
+
+    timestamp = format_utc()
+    project_name = project.get("name", "")
+    chunk_total = len(chunks)
+
+    for idx, chunk in enumerate(chunks):
+        content_hash = _hash_text(chunk)
+        entry_id = _generate_doc_entry_id(change_path, idx, content_hash)
+        message = f"{title}\n\n{chunk}" if title else chunk
+        doc_meta = {
+            "content_type": "doc",
+            "doc": doc,
+            "doc_title": title,
+            "doc_type": doc_type,
+            "file_path": str(change_path),
+            "chunk_index": idx,
+            "chunk_total": chunk_total,
+            "sha_after": after_hash,
+        }
+        if metadata:
+            doc_meta["doc_metadata"] = metadata
+
+        entry_data = {
+            "entry_id": entry_id,
+            "project_name": project_name,
+            "message": message,
+            "agent": agent_id,
+            "timestamp": timestamp,
+            "meta": doc_meta,
+        }
+        if wait_for_queue and hasattr(vector_indexer, "enqueue_entry"):
+            vector_indexer.enqueue_entry(entry_data, wait=True, timeout=queue_timeout)
+        else:
+            vector_indexer.post_append(entry_data)
 
 
 def _current_timestamp() -> str:
@@ -575,31 +934,41 @@ async def manage_docs(
         target_dir = healed_params["target_dir"]
 
     except Exception as healing_error:
-        # If healing fails completely, use safe defaults
-        healed_params = {
-            "action": "replace_section", "doc": "architecture", "section": None,
-            "content": None, "patch": None, "patch_source_hash": None, "edit": None, "patch_mode": None,
-            "start_line": None, "end_line": None,
-            "template": None, "metadata": {}, "dry_run": False,
-            "doc_name": None, "target_dir": None
-        }
-        healing_applied = False
-        healing_messages = [f"Parameter healing failed: {str(healing_error)}, using safe defaults"]
-        action = healed_params["action"]
-        doc = healed_params["doc"]
-        section = healed_params["section"]
-        content = healed_params["content"]
-        patch = healed_params["patch"]
-        patch_source_hash = healed_params["patch_source_hash"]
-        edit = healed_params["edit"]
-        patch_mode = healed_params["patch_mode"]
-        start_line = healed_params["start_line"]
-        end_line = healed_params["end_line"]
-        template = healed_params["template"]
-        metadata = healed_params["metadata"]
-        dry_run = healed_params["dry_run"]
-        doc_name = healed_params["doc_name"]
-        target_dir = healed_params["target_dir"]
+        error_payload = _MANAGE_DOCS_HELPER.error_response(
+            "manage_docs parameter healing failed; no changes applied.",
+            suggestion="Verify action/doc/section parameters and retry. For edits, prefer action='apply_patch'.",
+            extra={"error_detail": str(healing_error)},
+        )
+        return error_payload
+
+    if healed_params.get("invalid_action"):
+        error_payload = _MANAGE_DOCS_HELPER.error_response(
+            f"Invalid manage_docs action '{action}'.",
+            suggestion="Use action='apply_patch' for edits, 'replace_section' only for initial scaffolding.",
+            extra={
+                "allowed_actions": sorted(list({
+                    "replace_section",
+                    "append",
+                    "status_update",
+                    "apply_patch",
+                    "replace_range",
+                    "normalize_headers",
+                    "generate_toc",
+                    "list_sections",
+                    "list_checklist_items",
+                    "batch",
+                    "create_doc",
+                    "validate_crosslinks",
+                    "search",
+                    "create_research_doc",
+                    "create_bug_report",
+                    "create_review_report",
+                    "create_agent_report_card",
+                })),
+                "healing_messages": healing_messages,
+            },
+        )
+        return error_payload
 
     scaffold_flag = False
     if isinstance(metadata, dict):
@@ -631,6 +1000,7 @@ async def manage_docs(
         agent_id = await agent_identity.get_or_create_agent_id()
 
     backend = server_module.storage_backend
+    registry_warning = None
 
     # Handle research, bug, review, and agent report card creation
     if action in ["create_research_doc", "create_bug_report", "create_review_report", "create_agent_report_card"]:
@@ -672,6 +1042,192 @@ async def manage_docs(
             context=context,
         )
 
+    if action == "search":
+        search_meta = metadata if isinstance(metadata, dict) else {}
+        query = (search_meta.get("query") or search_meta.get("search") or "").strip()
+        if not query:
+            response = {"ok": False, "error": "search requires metadata.query"}
+            return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
+
+        search_mode = _normalize_doc_search_mode(search_meta.get("search_mode"))
+        if search_mode == "semantic":
+            content_type_raw = search_meta.get("content_type")
+            content_type = str(content_type_raw).strip().lower() if content_type_raw is not None else "all"
+            repo_root = project.get("root")
+            if isinstance(repo_root, str):
+                repo_root = Path(repo_root)
+            if content_type not in {"doc", "log"}:
+                enabled_for_doc = _vector_search_enabled(repo_root, "doc")
+                enabled_for_log = _vector_search_enabled(repo_root, "log")
+                if not (enabled_for_doc or enabled_for_log):
+                    response = {
+                        "ok": False,
+                        "error": "Semantic search disabled or unavailable",
+                        "suggestion": "Enable plugin_config.enabled and vector_index_docs/logs, and ensure vector.json enabled",
+                    }
+                    return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
+            elif not _vector_search_enabled(repo_root, content_type):
+                response = {
+                    "ok": False,
+                    "error": "Semantic search disabled or unavailable",
+                    "suggestion": "Enable plugin_config.enabled and vector_index_docs/logs, and ensure vector.json enabled",
+                }
+                return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
+
+            vector_indexer = _get_vector_indexer()
+            if not vector_indexer:
+                response = {"ok": False, "error": "Vector indexer plugin not available"}
+                return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
+
+            filters: Dict[str, Any] = {}
+            project_slugs = search_meta.get("project_slugs")
+            if isinstance(project_slugs, list):
+                filters["project_slugs"] = [str(slug).lower().replace(" ", "-") for slug in project_slugs if slug]
+            project_slug_prefix = search_meta.get("project_slug_prefix")
+            if project_slug_prefix:
+                filters["project_slug_prefix"] = str(project_slug_prefix).lower().replace(" ", "-")
+            project_slug = search_meta.get("project_slug")
+            if project_slug and "project_slugs" not in filters and "project_slug_prefix" not in filters:
+                filters["project_slug"] = str(project_slug).lower().replace(" ", "-")
+
+            if search_meta.get("doc_type"):
+                filters["doc_type"] = str(search_meta.get("doc_type"))
+            if search_meta.get("file_path"):
+                filters["file_path"] = str(search_meta.get("file_path"))
+            if search_meta.get("time_start") or search_meta.get("time_end"):
+                filters["time_range"] = {
+                    "start": search_meta.get("time_start"),
+                    "end": search_meta.get("time_end"),
+                }
+
+            min_similarity = search_meta.get("min_similarity")
+
+            def _apply_similarity_threshold(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                if min_similarity is None:
+                    return items
+                try:
+                    min_val = float(min_similarity)
+                except (TypeError, ValueError):
+                    return items
+                return [r for r in items if r.get("similarity_score", 0) >= min_val]
+
+            limits = _resolve_semantic_limits(search_meta=search_meta, repo_root=repo_root)
+            if content_type in {"doc", "log"}:
+                if limits["k_override"] is not None:
+                    single_k = limits["total_k"]
+                elif content_type == "doc":
+                    single_k = limits["doc_k_override"] if limits["doc_k_override"] is not None else limits["default_doc_k"]
+                else:
+                    single_k = limits["log_k_override"] if limits["log_k_override"] is not None else limits["default_log_k"]
+                filters["content_type"] = content_type
+                results = vector_indexer.search_similar(query, single_k, filters)
+                results = _apply_similarity_threshold(results)
+                results.sort(key=lambda x: x.get("similarity_score", 0), reverse=True)
+                for item in results:
+                    item["content_type"] = content_type
+                limits_payload = {
+                    "total_k": single_k,
+                    "doc_k": single_k if content_type == "doc" else 0,
+                    "log_k": single_k if content_type == "log" else 0,
+                    "default_doc_k": limits["default_doc_k"],
+                    "default_log_k": limits["default_log_k"],
+                }
+                response = {
+                    "ok": True,
+                    "action": "search",
+                    "search_mode": "semantic",
+                    "query": query,
+                    "results_count": len(results),
+                    "results": results,
+                    "filters_applied": filters,
+                    "limits": limits_payload,
+                }
+                return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
+
+            # Default: search both docs and logs and return combined results.
+            base_filters = filters.copy()
+            doc_filters = {**base_filters, "content_type": "doc"}
+            log_filters = {**base_filters, "content_type": "log"}
+            doc_results = _apply_similarity_threshold(
+                vector_indexer.search_similar(query, limits["doc_k"], doc_filters)
+            )
+            log_results = _apply_similarity_threshold(
+                vector_indexer.search_similar(query, limits["log_k"], log_filters)
+            )
+            doc_results.sort(key=lambda x: x.get("similarity_score", 0), reverse=True)
+            log_results.sort(key=lambda x: x.get("similarity_score", 0), reverse=True)
+            for item in doc_results:
+                item["content_type"] = "doc"
+            for item in log_results:
+                item["content_type"] = "log"
+            combined = (doc_results + log_results)[: limits["total_k"]]
+            response = {
+                "ok": True,
+                "action": "search",
+                "search_mode": "semantic",
+                "query": query,
+                "results_count": len(combined),
+                "results": combined,
+                "results_by_type": {
+                    "doc": doc_results,
+                    "log": log_results,
+                },
+                "results_count_by_type": {
+                    "doc": len(doc_results),
+                    "log": len(log_results),
+                },
+                "filters_applied": {**base_filters, "content_type": "all"},
+                "limits": {
+                    "total_k": limits["total_k"],
+                    "doc_k": limits["doc_k"],
+                    "log_k": limits["log_k"],
+                    "default_doc_k": limits["default_doc_k"],
+                    "default_log_k": limits["default_log_k"],
+                },
+            }
+            return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
+
+        # exact/fuzzy searches against doc content
+        targets = _iter_doc_search_targets(project, doc)
+        if not targets:
+            response = {"ok": False, "error": f"DOC_NOT_FOUND: doc '{doc}' is not registered"}
+            return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
+
+        fuzzy_threshold = float(search_meta.get("fuzzy_threshold", 0.8))
+        results: List[Dict[str, Any]] = []
+        for doc_key, path in targets:
+            try:
+                raw_text = await asyncio.to_thread(path.read_text, encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                parsed = parse_frontmatter(raw_text)
+                text = parsed.body
+            except ValueError:
+                text = raw_text
+            matches = _search_doc_lines(
+                text=text,
+                query=query,
+                mode=search_mode,
+                fuzzy_threshold=fuzzy_threshold,
+            )
+            if matches:
+                results.append({
+                    "doc": doc_key,
+                    "path": str(path),
+                    "matches": matches,
+                })
+
+        response = {
+            "ok": True,
+            "action": "search",
+            "search_mode": search_mode,
+            "query": query,
+            "results_count": len(results),
+            "results": results,
+        }
+        return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
+
     if action == "batch":
         return await _handle_batch_operations(
             project,
@@ -686,6 +1242,7 @@ async def manage_docs(
         "status_update",
         "apply_patch",
         "replace_range",
+        "replace_text",
         "normalize_headers",
         "generate_toc",
         "validate_crosslinks",
@@ -695,6 +1252,47 @@ async def manage_docs(
         if doc not in allowed_docs:
             response = {"ok": False, "error": f"DOC_NOT_FOUND: doc '{doc}' is not registered"}
             return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
+
+    if action == "create_doc" and isinstance(metadata, dict):
+        register_existing = bool(metadata.get("register_existing"))
+        if register_existing:
+            register_key = metadata.get("register_as") or metadata.get("doc_name") or doc
+            if not register_key:
+                response = {
+                    "ok": False,
+                    "error": "register_existing requires metadata.register_as or metadata.doc_name",
+                }
+                return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
+            try:
+                doc_path = _resolve_create_doc_path(project, metadata, doc)
+            except Exception as exc:
+                response = {"ok": False, "error": f"register_existing failed to resolve path: {exc}"}
+                return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
+            if doc_path.exists():
+                docs_mapping = dict(project.get("docs") or {})
+                docs_mapping[str(register_key)] = str(doc_path)
+                project["docs"] = docs_mapping
+                try:
+                    await server_module.state_manager.set_current_project(
+                        project.get("name"),
+                        project,
+                        agent_id=agent_id,
+                    )
+                except Exception as exc:
+                    registry_warning = f"Registry update failed: {exc}"
+                response: Dict[str, Any] = {
+                    "ok": True,
+                    "doc": doc,
+                    "section": None,
+                    "action": action,
+                    "path": str(doc_path),
+                    "dry_run": dry_run,
+                    "diff": "",
+                    "warning": "register_existing used; no content was written.",
+                }
+                if registry_warning:
+                    response.setdefault("warnings", []).append(registry_warning)
+                return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
 
     try:
         change = await apply_doc_change(
@@ -752,6 +1350,7 @@ async def manage_docs(
                 pass
 
     log_error = None
+    index_warning = None
     if not dry_run and action != "validate_crosslinks":
         # Use bulletproof metadata normalization
         healed_metadata, metadata_healed, metadata_messages = _normalize_metadata_with_healing(metadata)
@@ -775,6 +1374,19 @@ async def manage_docs(
         except Exception as exc:
             log_error = str(exc)
 
+        if change.success and change.path:
+            try:
+                await _index_doc_for_vector(
+                    project=project,
+                    doc=doc,
+                    change_path=Path(change.path),
+                    after_hash=change.after_hash or "",
+                    agent_id=agent_id or "unknown",
+                    metadata=metadata if isinstance(metadata, dict) else None,
+                )
+            except Exception as exc:
+                index_warning = str(exc)
+
     registry_warning = None
     response: Dict[str, Any] = {
         "ok": change.success,
@@ -785,12 +1397,47 @@ async def manage_docs(
         "dry_run": dry_run,
         "diff": change.diff_preview,
     }
+    if change.success:
+        response["hashes"] = {"before": change.before_hash, "after": change.after_hash}
     if change.extra:
         response["extra"] = change.extra
+    if index_warning:
+        response["index_warning"] = index_warning
+
+    if change.success:
+        repo_root = project.get("root")
+        if isinstance(repo_root, str):
+            repo_root = Path(repo_root)
+        if not _vector_indexing_enabled(repo_root):
+            reminders = list(context.reminders)
+            reminders.append(
+                {
+                    "level": "warn",
+                    "score": 8,
+                    "emoji": "🧭",
+                    "message": (
+                        "Semantic doc indexing is disabled (vector_index_docs=false). "
+                        "Enable it in .scribe/config/scribe.yaml and run "
+                        "scripts/reindex_vector.py --docs to build embeddings for managed docs."
+                    ),
+                    "category": "vector_index_docs",
+                    "tone": "strict",
+                }
+            )
+            response["reminders"] = reminders
 
     if action == "create_doc" and change.success and isinstance(metadata, dict):
-        register_doc = bool(metadata.get("register_doc"))
-        register_key = metadata.get("register_as") or metadata.get("doc_name")
+        register_doc = metadata.get("register_doc")
+        if register_doc is None:
+            docs_dir = project.get("docs_dir")
+            if docs_dir:
+                try:
+                    Path(change.path).resolve().relative_to(Path(docs_dir).resolve())
+                    register_doc = True
+                except ValueError:
+                    register_doc = False
+        register_doc = bool(register_doc)
+        register_key = metadata.get("register_as") or metadata.get("doc_name") or doc
         if register_doc:
             if not register_key:
                 return _MANAGE_DOCS_HELPER.apply_context_payload(
@@ -810,6 +1457,11 @@ async def manage_docs(
                 )
             except Exception as exc:
                 registry_warning = f"Registry update failed: {exc}"
+            if metadata.get("register_doc") is None:
+                response.setdefault("warnings", []).append(
+                    "register_doc defaulted to true for a doc created under docs_dir; "
+                    "set metadata.register_doc=false to skip registration."
+                )
 
     if registry_warning:
         response.setdefault("warnings", []).append(registry_warning)
@@ -827,7 +1479,22 @@ async def manage_docs(
     if log_error:
         response["log_warning"] = log_error
     if dry_run:
-        response["preview"] = change.content_written
+        preview_content = change.content_written
+        include_frontmatter = bool(
+            isinstance(metadata, dict) and metadata.get("include_frontmatter_preview")
+        )
+        if preview_content and not include_frontmatter:
+            try:
+                while True:
+                    parsed_preview = parse_frontmatter(preview_content)
+                    if not parsed_preview.has_frontmatter:
+                        break
+                    preview_content = parsed_preview.body
+                    if not preview_content.lstrip().startswith("---"):
+                        break
+            except Exception:
+                pass
+        response["preview"] = preview_content
 
     return _MANAGE_DOCS_HELPER.apply_context_payload(response, context)
 
@@ -1065,10 +1732,12 @@ async def _handle_list_sections(
     body_lines = parsed.body.splitlines()
     body_line_offset = len(parsed.frontmatter_raw.splitlines()) if parsed.has_frontmatter else 0
     sections: List[Dict[str, Any]] = []
+    duplicates: Dict[str, List[int]] = {}
     for line_no, line in enumerate(body_lines, start=1):
         stripped = line.strip()
         if stripped.startswith("<!-- ID:") and stripped.endswith("-->"):
             section_id = stripped[len("<!-- ID:"): -len("-->")].strip()
+            duplicates.setdefault(section_id, []).append(line_no)
             sections.append(
                 {
                     "id": section_id,
@@ -1076,18 +1745,24 @@ async def _handle_list_sections(
                     "file_line": line_no + body_line_offset,
                 }
             )
+    duplicate_sections = {
+        section_id: lines for section_id, lines in duplicates.items() if len(lines) > 1
+    }
 
-    return helper.apply_context_payload(
-        {
-            "ok": True,
-            "doc": doc,
-            "path": str(path),
-            "sections": sections,
-            "body_line_offset": body_line_offset,
-            "frontmatter_line_count": body_line_offset,
-        },
-        context,
-    )
+    response = {
+        "ok": True,
+        "doc": doc,
+        "path": str(path),
+        "sections": sections,
+        "body_line_offset": body_line_offset,
+        "frontmatter_line_count": body_line_offset,
+    }
+    if duplicate_sections:
+        response["duplicates"] = duplicate_sections
+        response["warning"] = (
+            "Duplicate section anchors detected; use apply_patch or fix anchors before replace_section."
+        )
+    return helper.apply_context_payload(response, context)
 
 
 async def _handle_list_checklist_items(
@@ -1130,9 +1805,17 @@ async def _handle_list_checklist_items(
     items: List[Dict[str, Any]] = []
     matches: List[Dict[str, Any]] = []
     pattern = re.compile(r"^- \[(?P<mark>[ xX])\]\s*(?P<text>.*)$")
+    section_id = None
+    duplicates: Dict[str, List[int]] = {}
 
     for line_no, line in enumerate(body_lines, start=1):
-        match = pattern.match(line.strip())
+        stripped = line.strip()
+        if stripped.startswith("<!-- ID:") and stripped.endswith("-->"):
+            section_id = stripped[len("<!-- ID:"): -len("-->")].strip()
+            duplicates.setdefault(section_id, []).append(line_no)
+            continue
+
+        match = pattern.match(stripped)
         if not match:
             continue
         item_text = match.group("text")
@@ -1145,6 +1828,7 @@ async def _handle_list_checklist_items(
             "status": status,
             "text": item_text,
             "raw": line,
+            "section": section_id,
         }
         items.append(entry)
         if query_text is None:
@@ -1163,19 +1847,25 @@ async def _handle_list_checklist_items(
             context,
         )
 
-    return helper.apply_context_payload(
-        {
-            "ok": True,
-            "doc": doc,
-            "path": str(path),
-            "total_items": len(items),
-            "items": items,
-            "matches": matches,
-            "body_line_offset": body_line_offset,
-            "frontmatter_line_count": body_line_offset,
-        },
-        context,
-    )
+    response = {
+        "ok": True,
+        "doc": doc,
+        "path": str(path),
+        "total_items": len(items),
+        "items": items,
+        "matches": matches,
+        "body_line_offset": body_line_offset,
+        "frontmatter_line_count": body_line_offset,
+    }
+    duplicate_sections = {
+        section: lines for section, lines in duplicates.items() if len(lines) > 1
+    }
+    if duplicate_sections:
+        response["duplicates"] = duplicate_sections
+        response["warning"] = (
+            "Duplicate section anchors detected; checklist items may map to ambiguous sections."
+        )
+    return helper.apply_context_payload(response, context)
 
 
 async def _handle_batch_operations(

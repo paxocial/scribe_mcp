@@ -220,10 +220,6 @@ class PluginRegistry:
             plugin_logger.info("Plugin loading disabled (plugin_config.enabled is false or missing)")
             return
 
-        if not config.plugins_dir or not config.plugins_dir.exists():
-            plugin_logger.debug("No plugins directory found")
-            return
-
         # Security settings
         allowlist = set(plugin_settings.get("allowlist", []))
         blocklist = set(plugin_settings.get("blocklist", []))
@@ -232,6 +228,10 @@ class PluginRegistry:
 
         # Load built-in plugins first
         self._load_builtin_plugins(config)
+
+        if not config.plugins_dir or not config.plugins_dir.exists():
+            plugin_logger.debug("No plugins directory found")
+            return
 
         # Load repository-specific plugins
         plugins_loaded = 0
@@ -244,10 +244,14 @@ class PluginRegistry:
             # Security check 1: Enforce repo sandbox boundaries
             try:
                 safe_file_operation(
-                    settings.project_root,
+                    config.repo_root,
                     plugin_file,
                     operation="read",
-                    context={"component": "plugins", "plugin_name": plugin_name}
+                    context={
+                        "component": "plugins",
+                        "plugin_name": plugin_name,
+                        "enforce_project": False,
+                    },
                 )
             except Exception as sandbox_error:
                 plugin_logger.error(f"Sandbox violation for plugin {plugin_name}: {sandbox_error}")
@@ -294,8 +298,29 @@ class PluginRegistry:
 
     def _load_builtin_plugins(self, config: RepoConfig) -> None:
         """Load built-in plugins."""
-        # Add any built-in plugins here
-        pass
+        plugin_settings = config.plugin_config or {}
+        allowlist = set(plugin_settings.get("allowlist", []))
+        blocklist = set(plugin_settings.get("blocklist", []))
+
+        try:
+            from scribe_mcp.plugins.vector_indexer import VectorIndexer
+        except Exception as exc:
+            plugin_logger.error(f"Failed to import built-in vector_indexer: {exc}")
+            return
+
+        if not self._is_plugin_allowed("vector_indexer", allowlist, blocklist):
+            return
+
+        if "vector_indexer" in self.plugins:
+            return
+
+        try:
+            plugin = VectorIndexer()
+            plugin.initialize(config)
+            self._register_plugin(plugin)
+            plugin_logger.info(f"Loaded built-in plugin: {plugin.name} v{plugin.version}")
+        except Exception as exc:
+            plugin_logger.error(f"Failed to initialize built-in vector_indexer: {exc}", exc_info=True)
 
     def _load_plugin_file(self, plugin_file: Path, config: RepoConfig, manifest: Optional[PluginManifest] = None) -> Optional[ScribePlugin]:
         """Load a plugin from a Python file with security validation."""
@@ -480,19 +505,7 @@ def initialize_plugins(config: RepoConfig) -> None:
 
 def _register_vector_tools_if_available() -> None:
     """Register vector search tools if VectorIndexer plugin is available."""
-    try:
-        # Import here to avoid circular dependencies
-        from scribe_mcp.tools.vector_search import register_vector_tools
-
-        # Try to register tools - will only work if VectorIndexer is initialized
-        registered = register_vector_tools()
-        if registered:
-            plugin_logger.info("Vector search tools registered successfully")
-    except ImportError:
-        # Vector search tools not available
-        plugin_logger.debug("Vector search tools not available")
-    except Exception as e:
-        plugin_logger.warning(f"Failed to register vector tools: {e}")
+    plugin_logger.debug("Vector search tools are deprecated; use manage_docs action='search' with search_mode='semantic'.")
 
 
 def get_plugin_security_info() -> Dict[str, Any]:

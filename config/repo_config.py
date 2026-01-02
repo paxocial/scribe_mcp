@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from scribe_mcp.config.settings import settings
 # Setup structured logging for repository configuration operations
 repo_config_logger = logging.getLogger(__name__)
 
@@ -40,6 +42,10 @@ class RepoConfig:
     # Plugin configuration
     plugins_dir: Optional[Path] = None
     plugin_config: Dict[str, Any] = field(default_factory=dict)
+    vector_index_docs: bool = False
+    vector_index_logs: bool = False
+    vector_search_doc_k: int = 5
+    vector_search_log_k: int = 3
 
     # Project defaults
     default_emoji: str = "📋"
@@ -53,6 +59,7 @@ class RepoConfig:
     mcp_server_name: str = "scribe.mcp"
     storage_backend: str = "sqlite"  # sqlite or postgres
     db_path: Optional[Path] = None  # for sqlite
+    doc_snapshots: bool = True
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], repo_root: Path) -> "RepoConfig":
@@ -70,6 +77,12 @@ class RepoConfig:
         if data.get("db_path"):
             db_path = repo_root / Path(data["db_path"])
 
+        def _safe_int(value: Any, fallback: int) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return fallback
+
         return cls(
             repo_slug=data.get("repo_slug", repo_root.name),
             repo_root=repo_root,
@@ -80,6 +93,10 @@ class RepoConfig:
             permissions=data.get("permissions", {}),
             plugins_dir=plugins_dir,
             plugin_config=data.get("plugin_config", {}),
+            vector_index_docs=bool(data.get("vector_index_docs", False)),
+            vector_index_logs=bool(data.get("vector_index_logs", False)),
+            vector_search_doc_k=_safe_int(data.get("vector_search_doc_k", 5), 5),
+            vector_search_log_k=_safe_int(data.get("vector_search_log_k", 3), 3),
             default_emoji=data.get("default_emoji", "📋"),
             default_agent=data.get("default_agent", "Agent"),
             reminder_config=data.get("reminder_config", {}),
@@ -87,6 +104,7 @@ class RepoConfig:
             mcp_server_name=data.get("mcp_server_name", "scribe.mcp"),
             storage_backend=data.get("storage_backend", "sqlite"),
             db_path=db_path,
+            doc_snapshots=bool(data.get("doc_snapshots", True)),
         )
 
     @classmethod
@@ -96,7 +114,20 @@ class RepoConfig:
             repo_slug=repo_root.name,
             repo_root=repo_root,
             dev_plans_dir=repo_root / "docs/dev_plans",
+            vector_index_docs=False,
+            vector_index_logs=False,
+            vector_search_doc_k=5,
+            vector_search_log_k=3,
         )
+
+    @classmethod
+    def from_directory(cls, repo_root: Path) -> "RepoConfig":
+        """Load RepoConfig for a specific repository root."""
+        repo_root = repo_root.resolve()
+        config = RepoDiscovery.load_config(repo_root)
+        # Ensure base docs directory exists to match discovery expectations.
+        config.dev_plans_dir.mkdir(parents=True, exist_ok=True)
+        return config
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert RepoConfig to dictionary for serialization."""
@@ -108,12 +139,17 @@ class RepoConfig:
             "templates_pack": self.templates_pack,
             "permissions": self.permissions,
             "plugin_config": self.plugin_config,
+            "vector_index_docs": self.vector_index_docs,
+            "vector_index_logs": self.vector_index_logs,
+            "vector_search_doc_k": self.vector_search_doc_k,
+            "vector_search_log_k": self.vector_search_log_k,
             "default_emoji": self.default_emoji,
             "default_agent": self.default_agent,
             "reminder_config": self.reminder_config,
             "hooks": self.hooks,
             "mcp_server_name": self.mcp_server_name,
             "storage_backend": self.storage_backend,
+            "doc_snapshots": self.doc_snapshots,
         }
 
         if self.custom_templates_dir:
@@ -180,6 +216,8 @@ class RepoDiscovery:
             # Check for scribe config file directly
             if (current / ".scribe" / "scribe.yaml").exists():
                 return current
+            if (current / ".scribe" / "config" / "scribe.yaml").exists():
+                return current
 
             current = current.parent
 
@@ -196,11 +234,12 @@ class RepoDiscovery:
         Load Scribe configuration for a repository.
 
         Search order:
-        1. .scribe/scribe.yaml
-        2. .scribe/scribe.yml
-        3. docs/dev_plans/scribe.yaml
-        4. .scribe/config.json
-        5. Create default config
+        1. .scribe/config/scribe.yaml
+        2. .scribe/scribe.yaml (legacy)
+        3. .scribe/scribe.yml (legacy)
+        4. docs/dev_plans/scribe.yaml
+        5. .scribe/config.json
+        6. Create default config
 
         Args:
             repo_root: Repository root path
@@ -209,11 +248,29 @@ class RepoDiscovery:
             Loaded or default RepoConfig
         """
         config_paths = [
+            repo_root / ".scribe" / "config" / "scribe.yaml",
             repo_root / ".scribe" / "scribe.yaml",
             repo_root / ".scribe" / "scribe.yml",
             repo_root / "docs" / "dev_plans" / "scribe.yaml",
             repo_root / ".scribe" / "config.json",
         ]
+
+        config_dir = repo_root / ".scribe" / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_file = config_dir / "scribe.yaml"
+        legacy_config = repo_root / ".scribe" / "scribe.yaml"
+        template_path = settings.project_root / "config" / "scribe_config_template.yaml"
+
+        if not config_file.exists():
+            try:
+                if legacy_config.exists():
+                    shutil.copy2(legacy_config, config_file)
+                    repo_config_logger.info(f"Copied legacy config to {config_file}")
+                elif template_path.exists():
+                    shutil.copy2(template_path, config_file)
+                    repo_config_logger.info(f"Seeded repo config from template at {config_file}")
+            except Exception as exc:
+                repo_config_logger.warning(f"Failed to seed repo config at {config_file}: {exc}")
 
         for config_path in config_paths:
             if config_path.exists():
@@ -250,7 +307,10 @@ class RepoDiscovery:
         scribe_dir = repo_root / ".scribe"
         scribe_dir.mkdir(parents=True, exist_ok=True)
 
-        config_file = scribe_dir / "scribe.yaml"
+        config_dir = scribe_dir / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+
+        config_file = config_dir / "scribe.yaml"
 
         if not config_file.exists():
             try:

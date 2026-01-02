@@ -38,6 +38,14 @@ def parse_frontmatter(text: str) -> FrontmatterResult:
     frontmatter_lines = lines[: end_index + 1]
     body_lines = lines[end_index + 1 :]
     frontmatter_content = "".join(lines[1:end_index])
+    if frontmatter_content:
+        # Remove YAML document end markers that can break parsing mid-frontmatter.
+        sanitized_lines = []
+        for line in frontmatter_content.splitlines(keepends=True):
+            if line.strip() == "...":
+                continue
+            sanitized_lines.append(line)
+        frontmatter_content = "".join(sanitized_lines)
     try:
         data = yaml.safe_load(frontmatter_content) or {}
     except yaml.YAMLError as exc:
@@ -55,12 +63,17 @@ def parse_frontmatter(text: str) -> FrontmatterResult:
 
 
 def _format_yaml_scalar(value: Any) -> str:
-    rendered = yaml.safe_dump(value, default_flow_style=True, sort_keys=False)
+    rendered = yaml.safe_dump(
+        value,
+        default_flow_style=True,
+        sort_keys=False,
+        explicit_end=False,
+    )
     return rendered.strip()
 
 
 def _rewrite_frontmatter_block(data: Dict[str, Any]) -> str:
-    rendered = yaml.safe_dump(data, sort_keys=False)
+    rendered = yaml.safe_dump(data, sort_keys=False, explicit_end=False)
     if not rendered.endswith("\n"):
         rendered += "\n"
     return f"{FRONTMATTER_BOUNDARY}\n{rendered}{FRONTMATTER_BOUNDARY}\n"
@@ -85,7 +98,7 @@ def apply_frontmatter_updates(
     if not lines:
         return frontmatter_raw, merged
 
-    content_lines = lines[1:-1]
+    content_lines = [line for line in lines[1:-1] if line.strip() != "..."]
     keys_remaining = dict(updates)
     for idx, line in enumerate(content_lines):
         stripped = line.lstrip()

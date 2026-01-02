@@ -65,7 +65,12 @@ async def vector_search(
     query: str,
     k: int = 10,
     project_slug: Optional[str] = None,
+    project_slugs: Optional[List[str]] = None,
+    project_slug_prefix: Optional[str] = None,
     agent_name: Optional[str] = None,
+    content_type: Optional[str] = None,
+    doc_type: Optional[str] = None,
+    file_path: Optional[str] = None,
     time_start: Optional[str] = None,
     time_end: Optional[str] = None,
     min_similarity: Optional[float] = None
@@ -105,10 +110,26 @@ async def vector_search(
     try:
         # Build filters
         filters = {}
-        if project_slug:
+        if project_slugs:
+            normalized = []
+            for slug in project_slugs:
+                if not slug:
+                    continue
+                normalized.append(str(slug).lower().replace(" ", "-"))
+            if normalized:
+                filters["project_slugs"] = normalized
+        elif project_slug_prefix:
+            filters["project_slug_prefix"] = str(project_slug_prefix).lower().replace(" ", "-")
+        elif project_slug:
             filters["project_slug"] = project_slug.lower().replace(" ", "-")
         if agent_name:
             filters["agent_name"] = agent_name
+        if content_type:
+            filters["content_type"] = content_type
+        if doc_type:
+            filters["doc_type"] = doc_type
+        if file_path:
+            filters["file_path"] = file_path
         if time_start or time_end:
             filters["time_range"] = {}
             if time_start:
@@ -374,6 +395,8 @@ async def semantic_search(
     query: str,
     k: int = 10,
     project_slug: Optional[str] = None,
+    project_slugs: Optional[List[str]] = None,
+    project_slug_prefix: Optional[str] = None,
     agent_name: Optional[str] = None,
     time_start: Optional[str] = None,
     time_end: Optional[str] = None,
@@ -387,6 +410,8 @@ async def semantic_search(
         query=query,
         k=k,
         project_slug=project_slug,
+        project_slugs=project_slugs,
+        project_slug_prefix=project_slug_prefix,
         agent_name=agent_name,
         time_start=time_start,
         time_end=time_end,

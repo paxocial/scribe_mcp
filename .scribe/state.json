@@ -1,0 +1,79 @@
+{
+  "current_project": "scribe_sentinel_concurrency_v1",
+  "projects": {
+    "scribe_mcp": {
+      "name": "scribe_mcp",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/docs/dev_plans/scribe_mcp/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/docs/dev_plans/scribe_mcp",
+      "docs": {
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/docs/dev_plans/scribe_mcp/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/docs/dev_plans/scribe_mcp/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/docs/dev_plans/scribe_mcp/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/docs/dev_plans/scribe_mcp/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "emoji": "\u2139\ufe0f",
+        "agent": "Scribe"
+      }
+    },
+    "scribe_sentinel_concurrency_v1": {
+      "name": "scribe_sentinel_concurrency_v1",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_sentinel_concurrency_v1/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_sentinel_concurrency_v1",
+      "docs": {
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_sentinel_concurrency_v1/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_sentinel_concurrency_v1/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_sentinel_concurrency_v1/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_sentinel_concurrency_v1/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "agent": "Scribe"
+      },
+      "author": "Scribe",
+      "description": null,
+      "tags": []
+    }
+  },
+  "recent_projects": [
+    "scribe_sentinel_concurrency_v1",
+    "scribe_mcp"
+  ],
+  "session_projects": {},
+  "recent_tools": [
+    {
+      "name": "append_entry",
+      "ts": "2026-01-02 11:49:22 UTC"
+    },
+    {
+      "name": "manage_docs",
+      "ts": "2026-01-02 11:49:15 UTC"
+    },
+    {
+      "name": "read_file",
+      "ts": "2026-01-02 11:48:04 UTC"
+    },
+    {
+      "name": "get_project",
+      "ts": "2026-01-02 11:46:36 UTC"
+    },
+    {
+      "name": "set_project",
+      "ts": "2026-01-02 11:14:04 UTC"
+    },
+    {
+      "name": "list_projects",
+      "ts": "2026-01-02 11:12:22 UTC"
+    },
+    {
+      "name": "vector_search",
+      "ts": "2026-01-02 09:20:27 UTC"
+    }
+  ],
+  "last_activity_at": "2026-01-02 11:49:22 UTC",
+  "session_started_at": "2026-01-02 09:20:27 UTC",
+  "version": 23,
+  "last_updated_by": "Scribe",
+  "operation_timestamp": "2026-01-02 11:14:04 UTC"
+}

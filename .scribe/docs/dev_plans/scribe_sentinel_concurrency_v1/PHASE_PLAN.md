@@ -142,3 +142,27 @@ Update status and evidence as work progresses. Always link to PROGRESS_LOG entri
 <!-- ID: retro_notes -->
 - Capture re-plans, scope shifts, and validation gaps after each phase.
 - Link retro notes to PROGRESS_LOG entries for traceability.
+## Tooling Hardening Plan (Frontmatter + read_file)
+
+### Goal
+Prevent frontmatter from appearing in tool outputs unless explicitly requested, avoid duplicate frontmatter insertion, and improve read_file ergonomics/errors.
+
+### Steps
+1) Frontmatter output suppression
+   - Strip all frontmatter blocks from manage_docs dry-run preview by default.
+   - Add explicit opt-in flag: `metadata.include_frontmatter_preview=true` to show frontmatter in preview.
+   - Hide `frontmatter_*` fields in `extra` unless `metadata.include_frontmatter_extra=true`.
+
+2) Frontmatter duplication prevention
+   - Detect frontmatter in `updated_body` and reuse/merge it instead of prepending a new block.
+
+3) read_file UX improvements
+   - Default `chunk_index=[0]` when `mode=chunk` and missing.
+   - Normalize `chunk_index` when passed as int/string.
+   - On `file not found` and `read_file denied`, include `absolute_path` and `repo_relative_path` in the error response.
+
+4) Verification
+   - manage_docs dry_run preview without opt-in: no frontmatter.
+   - manage_docs dry_run preview with opt-in: frontmatter shown.
+   - read_file `mode=chunk` without chunk_index: returns first chunk.
+   - read_file missing path: error includes absolute + repo-relative paths.
