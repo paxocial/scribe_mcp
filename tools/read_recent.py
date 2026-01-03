@@ -9,7 +9,7 @@ from scribe_mcp import server as server_module
 from scribe_mcp.server import app
 from scribe_mcp.tools.constants import STATUS_EMOJI
 from scribe_mcp.utils.files import read_tail
-from scribe_mcp.utils.response import create_pagination_info
+from scribe_mcp.utils.response import create_pagination_info, ResponseFormatter
 from scribe_mcp.utils.tokens import token_estimator
 from scribe_mcp.utils.estimator import ParameterTypeEstimator
 from scribe_mcp.utils.config_manager import TokenBudgetManager
@@ -27,6 +27,7 @@ class _ReadRecentHelper(LoggingToolMixin):
         self.token_budget_manager = TokenBudgetManager()
         self.parameter_estimator = ParameterTypeEstimator()
         self.error_handler = HealingErrorHandler()
+        self.formatter = ResponseFormatter()
 
     def heal_parameters_with_exception_handling(
         self,
@@ -156,10 +157,11 @@ async def read_recent(
     limit: Optional[Any] = None,
     filter: Optional[Dict[str, Any]] = None,
     page: int = 1,
-    page_size: int = 50,
+    page_size: int = 10,
     compact: bool = False,
     fields: Optional[List[str]] = None,
     include_metadata: bool = True,
+    format: str = "readable",
 ) -> Dict[str, Any]:
     """Return recent log entries with pagination and formatting options.
 
@@ -169,10 +171,11 @@ async def read_recent(
         limit: Alias for n (commonly used by agents)
         filter: Optional filters to apply (agent, status, emoji)
         page: Page number for pagination (1-based)
-        page_size: Number of entries per page
+        page_size: Number of entries per page (default: 10)
         compact: Use compact response format with short field names
         fields: Specific fields to include in response
         include_metadata: Include metadata field in entries
+        format: Output format - "readable" (default), "structured", or "compact"
 
     Returns:
         Paginated response with recent entries and metadata
@@ -280,7 +283,20 @@ async def read_recent(
                 extra_data={},
             )
 
-            # Apply Phase 1 token budget management
+            # For readable format, skip token budget truncation (full content needed)
+            # Token budget only applies to structured/compact formats
+            if format == "readable":
+                if healing_applied:
+                    response["parameter_healing"] = {
+                        "applied": True,
+                        "messages": healing_messages,
+                        "original_parameters": {"n": healed_params["n"], "page": healed_params["page"], "page_size": healed_params["page_size"]}
+                    }
+                return await _READ_RECENT_HELPER.formatter.finalize_tool_response(
+                    response, format, "read_recent"
+                )
+
+            # Apply Phase 1 token budget management (structured/compact formats only)
             try:
                 truncated, token_count, items_truncated = _READ_RECENT_HELPER.token_budget_manager.truncate_response_to_budget(
                     response,
@@ -319,7 +335,9 @@ async def read_recent(
                         page_size=page_size
                     )
 
-                return managed_response
+                return await _READ_RECENT_HELPER.formatter.finalize_tool_response(
+                    managed_response, format, "read_recent"
+                )
 
             except Exception as token_error:
                 # Fallback: return original response with healing info
@@ -351,7 +369,9 @@ async def read_recent(
                         page_size=page_size
                     )
 
-                return response
+                return await _READ_RECENT_HELPER.formatter.finalize_tool_response(
+                    response, format, "read_recent"
+                )
 
     # File-based fallback with pagination
     # Read more lines than needed to account for filtering
@@ -393,7 +413,19 @@ async def read_recent(
         extra_data={},
     )
 
-    # Apply Phase 1 token budget management for file-based fallback
+    # For readable format, skip token budget truncation (full content needed)
+    if format == "readable":
+        if healing_applied:
+            response["parameter_healing"] = {
+                "applied": True,
+                "messages": healing_messages,
+                "original_parameters": {"n": healed_params["n"], "page": healed_params["page"], "page_size": healed_params["page_size"]}
+            }
+        return await _READ_RECENT_HELPER.formatter.finalize_tool_response(
+            response, format, "read_recent"
+        )
+
+    # Apply Phase 1 token budget management for file-based fallback (structured/compact only)
     try:
         truncated, token_count, items_truncated = _READ_RECENT_HELPER.token_budget_manager.truncate_response_to_budget(
             response,
@@ -432,7 +464,9 @@ async def read_recent(
                 page_size=page_size
             )
 
-        return managed_response
+        return await _READ_RECENT_HELPER.formatter.finalize_tool_response(
+            managed_response, format, "read_recent"
+        )
 
     except Exception as token_error:
         # Fallback: return original response with healing info
@@ -464,7 +498,9 @@ async def read_recent(
                 page_size=page_size
             )
 
-        return response
+        return await _READ_RECENT_HELPER.formatter.finalize_tool_response(
+            response, format, "read_recent"
+        )
 
 
 def _normalise_filters(filters: Dict[str, Any]) -> Dict[str, Any]:

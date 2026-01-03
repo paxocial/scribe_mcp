@@ -14,6 +14,61 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Protocol Sequence (Mandatory)
 
+---
+
+## 🔒 **Directive: File Reading Priority (Scribe MCP)**
+
+**MANDATORY RULE — NO EXCEPTIONS UNLESS EXPLICITLY OVERRIDDEN**
+
+> **Agents MUST prioritize the Scribe MCP `read_file` tool over any basic or native `read` tool when inspecting repository files.**
+
+### **Rationale**
+
+The Scribe MCP `read_file` tool provides:
+
+* Auditable access history
+* Stable, human-readable formatting (line numbers, headers, metadata)
+* File identity verification (sha256, size, encoding)
+* Project and context reminders
+* Chunk-aware reading for large files
+
+Basic read tools lack auditability, provenance, and contextual framing and **must not be used for primary file inspection**.
+
+---
+
+### **Required Behavior**
+
+* **Claude Code**:
+
+  * Always use `scribe.read_file` for file inspection, review, or debugging.
+  * Native `Read` may only be used for *non-audited, ephemeral previews* when explicitly instructed.
+
+* **Codex / Other Agents**:
+
+  * Default to `scribe.read_file` for *all* file reads.
+  * Treat native read tools as **fallback-only** if Scribe MCP is unavailable.
+
+---
+
+### **Prohibited Behavior**
+
+* ❌ Using native `Read` when Scribe MCP is available
+* ❌ Inspecting files without generating an audit trail
+* ❌ Returning raw JSON blobs or escaped newline output when readable output is required
+
+---
+
+### **Exception Clause**
+
+An agent may bypass this directive **only if**:
+
+1. The user explicitly instructs otherwise, **or**
+2. Scribe MCP is unavailable or errors irrecoverably
+
+In such cases, the agent **must state the exception explicitly**.
+
+---
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  1️⃣ RESEARCH PHASE                                              │
@@ -395,6 +450,12 @@ from scribe_mcp.storage.sqlite import SQLiteStorage
 - `read_file(path, mode)` - Repo-scoped file access
 - `scribe_doctor()` - Diagnostics
 - `manage_docs(action="search")` - Semantic search
+
+**Readable Output Formatting** (v2.1.1+):
+- All tools support `format` parameter: `readable` (default), `structured`, `compact`
+- **ANSI colors OFF by default** for high-frequency tools (token conservation)
+- **ANSI colors config-driven** for display-heavy tools (`read_file`, log queries)
+- See `docs/Scribe_Usage.md#readable-output-formatting-v211` for implementation details
 
 ---
 

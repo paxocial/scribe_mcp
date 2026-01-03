@@ -14,9 +14,16 @@
 
 ---
 
-## ✨ Update v2.1.1 (Diff Editor & Scaffold Reminders)
+## ✨ Update v2.1.1 (Diff Editor, Readable Output & ANSI Colors)
 
 Scribe MCP 2.1.1 introduces foundational document lifecycle upgrades, including a fully automated YAML frontmatter engine with round-trip safety, canonical metadata defaults, and extensible schema support. Frontmatter is created on first edit if missing, auto-updates `last_updated`, and supports explicit overrides without breaking existing fields. These changes establish a metadata plane separate from document body content, enabling safe diff operations, deterministic header/TOC tooling, and template-driven document creation.
+
+**New: Enhanced Readable Output (Phase 1.5/1.6)**
+- **ANSI Color Support**: Tool output now renders with colors in Claude Code/Codex - cyan boxes, green line numbers, bold titles
+- **Green Line Numbers**: Clean `    1. content` format with dot separator, matching Claude's native Read tool style
+- **CallToolResult Fix**: Workaround for Issue #9962 - returns TextContent-only for proper newline rendering
+- **Config-Driven Colors**: Enable/disable via `use_ansi_colors: true` in `.scribe/config/scribe.yaml`
+- **5-Char Line Padding**: Consistent line number width for improved readability
 
 Structured edits are now the default path: agents express intent, the server compiles and applies deterministic mutations, and diagnostics remain explicit. Structural actions no longer auto-heal doc targets; if a doc key is not registered, the action fails with `DOC_NOT_FOUND` rather than redirecting the write.
 
@@ -110,7 +117,7 @@ pip install -r requirements.txt
   ```
   For Global MCP
   ```bash
-    claude mcp add scribe --scope user --env SCRIBE_STORAGE_BACKEND=sqlite -- bash -lc 'cd /home/austin/projects/MCP_SPINE/scribe_mcp && exec python -m server'
+    claude mcp add scribe --scope user --env SCRIBE_STORAGE_BACKEND=sqlite -- bash -lc 'cd  /home/path/to/scribe_mcp && exec python -m server'
   ```
 
 Once connected from Claude / Codex MCP:

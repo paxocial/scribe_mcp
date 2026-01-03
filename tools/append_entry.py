@@ -39,6 +39,7 @@ from scribe_mcp.utils.parameter_validator import ToolValidator, BulletproofParam
 from scribe_mcp.utils.config_manager import ConfigManager, resolve_fallback_chain, BulletproofFallbackManager
 from scribe_mcp.utils.error_handler import ErrorHandler, ExceptionHealer
 from scribe_mcp.security.sandbox import PermissionError as SandboxPermissionError
+from scribe_mcp.utils.response import default_formatter
 
 # Import validation helpers for backwards-compatible test globals.
 from . import manage_docs_validation as _manage_docs_validation  # noqa: F401
@@ -1163,8 +1164,9 @@ async def append_entry(
     agent_id: Optional[str] = None,  # Agent identification (auto-detected if not provided)
     log_type: Optional[str] = "progress",
     config: Optional[AppendEntryConfig] = None,  # Configuration object for enhanced parameter handling
+    format: str = "readable",  # Output format: readable (default), structured, compact
     **_kwargs: Any,  # tolerate unknown kwargs (contract: tools never TypeError)
-) -> Dict[str, Any]:
+) -> Union[Dict[str, Any], str]:
     """
     Enhanced append_entry with robust multiline handling and bulk mode support.
 
@@ -1355,7 +1357,12 @@ async def append_entry(
             else:
                 result["meta"]["parameter_healing"] = True
 
-        return result
+        # Route through formatter for readable/structured/compact output
+        return await default_formatter.finalize_tool_response(
+            data=result,
+            format=format,
+            tool_name="append_entry"
+        )
 
     except Exception as e:
         # === ULTIMATE EXCEPTION HANDLING AND FALLBACK ===

@@ -1,5 +1,5 @@
 {
-  "current_project": "scribe_mcp",
+  "current_project": "scribe_tool_output_refinement",
   "projects": {
     "scribe_mcp": {
       "name": "scribe_mcp",
@@ -34,46 +34,77 @@
       "author": "Scribe",
       "description": null,
       "tags": []
+    },
+    "scribe_tool_output_refinement": {
+      "name": "scribe_tool_output_refinement",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement",
+      "docs": {
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "agent": "Scribe"
+      },
+      "author": "Scribe",
+      "description": null,
+      "tags": []
     }
   },
   "recent_projects": [
+    "scribe_tool_output_refinement",
     "scribe_mcp",
     "scribe_sentinel_concurrency_v1"
   ],
   "session_projects": {},
   "recent_tools": [
     {
-      "name": "list_projects",
-      "ts": "2026-01-02 13:09:15 UTC"
-    },
-    {
       "name": "append_entry",
-      "ts": "2026-01-02 11:49:22 UTC"
-    },
-    {
-      "name": "manage_docs",
-      "ts": "2026-01-02 11:49:15 UTC"
+      "ts": "2026-01-03 04:32:37 UTC"
     },
     {
       "name": "read_file",
-      "ts": "2026-01-02 11:48:04 UTC"
-    },
-    {
-      "name": "get_project",
-      "ts": "2026-01-02 11:46:36 UTC"
+      "ts": "2026-01-03 04:32:37 UTC"
     },
     {
       "name": "set_project",
-      "ts": "2026-01-02 11:14:04 UTC"
+      "ts": "2026-01-03 04:17:19 UTC"
+    },
+    {
+      "name": "query_entries",
+      "ts": "2026-01-03 04:10:54 UTC"
+    },
+    {
+      "name": "read_recent",
+      "ts": "2026-01-03 04:09:22 UTC"
+    },
+    {
+      "name": "list_projects",
+      "ts": "2026-01-03 04:08:32 UTC"
+    },
+    {
+      "name": "get_project",
+      "ts": "2026-01-03 02:49:08 UTC"
+    },
+    {
+      "name": "manage_docs",
+      "ts": "2026-01-02 14:39:16 UTC"
+    },
+    {
+      "name": "generate_doc_templates",
+      "ts": "2026-01-02 13:47:01 UTC"
     },
     {
       "name": "vector_search",
       "ts": "2026-01-02 09:20:27 UTC"
     }
   ],
-  "last_activity_at": "2026-01-02 13:09:15 UTC",
-  "session_started_at": "2026-01-02 13:08:37 UTC",
-  "version": 37,
-  "last_updated_by": null,
-  "operation_timestamp": "2026-01-02 13:09:15 UTC"
+  "last_activity_at": "2026-01-03 04:32:37 UTC",
+  "session_started_at": "2026-01-03 00:43:44 UTC",
+  "version": 110,
+  "last_updated_by": "Scribe",
+  "operation_timestamp": "2026-01-03 04:17:19 UTC"
 }

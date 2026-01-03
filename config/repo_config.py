@@ -61,6 +61,9 @@ class RepoConfig:
     db_path: Optional[Path] = None  # for sqlite
     doc_snapshots: bool = True
 
+    # Output formatting settings
+    use_ansi_colors: bool = True  # Enable ANSI colors in tool output (Phase 1.5 - Issue #9962 fix)
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any], repo_root: Path) -> "RepoConfig":
         """Create RepoConfig from dictionary data."""
@@ -105,6 +108,7 @@ class RepoConfig:
             storage_backend=data.get("storage_backend", "sqlite"),
             db_path=db_path,
             doc_snapshots=bool(data.get("doc_snapshots", True)),
+            use_ansi_colors=bool(data.get("use_ansi_colors", True)),  # Colors ON by default
         )
 
     @classmethod
@@ -150,6 +154,7 @@ class RepoConfig:
             "mcp_server_name": self.mcp_server_name,
             "storage_backend": self.storage_backend,
             "doc_snapshots": self.doc_snapshots,
+            "use_ansi_colors": self.use_ansi_colors,
         }
 
         if self.custom_templates_dir:

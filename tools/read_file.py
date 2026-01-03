@@ -7,7 +7,7 @@ import os
 import re
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Union
 
 import yaml
 import difflib
@@ -20,6 +20,7 @@ from scribe_mcp.shared.logging_utils import compose_log_line, default_status_emo
 from scribe_mcp.utils.files import append_line
 from scribe_mcp.utils.frontmatter import parse_frontmatter
 from scribe_mcp.utils.sentinel_logs import append_sentinel_event
+from scribe_mcp.utils.response import default_formatter
 
 
 _DEFAULT_DENYLIST = [
@@ -469,7 +470,8 @@ async def read_file(
     context_lines: int = 0,
     max_matches: Optional[int] = None,
     fuzzy_threshold: Optional[float] = None,
-) -> Dict[str, Any]:
+    format: str = "readable",  # NEW: default is readable for agent-friendly output
+) -> Union[Dict[str, Any], str]:
     exec_context = server_module.get_execution_context()
     if exec_context is None:
         return {"ok": False, "error": "ExecutionContext missing"}
@@ -510,10 +512,16 @@ async def read_file(
         except Exception:
             return []
 
-    async def finalize_response(payload: Dict[str, Any], read_mode: str) -> Dict[str, Any]:
+    async def finalize_response(payload: Dict[str, Any], read_mode: str) -> Union[Dict[str, Any], str]:
         payload.setdefault("mode", read_mode)
         payload["reminders"] = await get_reminders(read_mode)
-        return payload
+
+        # NEW: Route through formatter for readable/structured/compact modes
+        return await default_formatter.finalize_tool_response(
+            data=payload,
+            format=format,
+            tool_name="read_file"
+        )
 
     async def log_read(event_type: str, data: Dict[str, Any], *, include_md: bool = True) -> None:
         payload = {**audit_meta, **data}

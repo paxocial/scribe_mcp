@@ -18,7 +18,7 @@ from scribe_mcp.utils.config_manager import ConfigManager, validate_enum_value, 
 from scribe_mcp.utils.logs import parse_log_line, read_all_lines
 from scribe_mcp.utils.search import message_matches
 from scribe_mcp.utils.time import coerce_range_boundary
-from scribe_mcp.utils.response import create_pagination_info
+from scribe_mcp.utils.response import create_pagination_info, default_formatter
 from scribe_mcp.utils.tokens import token_estimator
 from scribe_mcp.utils.estimator import PaginationCalculator
 from scribe_mcp.utils.bulk_processor import BulkProcessor
@@ -969,7 +969,7 @@ async def query_entries(
     meta_filters: Optional[Dict[str, Any]] = None,
     limit: int = 50,
     page: int = 1,
-    page_size: int = 50,
+    page_size: int = 10,
     compact: bool = False,
     fields: Optional[List[str]] = None,
     include_metadata: bool = True,
@@ -982,6 +982,7 @@ async def query_entries(
     relevance_threshold: float = 0.0,  # 0.0-1.0 relevance scoring threshold
     max_results: Optional[int] = None,  # Override for limit (deprecated but kept for compatibility)
     config: Optional[QueryEntriesConfig] = None,  # Configuration object for dual parameter support
+    format: str = "readable",  # Output format: readable (default), structured, compact
     **_kwargs: Any,  # tolerate unknown kwargs (contract: tools never TypeError)
 ) -> Dict[str, Any]:
     """Search the project log with flexible filters and pagination.
@@ -1013,6 +1014,7 @@ async def query_entries(
         max_results: Override maximum results (deprecated, use limit/page_size instead)
         config: Configuration object for dual parameter support. If provided, legacy parameters
                take precedence when both are specified.
+        format: Output format - "readable" (human-friendly, default), "structured" (full JSON), "compact" (minimal)
 
     Returns:
         Paginated response with entries and metadata
@@ -1142,7 +1144,22 @@ async def query_entries(
                 search_result["warnings"] = []
             search_result["warnings"].extend(search_result["validation_warnings"])
 
-        return search_result
+        # Add search parameters for readable formatter to show in header
+        if message:
+            search_result["search_message"] = message
+        if status:
+            search_result["search_status"] = status
+        if agents:
+            search_result["search_agents"] = agents
+        if emoji:
+            search_result["search_emoji"] = emoji
+
+        # Route through formatter for readable/structured/compact output
+        return await default_formatter.finalize_tool_response(
+            data=search_result,
+            format=format,
+            tool_name="query_entries"
+        )
 
     except Exception as e:
         # === ULTIMATE EXCEPTION HANDLING AND FALLBACK ===
