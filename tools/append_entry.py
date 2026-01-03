@@ -26,6 +26,7 @@ from scribe_mcp.tools.agent_project_utils import (
 from scribe_mcp import reminders
 from scribe_mcp.utils.files import append_line, rotate_file
 from scribe_mcp.utils.time import format_utc, utcnow
+from scribe_mcp.utils.sentinel_logs import append_sentinel_event
 from scribe_mcp.shared.logging_utils import (
     ProjectResolutionError,
     compose_log_line as shared_compose_line,
@@ -34,6 +35,13 @@ from scribe_mcp.shared.logging_utils import (
     normalize_metadata,
     resolve_log_definition as shared_resolve_log_definition,
     resolve_logging_context,
+)
+from scribe_mcp.shared.log_enums import (
+    LogPriority,
+    LogCategory,
+    validate_priority,
+    validate_category,
+    infer_priority_from_status,
 )
 from scribe_mcp.utils.parameter_validator import ToolValidator, BulletproofParameterCorrector
 from scribe_mcp.utils.config_manager import ConfigManager, resolve_fallback_chain, BulletproofFallbackManager
@@ -173,6 +181,10 @@ def _validate_and_prepare_parameters(
     stagger_seconds: int,
     agent_id: Optional[str],
     log_type: Optional[str],
+    priority: Optional[str],
+    category: Optional[str],
+    tags: Optional[List[str]],
+    confidence: Optional[float],
     config: Optional[AppendEntryConfig]
 ) -> Tuple[AppendEntryConfig, Dict[str, Any]]:
     """
@@ -248,6 +260,41 @@ def _validate_and_prepare_parameters(
         final_timestamp_utc = healed_params.get("timestamp_utc", timestamp_utc)
         final_log_type = healed_params.get("log_type", log_type)
 
+        # Validate and normalize priority/category parameters
+        final_priority = priority
+        final_category = category
+        final_tags = tags
+        final_confidence = confidence
+
+        # Validate priority
+        if final_priority:
+            try:
+                validated_priority = validate_priority(final_priority)
+                final_priority = validated_priority.value if validated_priority else "medium"
+            except ValueError:
+                # Invalid priority → default to medium
+                final_priority = "medium"
+        elif final_status:
+            # Auto-infer from status if not provided
+            inferred = infer_priority_from_status(final_status)
+            final_priority = inferred.value
+        else:
+            final_priority = "medium"
+
+        # Validate category
+        if final_category:
+            try:
+                validated_category = validate_category(final_category)
+                final_category = validated_category.value if validated_category else None
+            except ValueError:
+                # Invalid category → None
+                final_category = None
+
+        # Validate confidence
+        if final_confidence is not None:
+            if not isinstance(final_confidence, (int, float)) or not (0.0 <= final_confidence <= 1.0):
+                final_confidence = 1.0  # Out of range → default
+
         # Create configuration using dual parameter support
         if config is not None:
             legacy_config = AppendEntryConfig.from_legacy_params(
@@ -263,7 +310,11 @@ def _validate_and_prepare_parameters(
                 split_delimiter=split_delimiter,
                 stagger_seconds=stagger_seconds,
                 agent_id=agent_id,
-                log_type=final_log_type
+                log_type=final_log_type,
+                priority=final_priority,
+                category=final_category,
+                tags=final_tags,
+                confidence=final_confidence
             )
 
             config_dict = config.to_dict()
@@ -288,7 +339,11 @@ def _validate_and_prepare_parameters(
                 split_delimiter=split_delimiter,
                 stagger_seconds=stagger_seconds,
                 agent_id=agent_id,
-                log_type=final_log_type
+                log_type=final_log_type,
+                priority=final_priority,
+                category=final_category,
+                tags=final_tags,
+                confidence=final_confidence
             )
 
         return final_config, {"healing_applied": healing_applied, "healed_params": healed_params}
@@ -383,6 +438,12 @@ async def _process_single_entry(
         agent_id = final_config.agent_id
         base_log_type = (final_config.log_type or "progress").lower()
 
+        # Extract new priority/category fields
+        priority = final_config.priority
+        category = final_config.category
+        tags = final_config.tags
+        confidence = final_config.confidence
+
         # Validate message content with enhanced healing
         validation_error = _validate_message(message)
         if validation_error:
@@ -432,6 +493,16 @@ async def _process_single_entry(
         # Process metadata
         meta_payload = {key: value for key, value in meta_pairs}
         entry_log_type = base_log_type
+
+        # Add priority/category/tags/confidence to metadata for storage
+        if priority:
+            meta_payload["priority"] = priority
+        if category:
+            meta_payload["category"] = category
+        if tags:
+            meta_payload["tags"] = json.dumps(tags) if isinstance(tags, list) else tags
+        if confidence is not None:
+            meta_payload["confidence"] = confidence
 
         try:
             log_path, log_definition = _resolve_log_target(project, entry_log_type, log_cache)
@@ -693,6 +764,7 @@ async def _process_single_entry(
             "path": str(log_path),
             "paths": sorted({str(log_path), *tee_paths}),
             "line_id": line_id,
+            "project_name": project["name"],  # For concurrent session clarity
             "recent_projects": list(recent),
             "reminders": list(getattr(context, "reminders", []) or []) + tee_reminders,
         }
@@ -890,7 +962,11 @@ async def _process_bulk_entries(
                             meta=item.get("meta", {}),
                             timestamp_utc=item.get("timestamp_utc"),
                             agent_id=agent_id,
-                            log_type=base_log_type
+                            log_type=base_log_type,
+                            priority=item.get("priority", final_config.priority),
+                            category=item.get("category", final_config.category),
+                            tags=item.get("tags", final_config.tags),
+                            confidence=item.get("confidence", final_config.confidence)
                         )
 
                         result = await _process_single_entry(
@@ -943,7 +1019,11 @@ async def _process_bulk_entries(
                             meta=item.get("meta", {"bulk_healing": True}),
                             timestamp_utc=item.get("timestamp_utc", final_config.timestamp_utc),
                             agent_id=agent_id,
-                            log_type=base_log_type
+                            log_type=base_log_type,
+                            priority=item.get("priority", final_config.priority),
+                            category=item.get("category", final_config.category),
+                            tags=item.get("tags", final_config.tags),
+                            confidence=item.get("confidence", final_config.confidence)
                         )
 
                         result = await _process_single_entry(
@@ -1163,6 +1243,10 @@ async def append_entry(
     stagger_seconds: int = 1,
     agent_id: Optional[str] = None,  # Agent identification (auto-detected if not provided)
     log_type: Optional[str] = "progress",
+    priority: Optional[str] = None,  # Entry priority (critical|high|medium|low)
+    category: Optional[str] = None,  # Entry category (decision|investigation|bug|etc.)
+    tags: Optional[List[str]] = None,  # List of tags for entry
+    confidence: Optional[float] = None,  # Confidence score 0.0-1.0
     config: Optional[AppendEntryConfig] = None,  # Configuration object for enhanced parameter handling
     format: str = "readable",  # Output format: readable (default), structured, compact
     **_kwargs: Any,  # tolerate unknown kwargs (contract: tools never TypeError)
@@ -1183,6 +1267,10 @@ async def append_entry(
         split_delimiter: Delimiter for splitting multiline messages (default: newline)
         stagger_seconds: Seconds to stagger timestamps for bulk/split entries (default: 1)
         log_type: Target log identifier (progress/doc_updates/etc.) defined in config/log_config.json
+        priority: Entry priority (critical|high|medium|low). Auto-inferred from status if not provided. Default: medium
+        category: Entry category (decision|investigation|bug|implementation|test|milestone|config|security|performance|documentation)
+        tags: List of tags for entry
+        confidence: Confidence score 0.0-1.0. Default: 1.0
         config: Optional AppendEntryConfig object for enhanced parameter handling
 
     ENHANCED FEATURES:
@@ -1206,6 +1294,13 @@ async def append_entry(
     except Exception:
         state_snapshot = {}
 
+    exec_context = None
+    if hasattr(server_module, "get_execution_context"):
+        try:
+            exec_context = server_module.get_execution_context()
+        except Exception:
+            exec_context = None
+
     try:
         # === PHASE 3 ENHANCED PARAMETER VALIDATION AND PREPARATION ===
         # Replace monolithic parameter handling with bulletproof validation and healing
@@ -1223,6 +1318,10 @@ async def append_entry(
             stagger_seconds=stagger_seconds,
             agent_id=agent_id,
             log_type=log_type,
+            priority=priority,
+            category=category,
+            tags=tags,
+            confidence=confidence,
             config=config
         )
 
@@ -1260,6 +1359,92 @@ async def append_entry(
                 agent_id, "append_entry", {"message_length": len(message), "status": status, "bulk_mode": items is not None}
             )
 
+        def _collect_bulk_items(raw_items: Optional[str], raw_items_list: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+            if isinstance(raw_items_list, list):
+                return [item for item in raw_items_list if isinstance(item, dict)]
+            if isinstance(raw_items, str):
+                try:
+                    parsed = json.loads(raw_items)
+                    if isinstance(parsed, list):
+                        return [item for item in parsed if isinstance(item, dict)]
+                except Exception:
+                    return []
+            return []
+
+        def _append_entry_to_sentinel(
+            *,
+            message_value: str,
+            status_value: Optional[str],
+            emoji_value: Optional[str],
+            agent_value: Optional[str],
+            meta_value: Optional[Dict[str, Any]],
+            timestamp_override: Optional[str],
+            bulk_items: List[Dict[str, Any]],
+            split_parts: List[str],
+        ) -> Dict[str, Any]:
+            if not exec_context:
+                return {"ok": False, "error": "ExecutionContext missing"}
+
+            def emit(payload: Dict[str, Any], event_type: str) -> None:
+                append_sentinel_event(
+                    exec_context,
+                    event_type=event_type,
+                    data=payload,
+                    log_type="sentinel",
+                    include_md=True,
+                )
+
+            written = 0
+            if bulk_items:
+                for entry in bulk_items:
+                    entry_message = entry.get("message")
+                    if not entry_message:
+                        continue
+                    payload = {
+                        "message": entry_message,
+                        "status": entry.get("status"),
+                        "emoji": entry.get("emoji"),
+                        "agent": entry.get("agent"),
+                        "meta": entry.get("meta") if isinstance(entry.get("meta"), dict) else None,
+                        "timestamp_utc_override": entry.get("timestamp_utc"),
+                    }
+                    emit(payload, str(entry.get("status") or "info"))
+                    written += 1
+            else:
+                if not message_value:
+                    return {"ok": False, "error": "message or items are required"}
+                for part in split_parts:
+                    payload = {
+                        "message": part,
+                        "status": status_value,
+                        "emoji": emoji_value,
+                        "agent": agent_value,
+                        "meta": meta_value if isinstance(meta_value, dict) else None,
+                        "timestamp_utc_override": timestamp_override,
+                    }
+                    emit(payload, str(status_value or "info"))
+                    written += 1
+
+            return {"ok": True, "written_count": written, "mode": "sentinel"}
+
+        if exec_context and getattr(exec_context, "mode", None) == "sentinel":
+            bulk_items = _collect_bulk_items(items, items_list)
+            split_parts = (
+                [part for part in message.split(split_delimiter) if part]
+                if auto_split and split_delimiter and message
+                else [message] if message else []
+            )
+            return _append_entry_to_sentinel(
+                message_value=message,
+                status_value=status,
+                emoji_value=emoji,
+                agent_value=agent,
+                meta_value=meta_payload,
+                timestamp_override=timestamp_utc,
+                bulk_items=bulk_items,
+                split_parts=split_parts,
+            )
+
         # === CONTEXT RESOLUTION WITH ENHANCED ERROR HANDLING ===
         try:
             context = await resolve_logging_context(
@@ -1286,6 +1471,25 @@ async def append_entry(
                         state_snapshot=state_snapshot,
                     )
                 except Exception:
+                    if exec_context:
+                        bulk_items = _collect_bulk_items(items, items_list)
+                        split_parts = (
+                            [part for part in message.split(split_delimiter) if part]
+                            if auto_split and split_delimiter and message
+                            else [message] if message else []
+                        )
+                        fallback = _append_entry_to_sentinel(
+                            message_value=message,
+                            status_value=status,
+                            emoji_value=emoji,
+                            agent_value=agent,
+                            meta_value=meta_payload,
+                            timestamp_override=timestamp_utc,
+                            bulk_items=bulk_items,
+                            split_parts=split_parts,
+                        )
+                        fallback["warning"] = "project_resolution_failed_fallback_to_sentinel"
+                        return fallback
                     # Fallback response
                     error_response = ErrorHandler.create_project_resolution_error(
                         error=exc,
@@ -1295,6 +1499,25 @@ async def append_entry(
                 error_response["debug_path"] = "project_resolution_failed_healed"
                 return error_response
             else:
+                if exec_context:
+                    bulk_items = _collect_bulk_items(items, items_list)
+                    split_parts = (
+                        [part for part in message.split(split_delimiter) if part]
+                        if auto_split and split_delimiter and message
+                        else [message] if message else []
+                    )
+                    fallback = _append_entry_to_sentinel(
+                        message_value=message,
+                        status_value=status,
+                        emoji_value=emoji,
+                        agent_value=agent,
+                        meta_value=meta_payload,
+                        timestamp_override=timestamp_utc,
+                        bulk_items=bulk_items,
+                        split_parts=split_parts,
+                    )
+                    fallback["warning"] = "project_resolution_failed_fallback_to_sentinel"
+                    return fallback
                 error_response = ErrorHandler.create_project_resolution_error(
                     error=exc,
                     tool_name="append_entry",

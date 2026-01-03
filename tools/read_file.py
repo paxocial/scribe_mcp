@@ -429,7 +429,7 @@ async def _log_project_read(context: ExecutionContext, message: str, meta: Dict[
         tool_name="read_file",
         server_module=server_module,
         agent_id=None,
-        require_project=True,
+        require_project=False,
     )
     project = log_context.project or {}
     log_path = Path(project.get("progress_log", ""))

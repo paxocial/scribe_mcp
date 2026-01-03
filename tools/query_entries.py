@@ -82,7 +82,11 @@ def _validate_search_parameters(
     time_range: Optional[str],
     relevance_threshold: float,
     max_results: Optional[int],
-    config: Optional[QueryEntriesConfig]
+    config: Optional[QueryEntriesConfig],
+    priority: Optional[List[str]] = None,
+    category: Optional[List[str]] = None,
+    min_confidence: Optional[float] = None,
+    priority_sort: bool = False,
 ) -> Tuple[QueryEntriesConfig, Dict[str, Any]]:
     """
     Validate and prepare search parameters using enhanced Phase 3 utilities.
@@ -464,7 +468,11 @@ def _build_search_query(
             "verify_code_references": verify_code_references,
             "time_range": time_range,
             "relevance_threshold": relevance_threshold,
-            "max_results": max_results
+            "max_results": max_results,
+            "priority": final_config.priority if hasattr(final_config, 'priority') else None,
+            "category": final_config.category if hasattr(final_config, 'category') else None,
+            "min_confidence": final_config.min_confidence if hasattr(final_config, 'min_confidence') else None,
+            "priority_sort": final_config.priority_sort if hasattr(final_config, 'priority_sort') else False,
         }
 
         # Validate search parameters
@@ -699,6 +707,24 @@ async def _execute_search_with_fallbacks(
                         if normalized_filters and not _meta_matches(entry_meta, normalized_filters):
                             continue
 
+                    # Apply priority filter
+                    if search_params.get("priority"):
+                        entry_priority = parsed.get("meta", {}).get("priority", "medium")
+                        if entry_priority not in search_params["priority"]:
+                            continue
+
+                    # Apply category filter
+                    if search_params.get("category"):
+                        entry_category = parsed.get("meta", {}).get("category")
+                        if entry_category not in search_params["category"]:
+                            continue
+
+                    # Apply confidence filter
+                    if search_params.get("min_confidence") is not None:
+                        entry_confidence = float(parsed.get("meta", {}).get("confidence", 1.0))
+                        if entry_confidence < search_params["min_confidence"]:
+                            continue
+
                     # Apply time range filter
                     if search_params.get("start") or search_params.get("end"):
                         entry_timestamp = parsed.get("ts", "")
@@ -738,6 +764,17 @@ async def _execute_search_with_fallbacks(
                     if not healed_filter or not healed_filter.get("success"):
                         # Skip problematic entry but continue processing
                         continue
+
+            # Apply priority sorting if requested
+            if search_params.get("priority_sort", False):
+                from scribe_mcp.shared.log_enums import get_priority_sort_key
+                filtered_entries.sort(
+                    key=lambda e: (
+                        get_priority_sort_key(e.get("meta", {}).get("priority", "medium")),
+                        e.get("ts_iso", "")
+                    ),
+                    reverse=False  # Lower priority numbers first (critical=0), timestamp DESC maintained
+                )
 
             # Apply pagination with error handling
             try:
@@ -983,6 +1020,11 @@ async def query_entries(
     max_results: Optional[int] = None,  # Override for limit (deprecated but kept for compatibility)
     config: Optional[QueryEntriesConfig] = None,  # Configuration object for dual parameter support
     format: str = "readable",  # Output format: readable (default), structured, compact
+    # Phase 5 Priority/Category Filter Parameters
+    priority: Optional[List[str]] = None,  # Filter by priority levels (e.g., ["critical", "high"])
+    category: Optional[List[str]] = None,  # Filter by categories (e.g., ["bug", "security"])
+    min_confidence: Optional[float] = None,  # Minimum confidence threshold (0.0-1.0)
+    priority_sort: bool = False,  # If True, sort by priority (critical first) then by time
     **_kwargs: Any,  # tolerate unknown kwargs (contract: tools never TypeError)
 ) -> Dict[str, Any]:
     """Search the project log with flexible filters and pagination.
@@ -1015,6 +1057,11 @@ async def query_entries(
         config: Configuration object for dual parameter support. If provided, legacy parameters
                take precedence when both are specified.
         format: Output format - "readable" (human-friendly, default), "structured" (full JSON), "compact" (minimal)
+        # Phase 5 Priority/Category Filter Parameters
+        priority: Filter by priority levels (e.g., ["critical", "high"])
+        category: Filter by categories (e.g., ["bug", "security"])
+        min_confidence: Minimum confidence threshold (0.0-1.0)
+        priority_sort: If True, sort by priority (critical first) then by time
 
     Returns:
         Paginated response with entries and metadata
@@ -1055,6 +1102,10 @@ async def query_entries(
             page_size=page_size,
             compact=compact,
             fields=fields,
+            priority=priority,
+            category=category,
+            min_confidence=min_confidence,
+            priority_sort=priority_sort,
             include_metadata=include_metadata,
             search_scope=search_scope,
             document_types=document_types,

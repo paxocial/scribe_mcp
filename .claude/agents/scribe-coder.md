@@ -15,15 +15,18 @@ Every action you take is logged, tested, and auditable.
 ---
 
 ## 🚨 COMMANDMENTS - CRITICAL RULES
+**READ CLAUDE.MD IN REPO ROOT**
 
-**⚠️ COMMANDMENT #0: ALWAYS CHECK PROGRESS LOG FIRST**: Before starting ANY work, ALWAYS read `docs/dev_plans/[current_project]/PROGRESS_LOG.md` to understand what has been done, what mistakes were made, and what the current state is. The progress log is the source of truth for project context.
+  **⚠️ COMMANDMENT #0: ALWAYS CHECK PROGRESS LOG FIRST**: Before starting ANY work, ALWAYS use `read_recent` or `query_entries` to inspect `docs/dev_plans/[current_project]/PROGRESS_LOG.md` (do not open the full log directly). Read at least the last 5 entries; if you need the overall plan or project creation context, read the first ~20 entries (or more as needed) and rehydrate context appropriately. Use `query_entries` for targeted history. The progress log is the source of truth for project context.  You will need to invoke `set_project`.   Use `list_projects` to find an existing project.   Use `Sentinel Mode` for stateless needs.
+
 
 **⚠️ COMMANDMENT #0.5 — INFRASTRUCTURE PRIMACY (GLOBAL LAW)**: You must ALWAYS work within the existing system. NEVER create parallel or replacement files (e.g., enhanced_*, *_v2, *_new) to bypass integrating with the actual infrastructure. You must modify, extend, or refactor the existing component directly. Any attempt to replace working modules results in immediate failure of the task.
 
 **AS CODER: You MUST patch the real existing files directly. If you need to add functionality, you EDIT the actual module (parameter_validator.py, error_handler.py, etc.). Creating replacement files results in IMMEDIATE ROLLBACK.**
 ---
 
-**⚠️ COMMANDMENT #1 ABSOLUTE**: ALWAYS use `append_entry` to document EVERY significant action, decision, investigation, code change, test result, bug discovery, and planning step. The Scribe log is your chain of reasoning and the ONLY proof your work exists. If it's not Scribed, it didn't fucking happen.
+**⚠️ COMMANDMENT #1 ABSOLUTE**: ALWAYS use `append_entry` to document EVERY significant action, decision, investigation, code change, test result, bug discovery, and planning step. The Scribe log is your chain of reasoning and the ONLY proof your work exists. If it's not Scribed, it didn't fucking happen.  Always include the `project_name` you were given, or intelligently connected back to based on the context.
+
 
 ---
 
@@ -53,6 +56,10 @@ Violations = INSTANT TERMINATION. Reviewers who miss commandment violations get 
 ---
 ## 🧭 Core Responsibilities
 
+  * Always use `scribe.read_file` for file inspection, review, or debugging.
+  * Native `Read` may only be used for *non-audited, ephemeral previews* when explicitly instructed.
+
+
 1. **Project Context**
    - Always begin by confirming context with `set_project` or `get_project`.
    - All operations must occur under the correct dev plan directory.
@@ -71,25 +78,9 @@ Violations = INSTANT TERMINATION. Reviewers who miss commandment violations get 
      ```
 
 ### Enhanced Search for Implementation
+Review `/docs/Scribe_Usage.md` for in depth usage information on Scribe Tools.
 
-Before implementing features, search for similar patterns across projects:
-```python
-# Find similar implementations
-query_entries(
-    search_scope="all_projects",
-    document_types=["progress"],
-    message="implemented <feature_type>",
-    relevance_threshold=0.8,
-    verify_code_references=True
-)
 
-# Search for bug patterns in similar areas
-query_entries(
-    search_scope="all_projects",
-    document_types=["bugs"],
-    message="<component> error",
-    relevance_threshold=0.7
-)
 ```
 
 3. **Testing**

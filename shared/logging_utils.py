@@ -62,6 +62,14 @@ async def resolve_logging_context(
     if state_snapshot is None:
         state_snapshot = await server_module.state_manager.record_tool(tool_name)
 
+    if agent_id is None and hasattr(server_module, "get_agent_identity"):
+        try:
+            agent_identity = server_module.get_agent_identity()
+            if agent_identity:
+                agent_id = await agent_identity.get_or_create_agent_id()
+        except Exception:
+            agent_id = None
+
     project: Optional[Dict[str, Any]] = None
     recent_projects: List[str] = []
     exec_context = None
@@ -74,11 +82,73 @@ async def resolve_logging_context(
     # Primary path: session-scoped project resolution (project mode only).
     if exec_context and getattr(exec_context, "mode", None) == "project":
         try:
-            state = await server_module.state_manager.load()
-            session_project = state.get_session_project(getattr(exec_context, "session_id", None))
+            session_project = None
+            state = None
+            backend = getattr(server_module, "storage_backend", None)
+            if backend and hasattr(backend, "get_session_project"):
+                # Prefer stable_session_id for deterministic project resolution
+                session_key = getattr(exec_context, "stable_session_id", None) or getattr(exec_context, "session_id", None)
+                if session_key:
+                    project_name = await backend.get_session_project(session_key)
+                    # Debug logging
+                    from pathlib import Path
+                    from datetime import datetime, timezone
+                    debug_log = Path("/tmp/scribe_session_debug.log")
+                    with open(debug_log, "a") as f:
+                        f.write(f"\n=== get_session_project query ===\n")
+                        f.write(f"timestamp: {datetime.now(timezone.utc).isoformat()}\n")
+                        f.write(f"session_key: {session_key}\n")
+                        f.write(f"project_name from DB: {project_name}\n")
+                    if project_name:
+                        # Try database registry first (projects may not have JSON config files)
+                        import sqlite3
+                        from scribe_mcp.config.settings import settings
+                        try:
+                            with sqlite3.connect(settings.sqlite_path) as conn:
+                                conn.row_factory = sqlite3.Row
+                                row = conn.execute(
+                                    "SELECT name, repo_root, progress_log_path FROM scribe_projects WHERE name = ?",
+                                    (project_name,)
+                                ).fetchone()
+                                if row:
+                                    session_project = {
+                                        "name": row["name"],
+                                        "root": row["repo_root"],
+                                        "progress_log": row["progress_log_path"],
+                                    }
+                                    with open(debug_log, "a") as f:
+                                        f.write(f"session_project from scribe_projects table: {session_project.get('name')}\n")
+                                else:
+                                    # Fallback to JSON config files for legacy projects
+                                    from scribe_mcp.tools.project_utils import load_project_config
+                                    session_project = load_project_config(project_name)
+                                    with open(debug_log, "a") as f:
+                                        f.write(f"session_project from config: {session_project.get('name') if session_project else None}\n")
+                        except Exception as e:
+                            with open(debug_log, "a") as f:
+                                f.write(f"ERROR querying scribe_projects: {e}\n")
+                            # Fallback to JSON config on error
+                            from scribe_mcp.tools.project_utils import load_project_config
+                            session_project = load_project_config(project_name)
+            if not session_project:
+                state = await server_module.state_manager.load()
+                # Prefer stable_session_id for deterministic project resolution
+                session_key_fallback = getattr(exec_context, "stable_session_id", None) or getattr(exec_context, "session_id", None)
+                session_project = state.get_session_project(session_key_fallback)
+                # Debug logging
+                from pathlib import Path
+                from datetime import datetime, timezone
+                debug_log = Path("/tmp/scribe_session_debug.log")
+                with open(debug_log, "a") as f:
+                    f.write(f"\n=== get_session_project FALLBACK ===\n")
+                    f.write(f"timestamp: {datetime.now(timezone.utc).isoformat()}\n")
+                    f.write(f"session_key_fallback: {session_key_fallback}\n")
+                    f.write(f"session_project from state: {session_project.get('name') if session_project else None}\n")
             if session_project:
                 project = dict(session_project)
                 recent_projects = [project.get("name")] if project.get("name") else []
+                if state is None:
+                    state = await server_module.state_manager.load()
                 for name in state.recent_projects:
                     if name and name not in recent_projects:
                         recent_projects.append(name)
@@ -102,6 +172,12 @@ async def resolve_logging_context(
 
     # Sentinel mode must never resolve project context from global state.
     if exec_context and getattr(exec_context, "mode", None) == "sentinel":
+        if not recent_projects:
+            try:
+                state = await server_module.state_manager.load()
+                recent_projects = list(state.recent_projects)[:10]
+            except Exception:
+                recent_projects = []
         if require_project:
             raise ProjectResolutionError(
                 "Project resolution forbidden in sentinel mode.",
@@ -116,8 +192,24 @@ async def resolve_logging_context(
             agent_id=agent_id,
         )
 
-    # Final fallback: use the state's active project snapshot.
-    if not project:
+    # Project mode with an ExecutionContext should never fall back to global state.
+    if exec_context and getattr(exec_context, "mode", None) == "project" and not project:
+        if require_project:
+            raise ProjectResolutionError(
+                "No session-scoped project configured. Invoke set_project for this session.",
+                recent_projects,
+            )
+        return LoggingContext(
+            tool_name=tool_name,
+            project=None,
+            recent_projects=recent_projects,
+            state_snapshot=state_snapshot,
+            reminders=[],
+            agent_id=agent_id,
+        )
+
+    # Final fallback: use the state's active project snapshot (legacy/no context).
+    if not project and not exec_context:
         from scribe_mcp.tools.project_utils import load_active_project, load_project_config  # Lazy import.
 
         active_project, active_name, recent = await load_active_project(server_module.state_manager)

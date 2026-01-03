@@ -1277,6 +1277,7 @@ async def manage_docs(
                         project.get("name"),
                         project,
                         agent_id=agent_id,
+                        mirror_global=False,
                     )
                 except Exception as exc:
                     registry_warning = f"Registry update failed: {exc}"
@@ -1454,6 +1455,7 @@ async def manage_docs(
                     project.get("name"),
                     project,
                     agent_id=agent_id,
+                    mirror_global=False,
                 )
             except Exception as exc:
                 registry_warning = f"Registry update failed: {exc}"

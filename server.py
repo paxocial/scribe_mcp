@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
+import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Dict, Protocol, cast
 
@@ -99,7 +102,7 @@ state_manager = StateManager()
 storage_backend = create_storage_backend()
 agent_context_manager = None  # Will be initialized in startup
 agent_identity = None  # Will be initialized in startup
-router_context_manager = RouterContextManager()
+router_context_manager = RouterContextManager(storage_backend=storage_backend)
 _startup_complete = False
 
 if _MCP_AVAILABLE:
@@ -154,7 +157,115 @@ if _MCP_AVAILABLE:
                 raise ValueError(f"Unknown tool '{name}'")
 
             sentinel_only = {"append_event", "open_bug", "open_security", "link_fix"}
-            sentinel_allowed = sentinel_only | {"read_file", "query_entries"}
+            sentinel_allowed = sentinel_only | {"read_file", "query_entries", "read_recent", "set_project", "append_entry", "list_projects", "get_project"}
+
+            def derive_session_identity(exec_context, arguments: dict) -> tuple[str, dict]:
+                """Derive stable session identity from execution context.
+
+                Returns (identity_hash, identity_parts dict)
+                """
+                # 1. Canonicalize repo_root
+                repo_root = os.path.realpath(exec_context.repo_root)
+
+                # 2. Get mode and scope_key
+                mode = exec_context.mode  # "project" or "sentinel"
+                if mode == "sentinel":
+                    scope_key = exec_context.sentinel_day  # e.g., "2026-01-03"
+                else:
+                    scope_key = exec_context.execution_id  # UUID
+
+                # 3. Get agent_key (prefer stable ID, fallback to display_name)
+                agent_key = None
+                if exec_context.agent_identity:
+                    agent_key = (
+                        getattr(exec_context.agent_identity, 'id', None) or
+                        getattr(exec_context.agent_identity, 'instance_id', None) or
+                        exec_context.agent_identity.display_name
+                    )
+                if not agent_key:
+                    agent_key = arguments.get("agent") or "default"
+
+                # 4. Construct identity string
+                identity = f"{repo_root}:{mode}:{scope_key}:{agent_key}"
+
+                # 5. Hash it (full SHA-256, no truncation)
+                identity_hash = hashlib.sha256(identity.encode()).hexdigest()
+
+                return identity_hash, {
+                    "repo_root": repo_root,
+                    "mode": mode,
+                    "scope_key": scope_key,
+                    "agent_key": agent_key,
+                }
+
+            def derive_session_identity_preview(context_payload: dict, arguments: dict) -> tuple[str, dict]:
+                """Preview stable session identity before ExecutionContext exists.
+
+                Uses context_payload instead of exec_context so we can derive identity
+                BEFORE building ExecutionContext.
+
+                Returns (identity_hash, identity_parts dict)
+                """
+                from datetime import datetime, timezone
+                import uuid
+
+                # 1. Canonicalize repo_root
+                repo_root = os.path.realpath(context_payload.get("repo_root", ""))
+
+                # 2. Get mode and scope_key
+                mode = context_payload.get("mode", "sentinel")
+                if mode == "sentinel":
+                    # For sentinel mode, derive scope_key from timestamp
+                    timestamp_utc = context_payload.get("timestamp_utc")
+                    if not timestamp_utc:
+                        timestamp_utc = datetime.now(timezone.utc).isoformat()
+                    scope_key = timestamp_utc.split("T")[0]  # e.g., "2026-01-03"
+                else:
+                    # For project mode, use transport_session_id (stable across tool calls)
+                    scope_key = context_payload.get("transport_session_id") or context_payload.get("session_id") or str(uuid.uuid4())
+
+                # 3. Get agent_key from arguments
+                agent_key = arguments.get("agent") or "default"
+
+                # 4. Construct identity string
+                identity = f"{repo_root}:{mode}:{scope_key}:{agent_key}"
+
+                # 5. Hash it (full SHA-256, no truncation)
+                identity_hash = hashlib.sha256(identity.encode()).hexdigest()
+
+                return identity_hash, {
+                    "repo_root": repo_root,
+                    "mode": mode,
+                    "scope_key": scope_key,
+                    "agent_key": agent_key,
+                }
+
+            def _derive_transport_session_id() -> str | None:
+                """Extract transport session ID from MCP request context.
+
+                This is a backwards-compatible fallback that checks headers/meta
+                for client-provided session identifiers. The stable session identity
+                is now derived separately using derive_session_identity().
+                """
+                try:
+                    request_context = app.request_context
+                except Exception:
+                    return None
+                if not request_context:
+                    return None
+                request = getattr(request_context, "request", None)
+                if request is not None:
+                    headers = getattr(request, "headers", None)
+                    if headers:
+                        header_val = headers.get("mcp-session-id")
+                        if header_val:
+                            return str(header_val)
+                meta = getattr(request_context, "meta", None)
+                client_id = getattr(meta, "client_id", None) if meta else None
+                if client_id:
+                    return str(client_id)
+                # No more id(session) fallback - stable identity derived elsewhere
+                return None
 
             context_payload = arguments.pop("context", None)
             if context_payload is None and "context" in kwargs:
@@ -163,18 +274,63 @@ if _MCP_AVAILABLE:
                 context_payload = {}
 
             if not context_payload.get("repo_root"):
-                repo_root = None
-                try:
-                    from scribe_mcp.tools.project_utils import load_active_project  # Lazy import.
-                    active_project, _, _ = await load_active_project(state_manager)
-                    if active_project:
-                        repo_root = active_project.get("root")
-                except Exception:
-                    repo_root = None
-                context_payload["repo_root"] = repo_root or str(settings.project_root)
+                context_payload["repo_root"] = str(settings.project_root)
+
+            if not context_payload.get("session_id") and not context_payload.get("transport_session_id"):
+                transport_fallback = (
+                    kwargs.get("session_id")
+                    or kwargs.get("client_id")
+                    or kwargs.get("connection_id")
+                )
+                if not transport_fallback:
+                    transport_fallback = _derive_transport_session_id()
+                if not transport_fallback:
+                    # No MCP session context - generate fallback based on process instance
+                    # This will be converted to stable session via derive_session_identity()
+                    transport_fallback = f"process:{router_context_manager._process_instance_id}"
+                if transport_fallback:
+                    context_payload["transport_session_id"] = str(transport_fallback)
+
+            if not context_payload.get("session_id") and context_payload.get("transport_session_id"):
+                backend = storage_backend
+                if backend and hasattr(backend, "get_session_by_transport"):
+                    # NO SILENT ERRORS - let it fail loudly
+                    existing = await backend.get_session_by_transport(
+                        str(context_payload["transport_session_id"])
+                    )
+                    if existing and existing.get("session_id"):
+                        context_payload["session_id"] = existing["session_id"]
+                if not context_payload.get("session_id"):
+                    # NO SILENT ERRORS - let it fail loudly
+                    session_id = await router_context_manager.get_or_create_session_id(
+                        context_payload["transport_session_id"]
+                    )
+                    context_payload["session_id"] = session_id
 
             if context_payload.get("mode") not in {"sentinel", "project"}:
-                context_payload["mode"] = "sentinel" if name in sentinel_only else "project"
+                # Project-scoped tools that should always run in project mode
+                project_tools = {"set_project", "get_project", "append_entry", "read_recent", "query_entries", "rotate_log", "manage_docs", "generate_doc_templates"}
+
+                if name in project_tools:
+                    # Force project mode for project-scoped tools
+                    context_payload["mode"] = "project"
+                else:
+                    # For other tools, query existing session mode
+                    session_mode = None
+                    if context_payload.get("session_id"):
+                        backend = storage_backend
+                        if backend and hasattr(backend, "get_session_mode"):
+                            # NO SILENT ERRORS - let it fail loudly
+                            session_mode = await backend.get_session_mode(context_payload.get("session_id"))
+                        if session_mode is None:
+                            # NO SILENT ERRORS - let it fail loudly
+                            state = await state_manager.load()
+                            session_mode = state.get_session_mode(context_payload.get("session_id"))
+                    # Default to sentinel to avoid implicit project scope or audit pollution.
+                    context_payload["mode"] = session_mode or "sentinel"
+
+            if not context_payload.get("session_id") and not context_payload.get("transport_session_id"):
+                raise ValueError("ExecutionContext requires context.session_id or context.transport_session_id")
 
             if not context_payload.get("intent"):
                 context_payload["intent"] = f"tool:{name}"
@@ -188,6 +344,61 @@ if _MCP_AVAILABLE:
                     affected = [str(project_hint)]
             context_payload["affected_dev_projects"] = affected
 
+            backend = storage_backend
+            if backend and hasattr(backend, "upsert_session"):
+                try:
+                    await backend.upsert_session(
+                        session_id=context_payload.get("session_id"),
+                        transport_session_id=context_payload.get("transport_session_id"),
+                        repo_root=context_payload.get("repo_root"),
+                        mode=context_payload.get("mode"),
+                    )
+                except Exception:
+                    pass
+
+            # PHASE 1 INTEGRATION: Derive stable session BEFORE building ExecutionContext
+            import traceback
+            debug_log = Path("/tmp/scribe_session_debug.log")
+            with open(debug_log, "a") as f:
+                f.write(f"\n=== {datetime.now(timezone.utc).isoformat()} ===\n")
+                f.write(f"Tool: {name}\n")
+                f.write(f"context_payload: {context_payload}\n")
+
+            identity_hash, identity_parts = derive_session_identity_preview(context_payload, arguments)
+            with open(debug_log, "a") as f:
+                f.write(f"identity_hash: {identity_hash}\n")
+                f.write(f"identity_parts: {identity_parts}\n")
+
+            stable_session_id = None
+            with open(debug_log, "a") as f:
+                f.write(f"backend: {backend}\n")
+                f.write(f"has method: {hasattr(backend, 'get_or_create_agent_session') if backend else False}\n")
+
+            if backend and hasattr(backend, "get_or_create_agent_session"):
+                with open(debug_log, "a") as f:
+                    f.write(f"Calling get_or_create_agent_session...\n")
+                try:
+                    # NO SILENT ERRORS - let it fail loudly so we can debug
+                    stable_session_id = await backend.get_or_create_agent_session(
+                        identity_key=identity_hash,
+                        agent_name=identity_parts["agent_key"],  # For display
+                        agent_key=identity_parts["agent_key"],
+                        repo_root=identity_parts["repo_root"],
+                        mode=identity_parts["mode"],
+                        scope_key=identity_parts["scope_key"],
+                    )
+                    with open(debug_log, "a") as f:
+                        f.write(f"stable_session_id: {stable_session_id}\n")
+                except Exception as e:
+                    with open(debug_log, "a") as f:
+                        f.write(f"ERROR: {e}\n")
+                        f.write(f"Traceback:\n{traceback.format_exc()}\n")
+                    raise
+
+            # Add stable_session_id to context_payload BEFORE building ExecutionContext
+            if stable_session_id:
+                context_payload["stable_session_id"] = stable_session_id
+
             exec_context = await router_context_manager.build_execution_context(context_payload)
 
             if exec_context.mode == "sentinel" and name not in sentinel_allowed:
@@ -197,7 +408,7 @@ if _MCP_AVAILABLE:
                     tool_name=name,
                 )
                 raise ValueError(f"Tool '{name}' not allowed in sentinel mode")
-            if exec_context.mode == "project" and name in sentinel_only:
+            if exec_context.mode == "project" and name in sentinel_only and name != "append_event":
                 raise ValueError(f"Tool '{name}' not allowed in project mode")
 
             token = router_context_manager.set_current(exec_context)
