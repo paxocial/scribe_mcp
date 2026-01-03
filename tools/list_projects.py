@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from scribe_mcp import server as server_module
@@ -46,6 +47,86 @@ _LIST_PROJECTS_HELPER = _ListProjectsHelper()
 _PROJECT_REGISTRY = ProjectRegistry()
 
 
+async def _gather_doc_info(project: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Gather document information for a project (for detail view).
+
+    Args:
+        project: Project dict with name, root, progress_log
+
+    Returns:
+        Dict with document information:
+        {
+            "architecture": {"exists": True, "lines": 1274, "modified": False},
+            "phase_plan": {"exists": True, "lines": 542, "modified": False},
+            "checklist": {"exists": True, "lines": 356, "modified": False},
+            "progress": {"exists": True, "entries": 298},
+            "custom": {
+                "research_files": 3,
+                "bugs_present": False,
+                "jsonl_files": ["TOOL_LOG.jsonl"]
+            }
+        }
+    """
+    from scribe_mcp.utils.response import default_formatter
+
+    # Extract dev plan directory from progress_log path
+    progress_log = project.get('progress_log', '')
+    if not progress_log or not Path(progress_log).exists():
+        return {}
+
+    # Get dev plan directory
+    dev_plan_dir = Path(progress_log).parent
+
+    result = {}
+
+    # Check standard documents
+    arch_file = dev_plan_dir / "ARCHITECTURE_GUIDE.md"
+    if arch_file.exists():
+        result["architecture"] = {
+            "exists": True,
+            "lines": default_formatter._get_doc_line_count(arch_file),
+            "modified": False  # TODO: Check against registry hashes if needed
+        }
+
+    phase_file = dev_plan_dir / "PHASE_PLAN.md"
+    if phase_file.exists():
+        result["phase_plan"] = {
+            "exists": True,
+            "lines": default_formatter._get_doc_line_count(phase_file),
+            "modified": False
+        }
+
+    checklist_file = dev_plan_dir / "CHECKLIST.md"
+    if checklist_file.exists():
+        result["checklist"] = {
+            "exists": True,
+            "lines": default_formatter._get_doc_line_count(checklist_file),
+            "modified": False
+        }
+
+    # Progress log - count entries not lines
+    prog_file = Path(progress_log)
+    if prog_file.exists():
+        # Count entries by looking for emoji markers
+        try:
+            with open(prog_file, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+                # Count lines starting with '[' (emoji markers)
+                entry_count = sum(1 for line in content.split('\n') if line.strip().startswith('['))
+            result["progress"] = {
+                "exists": True,
+                "entries": entry_count
+            }
+        except:
+            result["progress"] = {"exists": True, "entries": 0}
+
+    # Detect custom content
+    result["custom"] = default_formatter._detect_custom_content(dev_plan_dir)
+
+    return result
+
+
 @app.tool()
 async def list_projects(
     limit: Optional[int] = 5,  # Changed default to 5 for context safety
@@ -59,6 +140,7 @@ async def list_projects(
     tags: Optional[List[str]] = None,
     order_by: Optional[str] = None,
     direction: str = "desc",
+    format: str = "structured",  # New parameter for output format
 ) -> Dict[str, Any]:
     """Return projects registered in the database or state cache with intelligent filtering.
 
@@ -74,9 +156,11 @@ async def list_projects(
         tags: Optional list of tags; projects matching any tag are included
         order_by: Optional sort field: created_at|last_entry_at|last_access_at|total_entries
         direction: Sort direction ('asc' or 'desc') when order_by is provided
+        format: Output format ('readable', 'structured', 'compact') (default: 'structured')
 
     Returns:
-        Projects list with intelligent filtering, pagination, and context safety
+        Projects list with intelligent filtering, pagination, and context safety.
+        For readable format: 3-way routing (0 matches → empty state, 1 → detail, multiple → table)
     """
     state_snapshot = await server_module.state_manager.record_tool("list_projects")
     agent_identity = server_module.get_agent_identity()
@@ -283,6 +367,99 @@ async def list_projects(
     total_available = context_response["total_available"]
     filtered_flag = context_response["filtered"]
 
+    # 3-WAY ROUTING for readable format
+    if format == "readable":
+        from scribe_mcp.utils.response import default_formatter
+
+        filtered_count = len(formatted_projects)
+
+        if filtered_count == 0:
+            # Route 1: No matches - helpful empty state
+            filter_info = {
+                "name": filter,
+                "status": status,
+                "tags": tags
+            }
+            readable_content = default_formatter.format_no_projects_found(filter_info)
+
+            # Return via finalize_tool_response for consistency
+            response = {
+                "ok": True,
+                "projects": [],
+                "count": 0,
+                "readable_content": readable_content,
+                "active_project": current_name
+            }
+            response = _LIST_PROJECTS_HELPER.apply_context_payload(response, context)
+            return await default_formatter.finalize_tool_response(response, format="readable", tool_name="list_projects")
+
+        elif filtered_count == 1:
+            # Route 2: Single match - deep dive detail view
+            # Use original project from projects_list (before formatting)
+            project = context_response["items"][0]
+
+            # Gather detailed info
+            registry_info = None
+            try:
+                registry_info = _PROJECT_REGISTRY.get_project(project["name"])
+            except Exception:
+                pass
+
+            docs_info = await _gather_doc_info(project)
+
+            readable_content = default_formatter.format_project_detail(project, registry_info, docs_info)
+
+            response = {
+                "ok": True,
+                "projects": formatted_projects,
+                "count": 1,
+                "readable_content": readable_content,
+                "active_project": current_name
+            }
+            response = _LIST_PROJECTS_HELPER.apply_context_payload(response, context)
+            return await default_formatter.finalize_tool_response(response, format="readable", tool_name="list_projects")
+
+        else:
+            # Route 3: Multiple matches - paginated table view
+            # Calculate total_pages from pagination info
+            total_pages = (pagination_info["total_count"] + pagination_info["page_size"] - 1) // pagination_info["page_size"]
+
+            pagination_info_dict = {
+                "page": pagination_info["page"],
+                "page_size": pagination_info["page_size"],
+                "total_count": pagination_info["total_count"],
+                "total_pages": total_pages,
+                "has_next": pagination_info.get("has_next", False),
+                "has_prev": pagination_info.get("has_prev", False)
+            }
+            filter_info = {
+                "name": filter,
+                "status": status,
+                "tags": tags,
+                "order_by": order_by,
+                "direction": direction
+            }
+
+            # Pass original projects (before formatting) for richer table display
+            readable_content = default_formatter.format_projects_table(
+                context_response["items"],
+                current_name,
+                pagination_info_dict,
+                filter_info
+            )
+
+            response = {
+                "ok": True,
+                "projects": formatted_projects,
+                "count": filtered_count,
+                "pagination": pagination_info,
+                "readable_content": readable_content,
+                "active_project": current_name
+            }
+            response = _LIST_PROJECTS_HELPER.apply_context_payload(response, context)
+            return await default_formatter.finalize_tool_response(response, format="readable", tool_name="list_projects")
+
+    # For structured/compact formats, continue with existing logic
     token_check = context_manager.token_guard.check_limits(
         {"projects": formatted_projects, "count": len(formatted_projects)}
     )

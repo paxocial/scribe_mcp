@@ -4,6 +4,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+
+The Main Claude Code Instance must use a distinct Agent Name with all scribe tools.  agent=Orchestrator
+
+All Subagents (And OpenAI Codex) must use their own agent names.    For session concurrency, Each agent name should be unique.   Coder-9289 as an example.   Or Coder A, B and C.
+
+
 ---
 
 ## 🎯 ACTIVE PROJECT ORCHESTRATION WORKFLOW
@@ -13,6 +19,61 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 > **Protocol**: Research → Architect → Review → Code → Review
 
 ### Protocol Sequence (Mandatory)
+
+---
+
+## 🔒 **Directive: File Reading Priority (Scribe MCP)**
+
+**MANDATORY RULE — NO EXCEPTIONS UNLESS EXPLICITLY OVERRIDDEN**
+
+> **Agents MUST prioritize the Scribe MCP `read_file` tool over any basic or native `read` tool when inspecting repository files.**
+
+### **Rationale**
+
+The Scribe MCP `read_file` tool provides:
+
+* Auditable access history
+* Stable, human-readable formatting (line numbers, headers, metadata)
+* File identity verification (sha256, size, encoding)
+* Project and context reminders
+* Chunk-aware reading for large files
+
+Basic read tools lack auditability, provenance, and contextual framing and **must not be used for primary file inspection**.
+
+---
+
+### **Required Behavior**
+
+* **Claude Code**:
+
+  * Always use `scribe.read_file` for file inspection, review, or debugging.
+  * Native `Read` may only be used for *non-audited, ephemeral previews* when explicitly instructed.
+
+* **Codex / Other Agents**:
+
+  * Default to `scribe.read_file` for *all* file reads.
+  * Treat native read tools as **fallback-only** if Scribe MCP is unavailable.
+
+---
+
+### **Prohibited Behavior**
+
+* ❌ Using native `Read` when Scribe MCP is available
+* ❌ Inspecting files without generating an audit trail
+* ❌ Returning raw JSON blobs or escaped newline output when readable output is required
+
+---
+
+### **Exception Clause**
+
+An agent may bypass this directive **only if**:
+
+1. The user explicitly instructs otherwise, **or**
+2. Scribe MCP is unavailable or errors irrecoverably
+
+In such cases, the agent **must state the exception explicitly**.
+
+---
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -86,7 +147,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - Log your intent only after the tool call succeeds or fails.
   - Confirmation flags (`confirm`, `dry_run`, etc.) must be passed as actual tool parameters.
 
-  **⚠️ COMMANDMENT #0: ALWAYS CHECK PROGRESS LOG FIRST**: Before starting ANY work, ALWAYS read `docs/dev_plans/[current_project]/PROGRESS_LOG.md` to understand what has been done, what mistakes were made, and what the current state is. The progress log is the source of truth for project context.
+  **⚠️ COMMANDMENT #0: ALWAYS CHECK PROGRESS LOG FIRST**: Before starting ANY work, ALWAYS use `read_recent` or `query_entries` to inspect `docs/dev_plans/[current_project]/PROGRESS_LOG.md` (do not open the full log directly). Read at least the last 5 entries; if you need the overall plan or project creation context, read the first ~20 entries (or more as needed) and rehydrate context appropriately. Use `query_entries` for targeted history. The progress log is the source of truth for project context.
 
 **⚠️ COMMANDMENT #0.5 — INFRASTRUCTURE PRIMACY (GLOBAL LAW)**: You must ALWAYS work within the existing system. NEVER create parallel or replacement files (e.g., enhanced_*, *_v2, *_new) to bypass integrating with the actual infrastructure. You must modify, extend, or refactor the existing component directly. Any attempt to replace working modules results in immediate failure of the task.
 ---
@@ -327,6 +388,103 @@ manage_docs(
 
 ---
 
+## ✅ CORRECT manage_docs USAGE PATTERNS (REQUIRED READING)
+
+**Critical**: All agents MUST follow these exact patterns when using `manage_docs`. Incorrect parameter combinations will fail.
+
+### 📋 Action Types & Required Parameters
+
+#### **1. create_research_doc** - Create New Research Document
+
+**✅ CORRECT:**
+```python
+await manage_docs(
+    action="create_research_doc",
+    doc="research",  # REQUIRED (always use "research")
+    doc_name="RESEARCH_CONTEXT_HYDRATION_20260103",  # REQUIRED
+    metadata={  # OPTIONAL
+        "research_goal": "Design context hydration for list/get/set project tools",
+        "confidence_areas": ["tool_behavior", "output_formats"],
+        "priority": "high"
+    }
+)
+```
+
+**❌ INCORRECT:**
+```python
+# Missing doc and doc_name parameters
+await manage_docs(
+    action="create_research_doc",
+    metadata={"research_goal": "..."}  # FAILS - doc and doc_name are REQUIRED
+)
+```
+
+**Creates:** `.scribe/docs/dev_plans/<project>/research/RESEARCH_*.md` + auto-updates INDEX.md
+
+#### **2. create_bug_report** - Create Structured Bug Report
+
+**✅ CORRECT:**
+```python
+await manage_docs(
+    action="create_bug_report",
+    metadata={  # REQUIRED
+        "category": "infrastructure",  # infrastructure|logic|database|api|ui|misc
+        "slug": "session_isolation_bug",
+        "severity": "high",  # low|medium|high|critical
+        "title": "Session isolation failing in concurrent scenarios",
+        "component": "execution_context"
+    }
+)
+```
+
+**Creates:** `.scribe/docs/bugs/<category>/<YYYY-MM-DD>_<slug>/report.md` + auto-updates INDEX.md
+
+### 🚨 Common Mistakes to Avoid
+
+**❌ Missing Required Parameters:**
+```python
+# WRONG: Missing doc_name
+manage_docs(action="create_research_doc", metadata={"research_goal": "..."})  # FAILS
+
+# CORRECT:
+manage_docs(action="create_research_doc", doc_name="RESEARCH_TOPIC_20260103", metadata={...})
+```
+
+**❌ Wrong Document Key:**
+```python
+# WRONG: Invalid doc key
+manage_docs(action="replace_section", doc="unknown_doc", ...)  # FAILS
+
+# CORRECT: Use registered keys
+manage_docs(action="replace_section", doc="architecture", ...)  # Valid
+```
+
+**❌ Missing Section Anchors:**
+```python
+# WRONG: Section doesn't exist
+manage_docs(action="replace_section", doc="architecture", section="nonexistent", ...)  # FAILS
+
+# CORRECT: List valid sections first
+manage_docs(action="list_sections", doc="architecture")  # Returns valid section IDs
+```
+
+### 📚 Quick Reference by Use Case
+
+| Use Case | Action | Key Parameters |
+|----------|--------|----------------|
+| Create research doc | `create_research_doc` | `doc_name` (required) + `metadata` (optional) |
+| Create bug report | `create_bug_report` | `metadata.category`, `metadata.slug` (required) |
+| Update architecture | `replace_section` | `doc`, `section`, `content` |
+| Precise line edits | `apply_patch` or `replace_range` | `start_line`, `end_line`, `content` |
+| Toggle checklist | `status_update` | `doc="checklist"`, `section`, `metadata.status` |
+| Search docs | `search` | `doc="*"`, `metadata.query`, `metadata.search_mode="semantic"` |
+
+**⚠️ ENFORCEMENT**: Any agent using incorrect `manage_docs` patterns will have their work rejected during Review phase.
+
+**📖 Full Reference**: See `docs/Scribe_Usage.md` for complete documentation of all 11 action types.
+
+---
+
 ## 🚀 QUICK START (v2.1.1)
 
 **1. Setup**:
@@ -395,6 +553,12 @@ from scribe_mcp.storage.sqlite import SQLiteStorage
 - `read_file(path, mode)` - Repo-scoped file access
 - `scribe_doctor()` - Diagnostics
 - `manage_docs(action="search")` - Semantic search
+
+**Readable Output Formatting** (v2.1.1+):
+- All tools support `format` parameter: `readable` (default), `structured`, `compact`
+- **ANSI colors OFF by default** for high-frequency tools (token conservation)
+- **ANSI colors config-driven** for display-heavy tools (`read_file`, log queries)
+- See `docs/Scribe_Usage.md#readable-output-formatting-v211` for implementation details
 
 ---
 

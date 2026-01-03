@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -174,16 +175,33 @@ class SQLiteStorage(StorageBackend):
         meta: Optional[Dict[str, Any]],
         raw_line: str,
         sha256: str,
+        priority: Optional[str] = None,
+        category: Optional[str] = None,
+        tags: Optional[str] = None,
+        confidence: Optional[float] = None,
     ) -> None:
         await self._initialise()
         ts_iso = ts.isoformat()
         meta_json = json.dumps(meta or {}, sort_keys=True)
+        # Extract new fields from meta if not explicitly provided
+        if priority is None and meta:
+            priority = meta.get("priority", "medium")
+        elif priority is None:
+            priority = "medium"
+        if category is None and meta:
+            category = meta.get("category")
+        if tags is None and meta:
+            tags = meta.get("tags")
+        if confidence is None and meta:
+            confidence = meta.get("confidence", 1.0)
+        elif confidence is None:
+            confidence = 1.0
         async with self._write_lock:
             await self._execute(
                 """
                 INSERT OR IGNORE INTO scribe_entries
-                    (id, project_id, ts, emoji, agent, message, meta, raw_line, sha256, ts_iso)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    (id, project_id, ts, emoji, agent, message, meta, raw_line, sha256, ts_iso, priority, category, tags, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     entry_id,
@@ -196,6 +214,10 @@ class SQLiteStorage(StorageBackend):
                     raw_line,
                     sha256,
                     ts_iso,
+                    priority,
+                    category,
+                    tags,
+                    confidence,
                 ),
             )
             await self._execute(
@@ -325,13 +347,51 @@ class SQLiteStorage(StorageBackend):
             clauses.append("emoji = ?")
             params.append(emoji)
 
+        # Add priority filter
+        priority = filters.get("priority")
+        if priority:
+            placeholders = ",".join("?" * len(priority))
+            clauses.append(f"priority IN ({placeholders})")
+            params.extend(priority)
+
+        # Add category filter
+        category = filters.get("category")
+        if category:
+            placeholders = ",".join("?" * len(category))
+            clauses.append(f"category IN ({placeholders})")
+            params.extend(category)
+
+        # Add confidence filter
+        min_confidence = filters.get("min_confidence")
+        if min_confidence is not None:
+            clauses.append("confidence >= ?")
+            params.append(min_confidence)
+
         where_clause = " AND ".join(clauses)
+
+        # Build ORDER BY clause
+        priority_sort = filters.get("priority_sort", False)
+        if priority_sort:
+            order_by = """
+                ORDER BY
+                    CASE priority
+                        WHEN 'critical' THEN 0
+                        WHEN 'high' THEN 1
+                        WHEN 'medium' THEN 2
+                        WHEN 'low' THEN 3
+                        ELSE 4
+                    END ASC,
+                    ts_iso DESC
+            """
+        else:
+            order_by = "ORDER BY ts_iso DESC"
+
         rows = await self._fetchall(
             f"""
-            SELECT id, ts, emoji, agent, message, meta, raw_line
+            SELECT id, ts, emoji, agent, message, meta, raw_line, priority, category, confidence
             FROM scribe_entries
             WHERE {where_clause}
-            ORDER BY ts_iso DESC
+            {order_by}
             LIMIT ? OFFSET ?;
             """,
             (*params, limit, offset),
@@ -348,6 +408,9 @@ class SQLiteStorage(StorageBackend):
                     "message": row["message"],
                     "meta": meta_value,
                     "raw_line": row["raw_line"],
+                    "priority": row["priority"] if "priority" in row.keys() else "medium",
+                    "category": row["category"] if "category" in row.keys() else None,
+                    "confidence": row["confidence"] if "confidence" in row.keys() else 1.0,
                 }
             )
         return results
@@ -454,6 +517,26 @@ class SQLiteStorage(StorageBackend):
             clauses.append("emoji = ?")
             params.append(emoji)
 
+        # Add priority filter
+        priority = filters.get("priority")
+        if priority:
+            placeholders = ",".join("?" * len(priority))
+            clauses.append(f"priority IN ({placeholders})")
+            params.extend(priority)
+
+        # Add category filter
+        category = filters.get("category")
+        if category:
+            placeholders = ",".join("?" * len(category))
+            clauses.append(f"category IN ({placeholders})")
+            params.extend(category)
+
+        # Add confidence filter
+        min_confidence = filters.get("min_confidence")
+        if min_confidence is not None:
+            clauses.append("confidence >= ?")
+            params.append(min_confidence)
+
         where_clause = " AND ".join(clauses)
         row = await self._fetchone(
             f"""
@@ -553,6 +636,10 @@ class SQLiteStorage(StorageBackend):
             if self._initialised:
                 return
             await asyncio.to_thread(self._path.parent.mkdir, parents=True, exist_ok=True)
+            # Migration: Drop old agent_sessions table if it has legacy schema
+            # (old schema had 'id' column, new schema has 'session_id')
+            await self._migrate_agent_sessions_schema()
+
             await self._execute_many(
                 [
                     """
@@ -592,16 +679,26 @@ class SQLiteStorage(StorageBackend):
                     """,
                     """
                     CREATE TABLE IF NOT EXISTS agent_sessions (
-                        id TEXT PRIMARY KEY,
-                        agent_id TEXT NOT NULL,
-                        started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        last_active_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        status TEXT NOT NULL CHECK (status IN ('active','expired')) DEFAULT 'active',
-                        metadata TEXT
+                        session_id TEXT PRIMARY KEY,
+                        identity_key TEXT UNIQUE NOT NULL,
+                        agent_name TEXT NOT NULL,
+                        agent_key TEXT NOT NULL,
+                        repo_root TEXT NOT NULL,
+                        mode TEXT NOT NULL,
+                        scope_key TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        expires_at TIMESTAMP
                     );
                     """,
                     """
-                    CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent ON agent_sessions(agent_id);
+                    CREATE INDEX IF NOT EXISTS idx_agent_sessions_identity ON agent_sessions(identity_key);
+                    """,
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_agent_sessions_last_active ON agent_sessions(last_active_at);
+                    """,
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_agent_sessions_expires ON agent_sessions(expires_at);
                     """,
                     """
                     CREATE TABLE IF NOT EXISTS agent_projects (
@@ -638,6 +735,40 @@ class SQLiteStorage(StorageBackend):
                     """,
                     """
                     CREATE INDEX IF NOT EXISTS idx_agent_project_events_created_at ON agent_project_events(created_at);
+                    """,
+                    """
+                    CREATE TABLE IF NOT EXISTS scribe_sessions (
+                        session_id TEXT PRIMARY KEY,
+                        transport_session_id TEXT,
+                        agent_id TEXT,
+                        repo_root TEXT,
+                        mode TEXT NOT NULL CHECK (mode IN ('sentinel','project')) DEFAULT 'sentinel',
+                        started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        last_active_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+                    """,
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_scribe_sessions_transport ON scribe_sessions(transport_session_id);
+                    """,
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_scribe_sessions_agent ON scribe_sessions(agent_id);
+                    """,
+                    """
+                    CREATE TABLE IF NOT EXISTS session_projects (
+                        session_id TEXT PRIMARY KEY,
+                        project_name TEXT,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY(project_name) REFERENCES scribe_projects(name) ON DELETE SET NULL
+                    );
+                    """,
+                    """
+                    CREATE TABLE IF NOT EXISTS agent_recent_projects (
+                        agent_id TEXT NOT NULL,
+                        project_name TEXT NOT NULL,
+                        last_access_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY(agent_id, project_name),
+                        FOREIGN KEY(project_name) REFERENCES scribe_projects(name) ON DELETE CASCADE
+                    );
                     """,
                     """
                     CREATE TABLE IF NOT EXISTS doc_changes (
@@ -888,6 +1019,11 @@ class SQLiteStorage(StorageBackend):
             await self._ensure_column("scribe_projects", "last_status_change", "TEXT")
             await self._ensure_column("scribe_projects", "tags", "TEXT")
             await self._ensure_column("scribe_projects", "meta", "TEXT")
+            # Ensure scribe_entries has metadata columns for categorization and prioritization
+            await self._ensure_column("scribe_entries", "priority", "TEXT DEFAULT 'medium'")
+            await self._ensure_column("scribe_entries", "category", "TEXT")
+            await self._ensure_column("scribe_entries", "tags", "TEXT")
+            await self._ensure_column("scribe_entries", "confidence", "REAL DEFAULT 1.0")
             await self._migrate_document_sections()
             await self._ensure_column("document_changes", "project_root", "TEXT")
             await self._ensure_column("document_changes", "file_path", "TEXT")
@@ -900,6 +1036,10 @@ class SQLiteStorage(StorageBackend):
             await self._ensure_index("CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_status_file_path ON sync_status(project_root, file_path);")
             await self._ensure_index("CREATE INDEX IF NOT EXISTS idx_agent_report_cards_project_agent ON agent_report_cards(project_id, agent_name);")
             await self._ensure_index("CREATE INDEX IF NOT EXISTS idx_agent_report_cards_stage ON agent_report_cards(stage);")
+            # Performance indexes for scribe_entries metadata columns
+            await self._ensure_index("CREATE INDEX IF NOT EXISTS idx_entries_priority_ts ON scribe_entries(priority, ts_iso DESC);")
+            await self._ensure_index("CREATE INDEX IF NOT EXISTS idx_entries_category_ts ON scribe_entries(category, ts_iso DESC);")
+            await self._ensure_index("CREATE INDEX IF NOT EXISTS idx_entries_project_priority_category ON scribe_entries(project_id, priority, category, ts_iso DESC);")
             self._initialised = True
 
     async def _migrate_document_sections(self) -> None:
@@ -966,6 +1106,32 @@ class SQLiteStorage(StorageBackend):
             existing = {row["name"] for row in cursor.fetchall()}
             if column not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition};")
+                conn.commit()
+        finally:
+            conn.close()
+
+    async def _migrate_agent_sessions_schema(self) -> None:
+        """Migrate agent_sessions from legacy schema to new stable identity schema."""
+        await asyncio.to_thread(self._migrate_agent_sessions_schema_sync)
+
+    def _migrate_agent_sessions_schema_sync(self) -> None:
+        """Drop old agent_sessions table if it has legacy schema (id column instead of session_id)."""
+        conn = self._connect()
+        try:
+            # Check if table exists
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_sessions';"
+            )
+            if not cursor.fetchone():
+                return  # Table doesn't exist, nothing to migrate
+
+            # Check columns - old schema has 'id', new schema has 'session_id'
+            cursor = conn.execute("PRAGMA table_info(agent_sessions);")
+            columns = {row["name"] for row in cursor.fetchall()}
+
+            if "id" in columns and "session_id" not in columns:
+                # Old schema detected - drop table so it can be recreated with new schema
+                conn.execute("DROP TABLE agent_sessions;")
                 conn.commit()
         finally:
             conn.close()
@@ -1294,20 +1460,141 @@ class SQLiteStorage(StorageBackend):
 
     # Agent session and project context management methods
     async def upsert_agent_session(self, agent_id: str, session_id: str, metadata: Optional[Dict[str, Any]]) -> None:
-        """Create or update an agent session."""
+        """Create or update an agent session (legacy compatibility shim).
+
+        Maps old parameters to new stable session schema:
+        - session_id → session_id
+        - agent_id → agent_name, agent_key
+        - identity_key = sha256(agent_id:session_id:legacy)
+        """
         await self._initialise()
-        metadata_json = json.dumps(metadata or {}) if metadata else None
+        import hashlib
+        # Generate identity_key for legacy sessions
+        identity_string = f"{agent_id}:{session_id}:legacy"
+        identity_key = hashlib.sha256(identity_string.encode()).hexdigest()
+
         async with self._write_lock:
             await self._execute(
                 """
-                INSERT INTO agent_sessions (id, agent_id, started_at, last_active_at, status, metadata)
-                VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'active', ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    last_active_at = CURRENT_TIMESTAMP,
-                    status = 'active',
-                    metadata = excluded.metadata;
+                INSERT INTO agent_sessions (session_id, identity_key, agent_name, agent_key, repo_root, mode, scope_key)
+                VALUES (?, ?, ?, ?, 'legacy', 'project', 'legacy')
+                ON CONFLICT(session_id) DO UPDATE SET
+                    last_active_at = CURRENT_TIMESTAMP;
                 """,
-                (session_id, agent_id, metadata_json)
+                (session_id, identity_key, agent_id, agent_id)
+            )
+
+    async def upsert_session(
+        self,
+        *,
+        session_id: str,
+        transport_session_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        repo_root: Optional[str] = None,
+        mode: Optional[str] = None,
+    ) -> None:
+        """Create or update a router session record."""
+        await self._initialise()
+        mode_value = mode if mode in ("sentinel", "project") else "sentinel"
+        async with self._write_lock:
+            await self._execute(
+                """
+                INSERT INTO scribe_sessions (
+                    session_id,
+                    transport_session_id,
+                    agent_id,
+                    repo_root,
+                    mode,
+                    started_at,
+                    last_active_at
+                ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    transport_session_id = COALESCE(excluded.transport_session_id, scribe_sessions.transport_session_id),
+                    agent_id = COALESCE(excluded.agent_id, scribe_sessions.agent_id),
+                    repo_root = COALESCE(excluded.repo_root, scribe_sessions.repo_root),
+                    mode = excluded.mode,
+                    last_active_at = CURRENT_TIMESTAMP;
+                """,
+                (session_id, transport_session_id, agent_id, repo_root, mode_value),
+            )
+
+    async def set_session_mode(self, session_id: str, mode: str) -> None:
+        await self._initialise()
+        if mode not in ("sentinel", "project"):
+            return
+        async with self._write_lock:
+            await self._execute(
+                "UPDATE scribe_sessions SET mode = ?, last_active_at = CURRENT_TIMESTAMP WHERE session_id = ?;",
+                (mode, session_id),
+            )
+
+    async def get_session_mode(self, session_id: str) -> Optional[str]:
+        await self._initialise()
+        row = await self._fetchone(
+            "SELECT mode FROM scribe_sessions WHERE session_id = ?;",
+            (session_id,),
+        )
+        if row and row["mode"]:
+            return row["mode"]
+        return None
+
+    async def set_session_project(self, session_id: str, project_name: Optional[str]) -> None:
+        await self._initialise()
+        async with self._write_lock:
+            await self._execute(
+                """
+                INSERT INTO session_projects (session_id, project_name, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    project_name = excluded.project_name,
+                    updated_at = CURRENT_TIMESTAMP;
+                """,
+                (session_id, project_name),
+            )
+
+    async def get_session_project(self, session_id: str) -> Optional[str]:
+        await self._initialise()
+        row = await self._fetchone(
+            "SELECT project_name FROM session_projects WHERE session_id = ?;",
+            (session_id,),
+        )
+        if row and row["project_name"]:
+            return row["project_name"]
+        return None
+
+    async def get_session_by_transport(self, transport_session_id: str) -> Optional[Dict[str, Any]]:
+        await self._initialise()
+        row = await self._fetchone(
+            """
+            SELECT session_id, transport_session_id, agent_id, repo_root, mode
+            FROM scribe_sessions
+            WHERE transport_session_id = ?
+            ORDER BY last_active_at DESC
+            LIMIT 1;
+            """,
+            (transport_session_id,),
+        )
+        if not row:
+            return None
+        return {
+            "session_id": row["session_id"],
+            "transport_session_id": row["transport_session_id"],
+            "agent_id": row["agent_id"],
+            "repo_root": row["repo_root"],
+            "mode": row["mode"],
+        }
+
+    async def upsert_agent_recent_project(self, agent_id: str, project_name: str) -> None:
+        await self._initialise()
+        async with self._write_lock:
+            await self._execute(
+                """
+                INSERT INTO agent_recent_projects (agent_id, project_name, last_access_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(agent_id, project_name) DO UPDATE SET
+                    last_access_at = CURRENT_TIMESTAMP;
+                """,
+                (agent_id, project_name),
             )
 
     async def heartbeat_session(self, session_id: str) -> None:
@@ -1318,20 +1605,20 @@ class SQLiteStorage(StorageBackend):
                 """
                 UPDATE agent_sessions
                 SET last_active_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND status = 'active';
+                WHERE session_id = ?;
                 """,
                 (session_id,)
             )
 
     async def end_session(self, session_id: str) -> None:
-        """Mark a session as expired."""
+        """Mark a session as expired (sets expires_at to now)."""
         await self._initialise()
         async with self._write_lock:
             await self._execute(
                 """
                 UPDATE agent_sessions
-                SET status = 'expired', last_active_at = CURRENT_TIMESTAMP
-                WHERE id = ?;
+                SET expires_at = CURRENT_TIMESTAMP, last_active_at = CURRENT_TIMESTAMP
+                WHERE session_id = ?;
                 """,
                 (session_id,)
             )
@@ -1397,3 +1684,89 @@ class SQLiteStorage(StorageBackend):
                 result = await self.get_agent_project(agent_id)
 
             return result or await self.get_agent_project(agent_id)
+
+    async def get_or_create_agent_session(
+        self,
+        identity_key: str,
+        agent_name: str,
+        agent_key: str,
+        repo_root: str,
+        mode: str,
+        scope_key: str,
+        ttl_hours: int = 24
+    ) -> str:
+        """Get existing session or create new one. Race-safe via upsert.
+
+        Args:
+            identity_key: SHA-256 hash of the identity components
+            agent_name: Display name for the agent (metadata)
+            agent_key: Actual identity component used in hash
+            repo_root: Canonicalized repository root path
+            mode: "project" or "sentinel"
+            scope_key: execution_id (project) or sentinel_day (sentinel)
+            ttl_hours: Time-to-live in hours (default: 24)
+
+        Returns:
+            session_id: UUID string for this session
+        """
+        await self._initialise()
+        async with self._write_lock:
+            new_session_id = str(uuid.uuid4())
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
+
+            # Upsert pattern: INSERT OR IGNORE, then UPDATE last_active, then SELECT
+            await self._execute(
+                """
+                INSERT OR IGNORE INTO agent_sessions
+                (session_id, identity_key, agent_name, agent_key, repo_root, mode, scope_key, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (new_session_id, identity_key, agent_name, agent_key, repo_root, mode, scope_key, expires_at)
+            )
+
+            # Update activity timestamp and extend TTL
+            await self._execute(
+                """
+                UPDATE agent_sessions
+                SET last_active_at = CURRENT_TIMESTAMP,
+                    expires_at = ?
+                WHERE identity_key = ?
+                """,
+                (expires_at, identity_key)
+            )
+
+            # Get the actual session_id (might be pre-existing)
+            row = await self._fetchone(
+                "SELECT session_id FROM agent_sessions WHERE identity_key = ?",
+                (identity_key,)
+            )
+
+            if not row:
+                raise RuntimeError(f"Failed to retrieve session for identity_key: {identity_key}")
+
+            return row['session_id']
+
+    async def cleanup_expired_sessions(self, batch_size: int = 100) -> int:
+        """Remove expired sessions. Call periodically.
+
+        Args:
+            batch_size: Maximum number of sessions to delete in one call
+
+        Returns:
+            Number of sessions deleted
+        """
+        await self._initialise()
+        async with self._write_lock:
+            # Use subquery workaround since DELETE LIMIT requires compile-time flag
+            cursor = await self._execute(
+                """
+                DELETE FROM agent_sessions
+                WHERE session_id IN (
+                    SELECT session_id FROM agent_sessions
+                    WHERE expires_at < CURRENT_TIMESTAMP
+                    LIMIT ?
+                )
+                """,
+                (batch_size,)
+            )
+            return cursor.rowcount if cursor else 0

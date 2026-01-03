@@ -45,7 +45,7 @@ Whenever you and the human spin up a **new project**, Codex must immediately:
 > **Canonical Chain:**
 > **1 Research → 2 Architect → 3 Review → 4 Code → 5 Review**
 
-**⚠️ COMMANDMENT #0: ALWAYS CHECK PROGRESS LOG FIRST**: Before starting ANY work, ALWAYS read `docs/dev_plans/[current_project]/PROGRESS_LOG.md` to understand what has been done, what mistakes were made, and what the current state is. The progress log is the source of truth for project context.  Read at least the last 5 entries.  Read the entire log if starting from no context.
+**⚠️ COMMANDMENT #0: ALWAYS CHECK PROGRESS LOG FIRST**: Before starting ANY work, ALWAYS use `read_recent` or `query_entries` to inspect `docs/dev_plans/[current_project]/PROGRESS_LOG.md` (do not open the full log directly). The progress log is the source of truth for project context. Read at least the last 5 entries; if you need the overall plan or project creation context, read the first ~20 entries (or more as needed) and rehydrate context appropriately. Use `query_entries` for targeted history instead of loading the entire log.
 
 **⚠️ COMMANDMENT #0.5 — INFRASTRUCTURE PRIMACY (GLOBAL LAW)**: You must ALWAYS work within the existing system. NEVER create parallel or replacement files (e.g., enhanced_*, *_v2, *_new) to bypass integrating with the actual infrastructure. You must modify, extend, or refactor the existing component directly. Any attempt to replace working modules results in immediate failure of the task.
 ---

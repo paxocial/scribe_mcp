@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 from scribe_mcp import server as server_module
 from scribe_mcp.server import app
@@ -66,9 +67,125 @@ async def _compute_log_counts(project: Dict[str, Any]) -> Dict[str, Any]:
     return counts
 
 
+async def _read_recent_progress_entries(progress_log_path: str, limit: int = 5) -> List[Dict[str, Any]]:
+    """
+    Read last N entries from progress log.
+
+    Args:
+        progress_log_path: Path to PROGRESS_LOG.md file
+        limit: Maximum number of recent entries to return (1-5)
+
+    Returns:
+        List of entry dicts with timestamp, emoji, agent, message
+        (COMPLETE messages - NO truncation!)
+    """
+    if not progress_log_path or not Path(progress_log_path).exists():
+        return []
+
+    try:
+        # Read the log file
+        with open(progress_log_path, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+
+        # Parse entries (lines starting with '[')
+        entries = []
+        for line in lines:
+            line = line.strip()
+            if not line.startswith('['):
+                continue
+
+            # Parse entry format: [emoji] [timestamp] [Agent: name] [Project: name] message
+            # Example: [ℹ️] [2026-01-03 09:53:42 UTC] [Agent: Orchestrator] [Project: xyz] Message here
+
+            try:
+                parts = line.split('] ', 4)  # Split on '] ' up to 5 parts
+                if len(parts) < 5:
+                    continue
+
+                emoji = parts[0].strip('[')
+                timestamp = parts[1].strip('[')
+                agent_part = parts[2].strip('[')  # "Agent: name"
+                # Skip project part (parts[3])
+                message = parts[4]
+
+                # Extract agent name
+                agent = agent_part.replace('Agent: ', '') if 'Agent:' in agent_part else 'unknown'
+
+                entries.append({
+                    "emoji": emoji,
+                    "timestamp": timestamp,
+                    "agent": agent,
+                    "message": message  # COMPLETE message - NO truncation!
+                })
+            except:
+                continue
+
+        # Return last N entries
+        return entries[-limit:] if len(entries) > limit else entries
+
+    except Exception:
+        return []
+
+
+async def _gather_doc_info(project: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Gather document information for a project.
+
+    Returns dict with architecture/phase_plan/checklist/progress info.
+    """
+    from utils.response import default_formatter
+
+    progress_log = project.get('progress_log', '')
+    if not progress_log or not Path(progress_log).exists():
+        return {}
+
+    dev_plan_dir = Path(progress_log).parent
+    result = {}
+
+    # Check standard documents
+    arch_file = dev_plan_dir / "ARCHITECTURE_GUIDE.md"
+    if arch_file.exists():
+        result["architecture"] = {
+            "exists": True,
+            "lines": default_formatter._get_doc_line_count(arch_file)
+        }
+
+    phase_file = dev_plan_dir / "PHASE_PLAN.md"
+    if phase_file.exists():
+        result["phase_plan"] = {
+            "exists": True,
+            "lines": default_formatter._get_doc_line_count(phase_file)
+        }
+
+    checklist_file = dev_plan_dir / "CHECKLIST.md"
+    if checklist_file.exists():
+        result["checklist"] = {
+            "exists": True,
+            "lines": default_formatter._get_doc_line_count(checklist_file)
+        }
+
+    # Progress log - count entries
+    prog_file = Path(progress_log)
+    if prog_file.exists():
+        try:
+            with open(prog_file, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+                entry_count = sum(1 for line in content.split('\n') if line.strip().startswith('['))
+            result["progress"] = {"exists": True, "entries": entry_count}
+        except:
+            result["progress"] = {"exists": True, "entries": 0}
+
+    return result
+
+
 @app.tool()
-async def get_project(project: Optional[str] = None) -> Dict[str, Any]:
-    """Return the active project selection, resolving defaults when necessary."""
+async def get_project(project: Optional[str] = None, format: str = "structured") -> Dict[str, Any]:
+    """Return the active project selection, resolving defaults when necessary.
+
+    Args:
+        project: Optional project name to retrieve
+        format: Output format - "readable" (human-friendly), "structured" (full JSON), "compact" (minimal)
+    """
     state_snapshot = await server_module.state_manager.record_tool("get_project")
     agent_identity = server_module.get_agent_identity()
     agent_id = None
@@ -92,14 +209,21 @@ async def get_project(project: Optional[str] = None) -> Dict[str, Any]:
         payload.setdefault("reminders", [])
         return payload
 
-    state = await server_module.state_manager.load()
-    recent_projects = list(state.recent_projects)
+    recent_projects = list(context.recent_projects)
 
     target_project = context.project if context.project else None
     current_name = target_project.get("name") if target_project else None
 
+    exec_context = None
+    if hasattr(server_module, "get_execution_context"):
+        try:
+            exec_context = server_module.get_execution_context()
+        except Exception:
+            exec_context = None
+
     if project:
         # Attempt to load explicit project request
+        state = await server_module.state_manager.load()
         project_data = state.get_project(project)
         if not project_data and context.project and context.project.get("name") == project:
             project_data = context.project
@@ -118,7 +242,16 @@ async def get_project(project: Optional[str] = None) -> Dict[str, Any]:
         target_project = dict(project_data)
         current_name = project
     else:
-        if not target_project:
+        if exec_context and getattr(exec_context, "mode", None) in {"project", "sentinel"}:
+            if not target_project:
+                return _GET_PROJECT_HELPER.apply_context_payload(
+                    _GET_PROJECT_HELPER.error_response(
+                        "No session-scoped project configured.",
+                        suggestion="Invoke set_project before using this tool",
+                    ),
+                    context,
+                )
+        if not target_project and not exec_context:
             active_project, current_name, recent = await load_active_project(server_module.state_manager)
             if active_project:
                 target_project = dict(active_project)
@@ -156,11 +289,6 @@ async def get_project(project: Optional[str] = None) -> Dict[str, Any]:
     if current_name:
         response["meta"]["current_project"] = current_name
 
-    payload = {
-        "ok": True,
-        "project": response,
-        "recent_projects": recent_projects,
-    }
     # Enrich with doc status + per-log entry counts for quick situational awareness.
     try:
         if current_name:
@@ -169,4 +297,54 @@ async def get_project(project: Optional[str] = None) -> Dict[str, Any]:
             response["meta"]["log_entry_counts"] = await _compute_log_counts(response)
     except Exception:
         pass
+
+    # Handle readable format with context hydration
+    if format == "readable":
+        from utils.response import default_formatter
+
+        # Read last 5 progress log entries (COMPLETE, no truncation!)
+        recent_entries = await _read_recent_progress_entries(
+            target_project.get("progress_log", ""),
+            limit=5
+        )
+
+        # Gather doc info
+        docs_info = await _gather_doc_info(target_project)
+
+        # Get activity summary from registry
+        registry_info = _PROJECT_REGISTRY.get_project(current_name) if current_name else None
+
+        activity_summary = {
+            "total_entries": registry_info.total_entries if registry_info else 0,
+            "last_entry_at": registry_info.last_entry_at if registry_info else None,
+            "status": registry_info.status if registry_info else "unknown"
+        }
+
+        # Format using context formatter
+        readable_content = default_formatter.format_project_context(
+            target_project,
+            recent_entries,
+            docs_info,
+            activity_summary
+        )
+
+        payload = {
+            "ok": True,
+            "project": response,
+            "recent_entries": recent_entries,
+            "readable_content": readable_content
+        }
+
+        return await default_formatter.finalize_tool_response(
+            payload,
+            format="readable",
+            tool_name="get_project"
+        )
+
+    # For structured/compact formats, continue with existing logic
+    payload = {
+        "ok": True,
+        "project": response,
+        "recent_projects": recent_projects,
+    }
     return _GET_PROJECT_HELPER.apply_context_payload(payload, context)

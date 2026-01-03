@@ -35,18 +35,26 @@ class AgentContextManager:
         self._lease_lock = asyncio.Lock()
         self._session_ttl_minutes = 15  # 15 minute session leases
 
-    async def start_session(self, agent_id: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    async def start_session(
+        self,
+        agent_id: str,
+        session_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
         """
-        Start a new agent session.
+        Start a new agent session, optionally using provided stable session_id.
 
         Args:
             agent_id: Unique identifier for the agent
+            session_id: Optional stable session ID (if not provided, generates UUID)
             metadata: Optional session metadata
 
         Returns:
             Session ID for tracking
         """
-        session_id = str(uuid.uuid4())
+        # Use provided stable session if available, otherwise generate UUID
+        if not session_id:
+            session_id = str(uuid.uuid4())
 
         # Store session in database
         await self.storage.upsert_agent_session(agent_id, session_id, metadata)
