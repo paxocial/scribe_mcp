@@ -45,14 +45,16 @@ class ReminderContext:
     project_name: Optional[str]
     project_root: Optional[str]
     agent_id: Optional[str]
-    total_entries: int
-    minutes_since_log: Optional[float]
-    last_log_time: Optional[datetime]
-    docs_status: Dict[str, str]
-    docs_changed: List[str]
-    current_phase: Optional[str]
-    session_age_minutes: Optional[float]
+    session_id: Optional[str] = None
+    total_entries: int = 0
+    minutes_since_log: Optional[float] = None
+    last_log_time: Optional[datetime] = None
+    docs_status: Dict[str, str] = field(default_factory=dict)
+    docs_changed: List[str] = field(default_factory=list)
+    current_phase: Optional[str] = None
+    session_age_minutes: Optional[float] = None
     variables: Dict[str, Any] = field(default_factory=dict)
+    operation_status: Optional[str] = None  # "success", "failure", or None for neutral
 
 
 @dataclass
@@ -280,34 +282,64 @@ class ReminderEngine:
         return len(keys)
 
     def _get_reminder_hash(self, reminder_key: str, variables: Dict[str, Any]) -> str:
-        """Generate a stable fingerprint for reminder cooldown checks."""
-        project_root = str(variables.get("project_root") or "")
-        agent_id = str(variables.get("agent_id") or "")
-        tool_name = str(variables.get("tool_name") or "")
-        return f"{project_root}|{agent_id}|{tool_name}|{reminder_key}"
+        """Generate hash for reminder deduplication.
+
+        Uses session_id when use_session_aware_hashes flag is enabled.
+        Falls back to legacy format for backward compatibility.
+        """
+        use_session_hash = getattr(settings, 'use_session_aware_hashes', False)
+        session_id = str(variables.get("session_id") or "")
+
+        if use_session_hash and session_id:
+            # Session-aware hash (new behavior)
+            parts = [
+                session_id,
+                str(variables.get("project_root") or ""),
+                str(variables.get("agent_id") or ""),
+                str(variables.get("tool_name") or ""),
+                reminder_key
+            ]
+        else:
+            # Legacy hash (backward compatible)
+            parts = [
+                str(variables.get("project_root") or ""),
+                str(variables.get("agent_id") or ""),
+                str(variables.get("tool_name") or ""),
+                reminder_key
+            ]
+
+        return hashlib.md5("|".join(parts).encode()).hexdigest()
 
     def _should_show_reminder(self, reminder: ReminderInstance, context: ReminderContext) -> bool:
-        """Check if reminder should be shown based on rules."""
+        """Check if reminder should be shown based on rules.
+
+        Failure-priority logic: When operation_status == "failure", cooldowns are bypassed
+        to ensure critical reminders are shown on tool failures.
+        """
 
         # Tool suppression
         if context.tool_name in reminder.tools_suppressed:
             return False
 
-        # Cooldown check
-        cooldown_minutes = reminder.cooldown_minutes
-        if cooldown_minutes <= 0 and reminder.category == "teaching":
-            cooldown_minutes = int(self.config.get("behavior", {}).get("default_teaching_cooldown_minutes", 10))
+        # Failure-priority logic: bypass cooldowns on failures
+        is_failure = context.operation_status == "failure"
 
-        if cooldown_minutes > 0:
-            reminder_hash = self._get_reminder_hash(reminder.key, reminder.variables)
-            last_shown = self.history.reminder_hashes.get(reminder_hash)
-            if last_shown:
-                cooldown_cutoff = datetime.now(timezone.utc) - timedelta(minutes=cooldown_minutes)
-                if last_shown > cooldown_cutoff:
-                    return False
+        # Cooldown check (bypassed for failures)
+        if not is_failure:
+            cooldown_minutes = reminder.cooldown_minutes
+            if cooldown_minutes <= 0 and reminder.category == "teaching":
+                cooldown_minutes = int(self.config.get("behavior", {}).get("default_teaching_cooldown_minutes", 10))
 
-        # Teaching session limits
-        if reminder.category == "teaching":
+            if cooldown_minutes > 0:
+                reminder_hash = self._get_reminder_hash(reminder.key, reminder.variables)
+                last_shown = self.history.reminder_hashes.get(reminder_hash)
+                if last_shown:
+                    cooldown_cutoff = datetime.now(timezone.utc) - timedelta(minutes=cooldown_minutes)
+                    if last_shown > cooldown_cutoff:
+                        return False
+
+        # Teaching session limits (bypassed for failures)
+        if not is_failure and reminder.category == "teaching":
             session_key = f"{context.tool_name}:{reminder.key}"
             sessions_used = self.history.teaching_sessions.get(session_key, 0)
             max_sessions = self.config.get("behavior", {}).get("max_teaching_reminders_per_session", 3)
@@ -371,6 +403,7 @@ class ReminderEngine:
             "project_name": context.project_name or "No project",
             "project_root": context.project_root or "",
             "agent_id": context.agent_id or "",
+            "session_id": context.session_id or "",
             "tool_name": context.tool_name,
             "total_entries": context.total_entries,
             "minutes": int(context.minutes_since_log or 0),

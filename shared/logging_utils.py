@@ -47,6 +47,7 @@ async def resolve_logging_context(
     require_project: bool = True,
     state_snapshot: Optional[Dict[str, Any]] = None,
     reminder_variables: Optional[Dict[str, Any]] = None,
+    operation_status: Optional[str] = None,
 ) -> LoggingContext:
     """Resolve the active project and reminders for logging tools.
 
@@ -241,6 +242,7 @@ async def resolve_logging_context(
                     state=state_snapshot,
                     agent_id=agent_id,
                     variables=reminder_variables,
+                    operation_status=operation_status,
                 )
             except TypeError:
                 # Backwards compatibility: some tests/patches provide get_reminders without agent_id.

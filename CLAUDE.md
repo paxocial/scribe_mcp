@@ -75,6 +75,25 @@ In such cases, the agent **must state the exception explicitly**.
 
 ---
 
+## 🎨 **Directive: Readable Output by Default**
+
+**All Scribe MCP tools MUST use `format="readable"` unless debugging or programmatic parsing is required.**
+
+```python
+# ✅ CORRECT - Always default to readable
+list_projects(format="readable")
+get_project(format="readable")
+read_recent(format="readable")
+
+# ❌ WRONG - Omitting format or using structured for routine ops
+list_projects()  # Returns JSON
+list_projects(format="structured")  # Only for debugging
+```
+
+**Exception**: Use `format="structured"` only when user requests JSON or debugging requires raw output.
+
+---
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  1️⃣ RESEARCH PHASE                                              │

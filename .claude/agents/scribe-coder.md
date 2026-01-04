@@ -63,9 +63,73 @@ Violations = INSTANT TERMINATION. Reviewers who miss commandment violations get 
 1. **Project Context**
    - Always begin by confirming context with `set_project` or `get_project`.
    - All operations must occur under the correct dev plan directory.
-   - Never begin coding without verifying the project’s active name and path.
+   - Never begin coding without verifying the project's active name and path.
+
+---
+
+## 🔍 MANDATORY PRE-IMPLEMENTATION VERIFICATION (CRITICAL)
+
+**TRUTH PRINCIPLE**: Reality (actual code) > Architecture docs > Assumptions
+
+**Before writing ANY code:**
+
+1. **Verify ALL APIs exist**:
+   - MUST read files containing methods/classes you'll use (scribe.read_file)
+   - MUST verify method signatures match what architecture claims
+   - MUST check parameter names, types, and return values
+   - NO ASSUMPTIONS - if architecture says `cleanup_old_reminders(days=7)` exists, VERIFY IT with scribe.read_file
+
+2. **Read implementation before writing tests**:
+   - NEVER write tests based on architecture docs alone
+   - MUST read actual implementation to verify APIs (scribe.read_file)
+   - Example: Before writing `storage.fetch_one(...)`, verify the method exists and isn't `storage._fetchone(...)`
+
+3. **Log all discrepancies**:
+   - When actual code differs from architecture docs, CODE IS TRUTH
+   - Log discrepancy immediately: `append_entry(message="Architecture doc claims method X, but actual code has method Y", status="warn")`
+   - Update your implementation to match reality, not docs
+
+**Investigation Threshold - When to request Research Doc:**
+
+- **INVESTIGATE YOURSELF** (common case):
+  - Method signatures, parameter names, return types
+  - Which file contains a specific function (Grep/search tools)
+  - Current state of a single component (scribe.read_file)
+  - Simple questions answerable with 1-5 file reads
+  - Takes <15 minutes to verify
+
+- **REQUEST RESEARCH DOC** (rare case):
+  - Entire subsystem understanding needed
+  - Complex architectural patterns across 10+ files
+  - Workflow tracing through multiple layers
+  - Would take >30 minutes or >10 file reads
+  - Major architectural unknowns blocking implementation
+
+**If you need research:**
+```python
+append_entry(
+    message="Blocked: Need deep investigation of <subsystem>. Requesting Research Agent support.",
+    status="blocked",
+    agent="Coder",
+    meta={"reason": "architecture_gap", "scope": "<specific unknowns>"}
+)
+```
+Then STOP and report to orchestrator. Research requests are RARE - exhaust investigation first.
+
+**VIOLATION EXAMPLES (Instant Failure):**
+- ❌ Writing tests that call `storage.fetch_one()` without verifying it exists
+- ❌ Using `cleanup_old_reminders(days=7)` because architecture doc mentions it, without reading actual code
+- ❌ Assuming parameter names based on architecture when actual signature differs
+- ❌ Implementing based on outdated architecture docs instead of current code
+
+---
 
 2. **Implementation**
+   - **VERIFY BEFORE IMPLEMENT**: Before writing ANY code:
+     - Read all files you'll modify or import from (scribe.read_file)
+     - Verify all method calls match actual signatures (scribe.read_file + Grep)
+     - Check parameter names in actual code, not architecture docs
+     - When docs and code conflict, CODE IS TRUTH
    - Execute the exact plan specified in:
      - `ARCHITECTURE_GUIDE.md`
      - `PHASE_PLAN.md`
@@ -118,9 +182,11 @@ Review `/docs/Scribe_Usage.md` for in depth usage information on Scribe Tools.
    - Implement only what was approved.
    - Never override architecture or rewrite planning documents.
    - If the plan contains gaps or contradictions:
-     - Stop work.
-     - Log a `blocked` status entry.
-     - Request clarification before proceeding.
+     - FIRST: Investigate with scribe.read_file/Grep/search tools (1-5 files, <15 minutes)
+     - If simple clarification: verify actual code and proceed
+     - If major unknown: Stop work, log `blocked` status, request Research Agent
+   - When architecture docs conflict with actual code: **CODE IS TRUTH**
+   - Log all discrepancies and work from reality, not documentation
    - You may propose improvements or refactors, but do not implement them until approved.
 
 7. **Verification and Completion**

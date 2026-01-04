@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "created_timestamp": "2025-10-24 11:35:00 UTC",
-  "last_updated": "2026-01-02T03:18:27.611786 UTC",
+  "last_updated": "2026-01-03T12:19:29.150810 UTC",
   "projects": {
     "enhanced-rotation-test": {
       "created_timestamp": "2025-10-24T12:05:59.361388 UTC",
@@ -437,13 +437,13 @@
     },
     "rotate-test": {
       "created_timestamp": "2025-10-25T20:04:04.788854 UTC",
-      "current_sequence": 27,
-      "total_rotations": 27,
-      "last_rotation_timestamp": "2025-12-17 03:44:50 UTC",
+      "current_sequence": 28,
+      "total_rotations": 28,
+      "last_rotation_timestamp": "2026-01-03 12:19:29 UTC",
       "hash_chain": {
         "root_hash": "de31a3ef69355397d23ffd48010d4f59e7873fd6f4956f2f861209ec6875a3f6",
-        "current_sequence": 27,
-        "last_hash": "ac6832fa44b55dccbae31c59996c585e5b8c3166efa564e039b3d1598f4a9aa5"
+        "current_sequence": 28,
+        "last_hash": "d2eb42e2857d4f8d152321a6f4e93e9ebfadf78a1ced4e4ed006802d75a50ee8"
       },
       "rotation_ids": [
         "4ce686f8-aa45-4348-9945-002554e1a1e4",
@@ -472,7 +472,8 @@
         "7f7ae8f7-bc34-4352-8158-d71f27b9a1c1",
         "47f1e49e-352e-4045-9667-b86d00996aae",
         "14990e8c-4dd7-4880-be6a-c61b5bb8a254",
-        "f492b1da-16f8-455b-856c-550dfe11eb0a"
+        "f492b1da-16f8-455b-856c-550dfe11eb0a",
+        "72524b97-4642-4b41-9143-1920f6dce461"
       ],
       "settings": {
         "auto_cleanup": true,

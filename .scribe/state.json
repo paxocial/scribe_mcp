@@ -564,6 +564,60 @@
       "author": "Scribe",
       "description": null,
       "tags": []
+    },
+    "fedec3a6-39d6-41c7-a2fe-956464803687": {
+      "name": "scribe_tool_output_refinement",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement",
+      "docs": {
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "agent": "Scribe"
+      },
+      "author": "Scribe",
+      "description": null,
+      "tags": []
+    },
+    "37fcd661-7558-4e7f-aad1-a9a3daa5ee61": {
+      "name": "scribe_tool_output_refinement",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement",
+      "docs": {
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "agent": "Scribe"
+      },
+      "author": "Scribe",
+      "description": null,
+      "tags": []
+    },
+    "5e7cebaa-1767-43b9-9c26-d2926f8d8536": {
+      "name": "scribe_tool_output_refinement",
+      "root": "/home/austin/projects/MCP_SPINE/scribe_mcp",
+      "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/PROGRESS_LOG.md",
+      "docs_dir": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement",
+      "docs": {
+        "architecture": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/ARCHITECTURE_GUIDE.md",
+        "phase_plan": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/PHASE_PLAN.md",
+        "checklist": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/CHECKLIST.md",
+        "progress_log": "/home/austin/projects/MCP_SPINE/scribe_mcp/.scribe/docs/dev_plans/scribe_tool_output_refinement/PROGRESS_LOG.md"
+      },
+      "defaults": {
+        "agent": "Scribe"
+      },
+      "author": "Scribe",
+      "description": null,
+      "tags": []
     }
   },
   "session_modes": {
@@ -582,53 +636,56 @@
     "58d0b425-0eb8-4960-a29b-6b00324d979d": "project",
     "14376dfb-d6c5-4384-a2f9-d1b143b874fc": "project",
     "8c2257ff-c205-4d93-aa17-1c79a0b8ee0c": "project",
-    "664cacb2-44e6-4884-a1e8-4b55809c7d97": "project"
+    "664cacb2-44e6-4884-a1e8-4b55809c7d97": "project",
+    "fedec3a6-39d6-41c7-a2fe-956464803687": "project",
+    "37fcd661-7558-4e7f-aad1-a9a3daa5ee61": "project",
+    "5e7cebaa-1767-43b9-9c26-d2926f8d8536": "project"
   },
   "recent_tools": [
     {
       "name": "append_entry",
-      "ts": "2026-01-03 11:15:14 UTC"
-    },
-    {
-      "name": "list_projects",
-      "ts": "2026-01-03 11:14:56 UTC"
-    },
-    {
-      "name": "get_project",
-      "ts": "2026-01-03 11:12:52 UTC"
-    },
-    {
-      "name": "set_project",
-      "ts": "2026-01-03 11:12:45 UTC"
+      "ts": "2026-01-04 04:43:54 UTC"
     },
     {
       "name": "read_file",
-      "ts": "2026-01-03 10:56:04 UTC"
-    },
-    {
-      "name": "read_recent",
-      "ts": "2026-01-03 10:23:04 UTC"
+      "ts": "2026-01-04 04:43:54 UTC"
     },
     {
       "name": "manage_docs",
-      "ts": "2026-01-03 10:15:27 UTC"
+      "ts": "2026-01-04 01:46:02 UTC"
+    },
+    {
+      "name": "set_project",
+      "ts": "2026-01-04 01:43:13 UTC"
+    },
+    {
+      "name": "list_projects",
+      "ts": "2026-01-04 01:39:57 UTC"
+    },
+    {
+      "name": "read_recent",
+      "ts": "2026-01-03 19:42:24 UTC"
+    },
+    {
+      "name": "query_entries",
+      "ts": "2026-01-03 19:34:03 UTC"
+    },
+    {
+      "name": "get_project",
+      "ts": "2026-01-03 11:50:18 UTC"
     },
     {
       "name": "generate_doc_templates",
       "ts": "2026-01-03 09:14:29 UTC"
     },
     {
-      "name": "query_entries",
-      "ts": "2026-01-03 07:24:23 UTC"
-    },
-    {
       "name": "vector_search",
       "ts": "2026-01-02 09:20:27 UTC"
     }
   ],
-  "last_activity_at": "2026-01-03 11:15:14 UTC",
-  "session_started_at": "2026-01-03 00:43:44 UTC",
-  "version": 200,
+  "last_activity_at": "2026-01-04 04:43:54 UTC",
+  "session_started_at": "2026-01-04 04:43:47 UTC",
+  "version": 217,
   "last_updated_by": "Scribe",
-  "operation_timestamp": "2026-01-03 11:12:46 UTC"
+  "operation_timestamp": "2026-01-04 01:43:13 UTC"
 }

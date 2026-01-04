@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sqlite3
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,6 +23,10 @@ from scribe_mcp.utils.search import message_matches
 
 SQLITE_TIMEOUT_SECONDS = 30
 SQLITE_BUSY_TIMEOUT_MS = 5000
+
+# Performance monitoring configuration (Stage 6)
+SLOW_QUERY_THRESHOLD_MS = 5.0  # Log warnings for queries slower than 5ms
+logger = logging.getLogger(__name__)
 
 
 class SQLiteStorage(StorageBackend):
@@ -968,6 +974,33 @@ class SQLiteStorage(StorageBackend):
                         UNIQUE(project_id, file_path)
                     );
                     """,
+                    """
+                    CREATE TABLE IF NOT EXISTS reminder_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT NOT NULL,
+                        reminder_hash TEXT NOT NULL,
+                        project_root TEXT,
+                        agent_id TEXT,
+                        tool_name TEXT,
+                        reminder_key TEXT,
+                        shown_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        operation_status TEXT NOT NULL DEFAULT 'neutral' CHECK (operation_status IN ('success', 'failure', 'neutral')),
+                        context_metadata TEXT,
+                        FOREIGN KEY (session_id) REFERENCES scribe_sessions(session_id) ON DELETE CASCADE
+                    );
+                    """,
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_reminder_history_session_hash
+                        ON reminder_history(session_id, reminder_hash);
+                    """,
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_reminder_history_shown_at
+                        ON reminder_history(shown_at);
+                    """,
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_reminder_history_session_tool
+                        ON reminder_history(session_id, tool_name);
+                    """,
                     # Document Management 2.0 Indexes
                     "CREATE INDEX IF NOT EXISTS idx_document_sections_project ON document_sections(project_id);",
                     "CREATE INDEX IF NOT EXISTS idx_document_sections_updated ON document_sections(updated_at);",
@@ -1770,3 +1803,152 @@ class SQLiteStorage(StorageBackend):
                 (batch_size,)
             )
             return cursor.rowcount if cursor else 0
+
+    async def record_reminder_shown(
+        self,
+        session_id: str,
+        reminder_hash: str,
+        project_root: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        reminder_key: Optional[str] = None,
+        operation_status: str = "neutral",
+        context_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Record that a reminder was shown in a session (inserts new record).
+
+        Args:
+            session_id: Session identifier (FK to scribe_sessions)
+            reminder_hash: Hash identifying the reminder
+            project_root: Optional project root path
+            agent_id: Optional agent identifier
+            tool_name: Optional tool name (e.g., 'append_entry')
+            reminder_key: Optional reminder key (e.g., 'log_warning')
+            operation_status: Operation status ('success', 'failure', 'neutral')
+            context_metadata: Optional context metadata as dict
+        """
+        # Performance monitoring (Stage 6)
+        start_time = time.perf_counter()
+
+        await self._initialise()
+        async with self._write_lock:
+            context_json = json.dumps(context_metadata or {}, sort_keys=True)
+            await self._execute(
+                """
+                INSERT INTO reminder_history
+                (session_id, reminder_hash, project_root, agent_id, tool_name,
+                 reminder_key, shown_at, operation_status, context_metadata)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?);
+                """,
+                (
+                    session_id,
+                    reminder_hash,
+                    project_root,
+                    agent_id,
+                    tool_name,
+                    reminder_key,
+                    operation_status,
+                    context_json,
+                ),
+            )
+
+        # Log slow queries (Stage 6)
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        if elapsed_ms > SLOW_QUERY_THRESHOLD_MS:
+            logger.warning(
+                f"Slow reminder query: record_reminder_shown took {elapsed_ms:.2f}ms "
+                f"(threshold: {SLOW_QUERY_THRESHOLD_MS}ms) [session={session_id[:16]}...]"
+            )
+
+    async def check_reminder_cooldown(
+        self,
+        session_id: str,
+        reminder_hash: str,
+        cooldown_minutes: int = 15,
+    ) -> bool:
+        """Check if a reminder is within its cooldown period for a session.
+
+        Args:
+            session_id: Session identifier
+            reminder_hash: Hash identifying the reminder
+            cooldown_minutes: Cooldown period in minutes (default: 15)
+
+        Returns:
+            True if reminder was shown within cooldown window (suppress),
+            False if reminder can be shown (cooldown expired or never shown)
+        """
+        # Performance monitoring (Stage 6)
+        start_time = time.perf_counter()
+
+        await self._initialise()
+        cutoff_time = f"datetime('now', '-{cooldown_minutes} minutes')"
+
+        row = await self._fetchone(
+            f"""
+            SELECT COUNT(*) as count
+            FROM reminder_history
+            WHERE session_id = ?
+              AND reminder_hash = ?
+              AND shown_at > {cutoff_time};
+            """,
+            (session_id, reminder_hash),
+        )
+
+        result = (row["count"] if row else 0) > 0
+
+        # Log slow queries (Stage 6)
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        if elapsed_ms > SLOW_QUERY_THRESHOLD_MS:
+            logger.warning(
+                f"Slow reminder query: check_reminder_cooldown took {elapsed_ms:.2f}ms "
+                f"(threshold: {SLOW_QUERY_THRESHOLD_MS}ms) [session={session_id[:16]}...]"
+            )
+
+        return result
+
+    async def cleanup_reminder_history(
+        self,
+        cutoff_hours: int = 168,
+    ) -> int:
+        """Delete old reminder history entries.
+
+        Args:
+            cutoff_hours: Delete entries older than this (default: 168 = 7 days)
+
+        Returns:
+            Number of entries deleted
+        """
+        # Performance monitoring (Stage 6)
+        start_time = time.perf_counter()
+
+        await self._initialise()
+        async with self._write_lock:
+            # Use direct connection since _execute doesn't return cursor
+            def _cleanup_sync():
+                conn = self._connect()
+                try:
+                    cursor = conn.execute(
+                        """
+                        DELETE FROM reminder_history
+                        WHERE shown_at < datetime('now', ? || ' hours');
+                        """,
+                        (f"-{cutoff_hours}",),
+                    )
+                    deleted = cursor.rowcount
+                    conn.commit()
+                    return deleted
+                finally:
+                    conn.close()
+
+            result = await asyncio.to_thread(_cleanup_sync)
+
+        # Log slow queries (Stage 6) - cleanup has higher threshold (100ms vs 5ms)
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        cleanup_threshold_ms = 100.0  # Cleanup allowed to be slower
+        if elapsed_ms > cleanup_threshold_ms:
+            logger.warning(
+                f"Slow reminder query: cleanup_reminder_history took {elapsed_ms:.2f}ms "
+                f"(threshold: {cleanup_threshold_ms}ms) [deleted={result} records]"
+            )
+
+        return result
